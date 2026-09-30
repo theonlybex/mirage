@@ -1,9 +1,9 @@
-import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EdlSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { createProject, loadEdl, openProject, saveEdl, slugify } from './project-store.js';
+import { createProject, loadEdl, openProject, saveEdl, slugify, writeJsonFile } from './project-store.js';
 
 const edl = EdlSchema.parse({
   version: 1,
@@ -53,5 +53,28 @@ describe('project store', () => {
     const root = await mkdtemp(join(tmpdir(), 'we-'));
     const h = await createProject(root, 'Bad');
     await expect(saveEdl(h, { ...edl, scenes: [] })).rejects.toThrow();
+  });
+
+  it('numbers the next snapshot from the max existing number, not the count', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'we-'));
+    const h = await createProject(root, 'Gappy');
+    const histDir = join(h.dir, 'history');
+    await mkdir(histDir, { recursive: true });
+    await writeFile(join(histDir, 'edl.0001.json'), JSON.stringify(edl, null, 2) + '\n', 'utf8');
+    await writeFile(join(histDir, 'edl.0003.json'), JSON.stringify(edl, null, 2) + '\n', 'utf8');
+    const result = await saveEdl(h, edl);
+    expect(result.snapshot.endsWith('edl.0004.json')).toBe(true);
+  });
+});
+
+describe('writeJsonFile', () => {
+  it('writes atomically, leaving no tmp file behind and readable content', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'we-'));
+    const target = join(root, 'edl.json');
+    await writeJsonFile(target, EdlSchema, edl);
+    const files = await readdir(root);
+    expect(files.some((f) => f.includes('.tmp-'))).toBe(false);
+    expect(files).toContain('edl.json');
+    expect(JSON.parse(await readFile(target, 'utf8')).version).toBe(1);
   });
 });

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EdlSchema, ProjectSchema, type Edl, type Project } from '@wordedits/shared';
 import type { ZodType } from 'zod';
@@ -25,7 +25,9 @@ export async function readJsonFile<T>(path: string, schema: ZodType<T>): Promise
 
 export async function writeJsonFile<T>(path: string, schema: ZodType<T>, value: T): Promise<void> {
   const parsed = schema.parse(value);
-  await writeFile(path, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+  const tmpPath = `${path}.tmp-${randomUUID()}`;
+  await writeFile(tmpPath, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+  await rename(tmpPath, path);
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -71,8 +73,12 @@ export async function saveEdl(handle: ProjectHandle, edl: Edl): Promise<{ snapsh
   const parsed = EdlSchema.parse(edl);
   const histDir = join(handle.dir, 'history');
   await mkdir(histDir, { recursive: true });
-  const count = (await readdir(histDir)).filter((f) => /^edl\.\d{4}\.json$/.test(f)).length;
-  const snapshot = join(histDir, `edl.${String(count + 1).padStart(4, '0')}.json`);
+  const existing = (await readdir(histDir))
+    .map((f) => /^edl\.(\d{4})\.json$/.exec(f))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => Number(m[1]));
+  const next = existing.length > 0 ? Math.max(...existing) + 1 : 1;
+  const snapshot = join(histDir, `edl.${String(next).padStart(4, '0')}.json`);
   await writeJsonFile(snapshot, EdlSchema, parsed);
   await writeJsonFile(join(handle.dir, 'edl.json'), EdlSchema, parsed);
   return { snapshot };
