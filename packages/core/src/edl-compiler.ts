@@ -40,6 +40,18 @@ export function edlDuration(edl: Edl): number {
   return edl.scenes.flatMap(sceneSegments).reduce((sum, s) => sum + (s.end - s.start), 0);
 }
 
+export interface EdlSegment {
+  sceneId: string;
+  start: number;
+  end: number;
+  scene: Scene;
+}
+
+/** Flattened kept segments across all scenes, in scene order. */
+export function edlSegments(edl: Edl): EdlSegment[] {
+  return edl.scenes.flatMap((scene) => sceneSegments(scene).map((seg) => ({ sceneId: scene.id, start: seg.start, end: seg.end, scene })));
+}
+
 export function bitrateFor(width: number, height: number, fps: number): string {
   const longSide = Math.max(width, height);
   if (longSide >= 3840) return '40M';
@@ -59,26 +71,21 @@ export function buildFilterGraph(edl: Edl, opts: GraphOptions): string {
   const [W, H] = opts.mode === 'preview' ? [960, 540] : [edl.output.width, edl.output.height];
   const fps = num(opts.sourceFps > 0 ? opts.sourceFps : edl.output.fps);
 
+  const segments = edlSegments(edl);
   const chains: string[] = [];
   const labels: string[] = [];
-  let k = 0;
-  for (const scene of edl.scenes) {
-    const S = scene.zoom.scale;
-    const { x: ax, y: ay } = scene.zoom.anchor;
+  segments.forEach((seg, k) => {
+    const S = seg.scene.zoom.scale;
+    const { x: ax, y: ay } = seg.scene.zoom.anchor;
     const crop =
       S > 1 + EPS
         ? `crop=trunc(iw/${num(S)}/2)*2:trunc(ih/${num(S)}/2)*2:(iw-iw/${num(S)})*${num(ax)}:(ih-ih/${num(S)})*${num(ay)},`
         : '';
-    for (const seg of sceneSegments(scene)) {
-      chains.push(
-        `[0:v]trim=start=${num(seg.start)}:end=${num(seg.end)},setpts=PTS-STARTPTS,${crop}scale=${W}:${H}:flags=bicubic,setsar=1,fps=${fps}[v${k}]`,
-      );
-      chains.push(`[0:a]atrim=start=${num(seg.start)}:end=${num(seg.end)},asetpts=PTS-STARTPTS[a${k}]`);
-      labels.push(`[v${k}][a${k}]`);
-      k++;
-    }
-  }
-  chains.push(`${labels.join('')}concat=n=${k}:v=1:a=1[vcat][acat]`);
+    chains.push(`[${k}:v]setpts=PTS-STARTPTS,${crop}scale=${W}:${H}:flags=bicubic,setsar=1,fps=${fps}[v${k}]`);
+    chains.push(`[${k}:a]asetpts=PTS-STARTPTS[a${k}]`);
+    labels.push(`[v${k}][a${k}]`);
+  });
+  chains.push(`${labels.join('')}concat=n=${segments.length}:v=1:a=1[vcat][acat]`);
   chains.push(`[acat]highpass=f=90,loudnorm=I=${num(edl.audio.loudnessLufs)}:TP=-1:LRA=11[aout]`);
   return chains.join(';');
 }
@@ -91,13 +98,15 @@ export interface CompileOptions extends GraphOptions {
 
 export function compileEdl(edl: Edl, opts: CompileOptions): string[] {
   const graph = buildFilterGraph(edl, opts);
+  const fps = opts.sourceFps > 0 ? opts.sourceFps : edl.output.fps;
+  const inputs = edlSegments(edl).flatMap((seg) => ['-ss', num(seg.start), '-t', num(seg.end - seg.start), '-i', opts.input]);
   const video =
     opts.mode === 'preview'
       ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28']
-      : ['-c:v', opts.encoder.name, ...opts.encoder.extraArgs, '-b:v', bitrateFor(edl.output.width, edl.output.height, opts.sourceFps), '-g', String(Math.round((opts.sourceFps || edl.output.fps) * 2))];
+      : ['-c:v', opts.encoder.name, ...opts.encoder.extraArgs, '-b:v', bitrateFor(edl.output.width, edl.output.height, fps), '-g', String(Math.round(fps * 2))];
   const audio = opts.mode === 'preview' ? ['-c:a', 'aac', '-b:a', '128k'] : ['-c:a', 'aac', '-b:a', '384k'];
   return [
-    '-i', opts.input,
+    ...inputs,
     '-filter_complex', graph,
     '-map', '[vcat]', '-map', '[aout]',
     ...video,

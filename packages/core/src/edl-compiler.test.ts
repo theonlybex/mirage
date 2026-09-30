@@ -2,6 +2,15 @@ import { EdlSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { bitrateFor, buildFilterGraph, compileEdl, edlDuration, sceneSegments } from './edl-compiler.js';
 
+const oneOffScenes = EdlSchema.parse({
+  version: 1,
+  output: { width: 1920, height: 1080, fps: 30 },
+  scenes: [
+    { id: 'A', src: { in: 3.0, out: 5.5 } },
+    { id: 'B', src: { in: 0.5, out: 2.5 } },
+  ],
+});
+
 const twoScenes = EdlSchema.parse({
   version: 1,
   output: { width: 1920, height: 1080, fps: 30 },
@@ -53,8 +62,8 @@ describe('bitrateFor', () => {
 describe('buildFilterGraph', () => {
   it('trims, zooms, scales and concatenates every segment', () => {
     const g = buildFilterGraph(twoScenes, { mode: 'final', sourceFps: 30 });
-    expect(g).toContain('[0:v]trim=start=0.5:end=1,setpts=PTS-STARTPTS');
-    expect(g).toContain('[0:v]trim=start=1.4:end=2.5,setpts=PTS-STARTPTS');
+    expect(g).toContain('[0:v]setpts=PTS-STARTPTS');
+    expect(g).toContain('[1:v]setpts=PTS-STARTPTS');
     expect(g).toContain('crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2:(iw-iw/1.2)*0.5:(ih-ih/1.2)*0.4');
     expect(g).toContain('scale=1920:1080:flags=bicubic,setsar=1,fps=30');
     expect(g).toContain('concat=n=3:v=1:a=1[vcat][acat]');
@@ -74,6 +83,28 @@ describe('compileEdl', () => {
     expect(args).toContain('-filter_complex');
     expect(args.slice(-1)[0]).toBe('out.mp4');
     expect(args).toEqual(expect.arrayContaining(['-c:v', 'libx264', '-b:v', '8M', '-c:a', 'aac', '-b:a', '384k', '-ar', '48000', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', '-colorspace', 'bt709']));
+  });
+
+  it('seeks each segment as its own input, in scene order', () => {
+    const args = compileEdl(twoScenes, { input: 'in.mp4', output: 'out.mp4', encoder: enc, mode: 'final', sourceFps: 30 });
+    // segment 0: scene s1's first kept range (0.5-1.0)
+    expect(args.join('|')).toContain(['-ss', '0.5', '-t', '0.5', '-i', 'in.mp4'].join('|'));
+    // segment 2 (3rd input overall): scene s2's only kept range (3.0-5.5)
+    expect(args.join('|')).toContain(['-ss', '3', '-t', '2.5', '-i', 'in.mp4'].join('|'));
+  });
+
+  it('emits inputs in scene order even when scenes are out of source order', () => {
+    const args = compileEdl(oneOffScenes, { input: 'in.mp4', output: 'out.mp4', encoder: enc, mode: 'final', sourceFps: 30 });
+    const aIdx = args.indexOf('-ss');
+    expect(args.slice(aIdx, aIdx + 6)).toEqual(['-ss', '3', '-t', '2.5', '-i', 'in.mp4']);
+    const bIdx = args.indexOf('-ss', aIdx + 1);
+    expect(args.slice(bIdx, bIdx + 6)).toEqual(['-ss', '0.5', '-t', '2', '-i', 'in.mp4']);
+  });
+
+  it('falls back to output.fps for bitrate and GOP when sourceFps is 0', () => {
+    const edl60fps = EdlSchema.parse({ ...twoScenes, output: { ...twoScenes.output, fps: 60 } });
+    const args = compileEdl(edl60fps, { input: 'in.mp4', output: 'out.mp4', encoder: enc, mode: 'final', sourceFps: 0 });
+    expect(args).toEqual(expect.arrayContaining(['-b:v', '12M']));
   });
 
   it('uses crf ultrafast libx264 for previews regardless of the picked encoder', () => {
