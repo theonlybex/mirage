@@ -56,7 +56,7 @@ export async function pickEncoder(): Promise<Encoder> {
     try {
       await run('ffmpeg', [
         '-hide_banner', '-loglevel', 'error', '-y',
-        '-f', 'lavfi', '-i', 'color=c=black:s=64x64:r=30:d=0.1',
+        '-f', 'lavfi', '-i', 'color=c=black:s=256x144:r=30:d=0.1',
         '-c:v', cand.name, ...cand.extraArgs, '-pix_fmt', 'yuv420p', '-f', 'null', '-',
       ], { timeoutMs: 30_000 });
       encoderCache = cand;
