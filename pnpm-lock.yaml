@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@wordedits/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@wordedits/shared':
+        specifier: workspace:*
+        version: link:packages/shared
       '@wordedits/sidecars':
         specifier: workspace:*
         version: link:packages/sidecars
