@@ -36,20 +36,48 @@ export function sceneSegments(scene: Scene): Segment[] {
   return out;
 }
 
-export function edlDuration(edl: Edl): number {
-  return edl.scenes.flatMap(sceneSegments).reduce((sum, s) => sum + (s.end - s.start), 0);
+/** Output frame rate: the source's when known, otherwise the EDL's. */
+export function resolveFps(edl: Edl, sourceFps: number): number {
+  return sourceFps > 0 ? sourceFps : edl.output.fps;
 }
 
 export interface EdlSegment {
   sceneId: string;
   start: number;
   end: number;
+  /** Whole output frames this segment contributes (end - start = frames / fps). */
+  frames: number;
   scene: Scene;
 }
 
-/** Flattened kept segments across all scenes, in scene order. */
-export function edlSegments(edl: Edl): EdlSegment[] {
-  return edl.scenes.flatMap((scene) => sceneSegments(scene).map((seg) => ({ sceneId: scene.id, start: seg.start, end: seg.end, scene })));
+/**
+ * Flattened kept segments across all scenes, in scene order, snapped to the output
+ * frame grid. Segments shorter than half a frame are dropped; a scene left with none
+ * throws EMPTY_SCENE.
+ */
+export function edlSegments(edl: Edl, fps: number): EdlSegment[] {
+  return edl.scenes.flatMap((scene) => {
+    const kept = sceneSegments(scene).flatMap((seg) => {
+      const start = Math.round(seg.start * fps) / fps;
+      const end = Math.round(seg.end * fps) / fps;
+      const frames = Math.round((end - start) * fps);
+      return frames < 1 ? [] : [{ sceneId: scene.id, scene, start, end, frames }];
+    });
+    if (kept.length === 0) {
+      throw new EdlError(
+        'EMPTY_SCENE',
+        `scene ${scene.id}: cuts leave less than one frame`,
+        'Remove a cut or delete the scene.',
+        scene.id,
+      );
+    }
+    return kept;
+  });
+}
+
+/** Rendered length in seconds: the sum of whole frames kept, at the output frame rate. */
+export function edlDuration(edl: Edl, fps: number): number {
+  return edlSegments(edl, fps).reduce((sum, s) => sum + s.frames / fps, 0);
 }
 
 export function bitrateFor(width: number, height: number, fps: number): string {
@@ -59,7 +87,9 @@ export function bitrateFor(width: number, height: number, fps: number): string {
   return '5M';
 }
 
-const num = (n: number) => String(Math.round(n * 1000) / 1000);
+// Microsecond precision: frame-derived times like 2/30 must not round to whole
+// milliseconds, or the audio of each segment drifts from its video by up to 0.5 ms.
+const num = (n: number) => String(Math.round(n * 1e6) / 1e6);
 
 export interface GraphOptions {
   mode: 'preview' | 'final';
@@ -69,9 +99,9 @@ export interface GraphOptions {
 export function buildFilterGraph(edl: Edl, opts: GraphOptions): string {
   if (edl.scenes.length === 0) throw new EdlError('NO_SCENES', 'EDL has no scenes', 'Add at least one scene.');
   const [W, H] = opts.mode === 'preview' ? [960, 540] : [edl.output.width, edl.output.height];
-  const fps = num(opts.sourceFps > 0 ? opts.sourceFps : edl.output.fps);
+  const fps = resolveFps(edl, opts.sourceFps);
 
-  const segments = edlSegments(edl);
+  const segments = edlSegments(edl, fps);
   const chains: string[] = [];
   const labels: string[] = [];
   segments.forEach((seg, k) => {
@@ -81,12 +111,18 @@ export function buildFilterGraph(edl: Edl, opts: GraphOptions): string {
       S > 1 + EPS
         ? `crop=trunc(iw/${num(S)}/2)*2:trunc(ih/${num(S)}/2)*2:(iw-iw/${num(S)})*${num(ax)}:(ih-ih/${num(S)})*${num(ay)},`
         : '';
-    chains.push(`[${k}:v]setpts=PTS-STARTPTS,${crop}scale=${W}:${H}:flags=bicubic,setsar=1,fps=${fps}[v${k}]`);
-    chains.push(`[${k}:a]asetpts=PTS-STARTPTS[a${k}]`);
+    // Both streams are cut to exactly seg.frames frames so concat never pads one to
+    // match the other (which would add up to a frame of drift per segment). tpad
+    // clones the last frame in case the source runs out a frame early.
+    chains.push(
+      `[${k}:v]setpts=PTS-STARTPTS,${crop}scale=${W}:${H}:flags=bicubic,setsar=1,fps=${num(fps)},` +
+        `tpad=stop=1:stop_mode=clone,trim=end_frame=${num(seg.frames)},setpts=PTS-STARTPTS[v${k}]`,
+    );
+    chains.push(`[${k}:a]asetpts=PTS-STARTPTS,apad,atrim=end=${num(seg.frames / fps)},asetpts=PTS-STARTPTS[a${k}]`);
     labels.push(`[v${k}][a${k}]`);
   });
   chains.push(`${labels.join('')}concat=n=${segments.length}:v=1:a=1[vcat][acat]`);
-  chains.push(`[acat]highpass=f=90,loudnorm=I=${num(edl.audio.loudnessLufs)}:TP=-1:LRA=11[aout]`);
+  chains.push(`[acat]highpass=f=90,loudnorm=I=${num(edl.audio.loudnessLufs)}:TP=-1:LRA=11,asetpts=N/SR/TB[aout]`);
   return chains.join(';');
 }
 
@@ -98,8 +134,9 @@ export interface CompileOptions extends GraphOptions {
 
 export function compileEdl(edl: Edl, opts: CompileOptions): string[] {
   const graph = buildFilterGraph(edl, opts);
-  const fps = opts.sourceFps > 0 ? opts.sourceFps : edl.output.fps;
-  const inputs = edlSegments(edl).flatMap((seg) => ['-ss', num(seg.start), '-t', num(seg.end - seg.start), '-i', opts.input]);
+  const fps = resolveFps(edl, opts.sourceFps);
+  // One extra frame of input so the fps filter never comes up a frame short.
+  const inputs = edlSegments(edl, fps).flatMap((seg) => ['-ss', num(seg.start), '-t', num((seg.frames + 1) / fps), '-i', opts.input]);
   const video =
     opts.mode === 'preview'
       ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28']

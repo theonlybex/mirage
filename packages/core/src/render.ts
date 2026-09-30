@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EdlSchema, type Edl, type ProbeInfo } from '@wordedits/shared';
-import { compileEdl, EdlError, edlDuration } from './edl-compiler.js';
+import { compileEdl, EdlError, edlDuration, resolveFps } from './edl-compiler.js';
 import type { MediaTools } from './media-tools.js';
 
 export class RenderError extends Error {
@@ -62,7 +62,7 @@ export async function renderEdl(opts: RenderOptions): Promise<RenderResult> {
 
   let expected: number;
   try {
-    expected = edlDuration(opts.edl);
+    expected = edlDuration(opts.edl, resolveFps(opts.edl, src.fps));
     const encoder = opts.mode === 'final' ? await tools.pickEncoder() : { name: 'libx264' as const, extraArgs: [] };
     await mkdir(opts.outputDir, { recursive: true });
     const outputPath = join(opts.outputDir, `${opts.mode}-${edlHash(opts.edl)}.mp4`);

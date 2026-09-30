@@ -73,6 +73,22 @@ describe('renderEdl', () => {
     expect(r.outputPath.endsWith(`preview-${edlHash(edl)}.mp4`)).toBe(true);
   });
 
+  it('keeps the rendered duration within 0.1 s of the EDL across 15 non-frame-aligned cuts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-cuts-'));
+    const cuts: [number, number][] = [
+      [0.37, 0.61], [0.93, 1.02], [1.21, 1.43], [1.57, 1.66], [1.88, 2.11],
+      [2.29, 2.37], [2.52, 2.77], [2.95, 3.03], [3.19, 3.41], [3.58, 3.67],
+      [3.86, 4.09], [4.23, 4.31], [4.49, 4.71], [4.89, 4.97], [5.23, 5.46],
+    ];
+    const cutEdl = EdlSchema.parse({
+      version: 1,
+      output: { width: 640, height: 360, fps: 30 },
+      scenes: [{ id: 'c', src: { in: 0.2, out: 5.8 }, cuts }],
+    });
+    const r = await renderEdl({ edl: cutEdl, input: 'fixtures/tone-6s.mp4', outputDir: dir, mode: 'preview', tools });
+    expect(Math.abs(r.probe.durationSec - r.expectedDurationSec)).toBeLessThanOrEqual(0.1);
+  });
+
   it('keeps a fractional source frame rate', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we-2997-'));
     const r = await renderEdl({ edl, input: 'fixtures/tone-6s-2997.mp4', outputDir: dir, mode: 'preview', tools });
