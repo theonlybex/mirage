@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EdlSchema, type Edl, type ProbeInfo } from '@wordedits/shared';
 import { compileEdl, EdlError, edlDuration } from './edl-compiler.js';
@@ -18,7 +18,8 @@ export class RenderError extends Error {
 }
 
 export function edlHash(edl: Edl): string {
-  const canonical = JSON.stringify(EdlSchema.parse(edl), Object.keys(flatten(edl)).sort());
+  const parsed = EdlSchema.parse(edl);
+  const canonical = JSON.stringify(parsed, Object.keys(flatten(parsed)).sort());
   return createHash('sha256').update(canonical).digest('hex').slice(0, 8);
 }
 
@@ -60,20 +61,25 @@ export async function renderEdl(opts: RenderOptions): Promise<RenderResult> {
   }
 
   let expected: number;
-  let args: string[];
   try {
     expected = edlDuration(opts.edl);
     const encoder = opts.mode === 'final' ? await tools.pickEncoder() : { name: 'libx264' as const, extraArgs: [] };
     await mkdir(opts.outputDir, { recursive: true });
     const outputPath = join(opts.outputDir, `${opts.mode}-${edlHash(opts.edl)}.mp4`);
-    args = compileEdl(opts.edl, { input: opts.input, output: outputPath, encoder, mode: opts.mode, sourceFps: src.fps });
-    await tools.runFfmpeg(args, {
-      expectedDurationSec: expected,
-      timeoutMs: Math.max(60_000, expected * 20 * 1000),
-      onProgress: opts.onProgress,
-    });
+    const args = compileEdl(opts.edl, { input: opts.input, output: outputPath, encoder, mode: opts.mode, sourceFps: src.fps });
+    try {
+      await tools.runFfmpeg(args, {
+        expectedDurationSec: expected,
+        timeoutMs: Math.max(60_000, expected * 20 * 1000),
+        onProgress: opts.onProgress,
+      });
+    } catch (e) {
+      await rm(outputPath, { force: true });
+      throw e;
+    }
     const probe = await tools.probe(outputPath);
     if (Math.abs(probe.durationSec - expected) > DURATION_TOLERANCE_SEC) {
+      await rm(outputPath, { force: true });
       throw new RenderError('DURATION_MISMATCH', `Rendered ${probe.durationSec}s but expected ${expected}s`, 'The source may be shorter than the EDL assumes. Re-import the file.');
     }
     return { outputPath, expectedDurationSec: expected, probe };

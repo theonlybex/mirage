@@ -1,7 +1,7 @@
-import { cp, mkdtemp } from 'node:fs/promises';
+import { access, cp, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EdlSchema } from '@wordedits/shared';
+import { EdlSchema, type Edl } from '@wordedits/shared';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from './media-tools.js';
 import { edlHash, renderEdl } from './render.js';
@@ -25,6 +25,22 @@ describe('edlHash', () => {
     expect(edlHash(edl)).toMatch(/^[0-9a-f]{8}$/);
     expect(edlHash(edl)).toBe(edlHash(JSON.parse(JSON.stringify(edl))));
     expect(edlHash({ ...edl, endScreen: { seconds: 3 } })).not.toBe(edlHash(edl));
+  });
+
+  it('hashes equal for a raw EDL with endScreen omitted vs the same EDL with the default spelled out', () => {
+    // Both raw objects parse (via EdlSchema.parse) to the identical Edl, since { seconds: 12 }
+    // is exactly SceneSchema's default for an omitted endScreen. edlHash must hash them equal
+    // too: it must build its key allowlist from the *parsed* (defaulted) value, not from the
+    // raw argument, or keys that only exist after defaulting get dropped from the raw-omitted
+    // variant's canonical JSON and the two hashes diverge.
+    const rawWithoutEndScreen = {
+      version: 1,
+      output: { width: 640, height: 360, fps: 30 },
+      scenes: [{ id: 's1', src: { in: 0, out: 1 } }],
+    };
+    const rawWithEndScreenSpelledOut = { ...rawWithoutEndScreen, endScreen: { seconds: 12 } };
+    expect(EdlSchema.parse(rawWithoutEndScreen)).toEqual(EdlSchema.parse(rawWithEndScreenSpelledOut));
+    expect(edlHash(rawWithoutEndScreen as unknown as Edl)).toBe(edlHash(rawWithEndScreenSpelledOut as unknown as Edl));
   });
 });
 
@@ -79,5 +95,42 @@ describe('renderEdl', () => {
       name: 'RenderError',
       code: 'EDL',
     });
+  });
+
+  it('removes the partial output file when the rendered duration mismatches', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-mismatch-'));
+    const validSourceProbe = {
+      durationSec: 6,
+      width: 1280,
+      height: 720,
+      fps: 30,
+      hasVideo: true,
+      hasAudio: true,
+      videoCodec: 'h264',
+      audioCodec: 'aac',
+    };
+    const badOutputProbe = { ...validSourceProbe, durationSec: 1 }; // far from edlDuration(edl) = 4.1s
+    let probeCalls = 0;
+    const stubTools: MediaTools = {
+      probe: async (_file: string) => {
+        // First probe call is the source; the second is the rendered output.
+        probeCalls += 1;
+        return probeCalls === 1 ? validSourceProbe : badOutputProbe;
+      },
+      runFfmpeg: async (args) => {
+        const outputPath = args.at(-1) as string;
+        await writeFile(outputPath, 'not a real render, just a placeholder');
+      },
+      pickEncoder: async () => ({ name: 'libx264', extraArgs: [] }),
+      makeProxy: async () => {},
+      measureLoudness: async () => ({ integratedLufs: -14, truePeakDb: -3 }),
+    };
+
+    const expectedOutputPath = join(dir, `preview-${edlHash(edl)}.mp4`);
+    await expect(renderEdl({ edl, input: 'fixtures/tone-6s.mp4', outputDir: dir, mode: 'preview', tools: stubTools })).rejects.toMatchObject({
+      name: 'RenderError',
+      code: 'DURATION_MISMATCH',
+    });
+    await expect(access(expectedOutputPath)).rejects.toThrow();
   });
 });
