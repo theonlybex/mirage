@@ -50,7 +50,8 @@ export interface RenderResult {
   probe: ProbeInfo;
 }
 
-const DURATION_TOLERANCE_SEC = 0.25;
+/** Spec §10: ±0.1 s, but never tighter than one output frame. */
+const durationToleranceSec = (fps: number) => Math.max(0.1, 1 / fps);
 
 export async function renderEdl(opts: RenderOptions): Promise<RenderResult> {
   const { tools } = opts;
@@ -62,7 +63,8 @@ export async function renderEdl(opts: RenderOptions): Promise<RenderResult> {
 
   let expected: number;
   try {
-    expected = edlDuration(opts.edl, resolveFps(opts.edl, src.fps));
+    const fps = resolveFps(opts.edl, src.fps);
+    expected = edlDuration(opts.edl, fps);
     const encoder = opts.mode === 'final' ? await tools.pickEncoder() : { name: 'libx264' as const, extraArgs: [] };
     await mkdir(opts.outputDir, { recursive: true });
     const outputPath = join(opts.outputDir, `${opts.mode}-${edlHash(opts.edl)}.mp4`);
@@ -78,7 +80,7 @@ export async function renderEdl(opts: RenderOptions): Promise<RenderResult> {
       throw e;
     }
     const probe = await tools.probe(outputPath);
-    if (Math.abs(probe.durationSec - expected) > DURATION_TOLERANCE_SEC) {
+    if (Math.abs(probe.durationSec - expected) > durationToleranceSec(fps)) {
       await rm(outputPath, { force: true });
       throw new RenderError('DURATION_MISMATCH', `Rendered ${probe.durationSec}s but expected ${expected}s`, 'The source may be shorter than the EDL assumes. Re-import the file.');
     }

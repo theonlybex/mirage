@@ -52,8 +52,7 @@ describe('renderEdl', () => {
     const seen: number[] = [];
     const r = await renderEdl({ edl, input, outputDir: dir, mode: 'final', tools, onProgress: (f) => seen.push(f) });
     expect(r.expectedDurationSec).toBeCloseTo(4.1, 5);
-    expect(r.probe.durationSec).toBeGreaterThan(4.1 - 0.25);
-    expect(r.probe.durationSec).toBeLessThan(4.1 + 0.25);
+    expect(Math.abs(r.probe.durationSec - 4.1)).toBeLessThanOrEqual(0.1);
     expect(r.probe.width).toBe(640);
     expect(r.probe.height).toBe(360);
     expect(r.probe.fps).toBe(30);
@@ -61,8 +60,8 @@ describe('renderEdl', () => {
     expect(r.outputPath).toBe(join(dir, `final-${edlHash(edl)}.mp4`));
     expect(Math.max(...seen)).toBe(1);
     const loud = await tools.measureLoudness(r.outputPath);
-    expect(loud.integratedLufs).toBeGreaterThan(-16.5);
-    expect(loud.integratedLufs).toBeLessThan(-11.5);
+    expect(loud.integratedLufs).toBeGreaterThanOrEqual(-15);
+    expect(loud.integratedLufs).toBeLessThanOrEqual(-13);
     expect(loud.truePeakDb).toBeLessThanOrEqual(-0.5);
   });
 
@@ -149,4 +148,36 @@ describe('renderEdl', () => {
     });
     await expect(access(expectedOutputPath)).rejects.toThrow();
   });
+
+  it('rejects a render 0.15 s off the EDL (spec tolerance is 0.1 s)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-tol-'));
+    const stubTools = probeStub([4.1 + 0.15]);
+    await expect(renderEdl({ edl, input: 'fixtures/tone-6s.mp4', outputDir: dir, mode: 'preview', tools: stubTools })).rejects.toMatchObject({
+      name: 'RenderError',
+      code: 'DURATION_MISMATCH',
+    });
+  });
+
+  it('accepts a render 0.09 s off the EDL', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-tol-ok-'));
+    const r = await renderEdl({ edl, input: 'fixtures/tone-6s.mp4', outputDir: dir, mode: 'preview', tools: probeStub([4.1 + 0.09]) });
+    expect(r.expectedDurationSec).toBeCloseTo(4.1, 9);
+  });
 });
+
+/** Stub tools: the first probe is a valid 6 s source; later probes return the given output durations. */
+function probeStub(outputDurations: number[], runFfmpeg?: MediaTools['runFfmpeg']): MediaTools {
+  const source = { durationSec: 6, width: 1280, height: 720, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac' };
+  let calls = 0;
+  return {
+    probe: async () => (calls++ === 0 ? source : { ...source, durationSec: outputDurations[Math.min(calls - 2, outputDurations.length - 1)] }),
+    runFfmpeg:
+      runFfmpeg ??
+      (async (args) => {
+        await writeFile(args.at(-1) as string, 'placeholder render');
+      }),
+    pickEncoder: async () => ({ name: 'libx264', extraArgs: [] }),
+    makeProxy: async () => {},
+    measureLoudness: async () => ({ integratedLufs: -14, truePeakDb: -3 }),
+  };
+}
