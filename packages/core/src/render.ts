@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdir, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EdlSchema, type Edl, type ProbeInfo } from '@wordedits/shared';
 import { compileEdl, EdlError, edlDuration, resolveFps } from './edl-compiler.js';
@@ -68,21 +68,26 @@ export async function renderEdl(opts: RenderOptions): Promise<RenderResult> {
     const encoder = opts.mode === 'final' ? await tools.pickEncoder() : { name: 'libx264' as const, extraArgs: [] };
     await mkdir(opts.outputDir, { recursive: true });
     const outputPath = join(opts.outputDir, `${opts.mode}-${edlHash(opts.edl)}.mp4`);
-    const args = compileEdl(opts.edl, { input: opts.input, output: outputPath, encoder, mode: opts.mode, sourceFps: src.fps });
+    // Render beside the target and rename over it only once verified, so a failed
+    // re-render never destroys a previous good output.
+    const partialPath = `${outputPath}.partial-${randomUUID()}.mp4`;
+    const args = compileEdl(opts.edl, { input: opts.input, output: partialPath, encoder, mode: opts.mode, sourceFps: src.fps });
+    let probe: ProbeInfo;
     try {
       await tools.runFfmpeg(args, {
         expectedDurationSec: expected,
         timeoutMs: Math.max(60_000, expected * 20 * 1000),
         onProgress: opts.onProgress,
       });
+      probe = await tools.probe(partialPath);
+      if (Math.abs(probe.durationSec - expected) > durationToleranceSec(fps)) {
+        throw new RenderError('DURATION_MISMATCH', `Rendered ${probe.durationSec}s but expected ${expected}s`, 'The source may be shorter than the EDL assumes. Re-import the file.');
+      }
+      await rename(partialPath, outputPath);
     } catch (e) {
-      await rm(outputPath, { force: true });
+      // Cleanup must never replace the original error.
+      await rm(partialPath, { force: true }).catch(() => {});
       throw e;
-    }
-    const probe = await tools.probe(outputPath);
-    if (Math.abs(probe.durationSec - expected) > durationToleranceSec(fps)) {
-      await rm(outputPath, { force: true });
-      throw new RenderError('DURATION_MISMATCH', `Rendered ${probe.durationSec}s but expected ${expected}s`, 'The source may be shorter than the EDL assumes. Re-import the file.');
     }
     return { outputPath, expectedDurationSec: expected, probe };
   } catch (e) {

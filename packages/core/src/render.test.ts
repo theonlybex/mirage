@@ -1,4 +1,4 @@
-import { access, cp, mkdtemp, writeFile } from 'node:fs/promises';
+import { access, cp, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EdlSchema, type Edl } from '@wordedits/shared';
@@ -147,6 +147,45 @@ describe('renderEdl', () => {
       code: 'DURATION_MISMATCH',
     });
     await expect(access(expectedOutputPath)).rejects.toThrow();
+    expect((await readdir(dir)).filter((f) => f.includes('.partial-'))).toEqual([]);
+  });
+
+  it('keeps a previous good render when a re-render fails, and rethrows the original error', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-atomic-'));
+    const outputPath = join(dir, `preview-${edlHash(edl)}.mp4`);
+    await writeFile(outputPath, 'previous good render');
+    const sentinel = new Error('ffmpeg blew up');
+    let writtenTo = '';
+    const stubTools = probeStub([4.1], async (args) => {
+      writtenTo = args.at(-1) as string;
+      await writeFile(writtenTo, 'half-written render');
+      throw sentinel;
+    });
+    const err = await renderEdl({ edl, input: 'fixtures/tone-6s.mp4', outputDir: dir, mode: 'preview', tools: stubTools }).catch((e: unknown) => e);
+    expect(err).toBe(sentinel);
+    expect(writtenTo).not.toBe(outputPath);
+    expect(writtenTo.startsWith(`${outputPath}.partial-`)).toBe(true);
+    expect((await readdir(dir)).filter((f) => f.includes('.partial-'))).toEqual([]);
+    expect(await readFile(outputPath, 'utf8')).toBe('previous good render');
+  });
+
+  it('keeps a previous good render when the re-render has the wrong duration', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-atomic-dur-'));
+    const outputPath = join(dir, `preview-${edlHash(edl)}.mp4`);
+    await writeFile(outputPath, 'previous good render');
+    await expect(renderEdl({ edl, input: 'fixtures/tone-6s.mp4', outputDir: dir, mode: 'preview', tools: probeStub([1]) })).rejects.toMatchObject({
+      code: 'DURATION_MISMATCH',
+    });
+    expect((await readdir(dir)).filter((f) => f.includes('.partial-'))).toEqual([]);
+    expect(await readFile(outputPath, 'utf8')).toBe('previous good render');
+  });
+
+  it('moves a verified render into place and leaves no partial file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-atomic-ok-'));
+    const r = await renderEdl({ edl, input: 'fixtures/tone-6s.mp4', outputDir: dir, mode: 'preview', tools: probeStub([4.1]) });
+    expect(r.outputPath).toBe(join(dir, `preview-${edlHash(edl)}.mp4`));
+    expect(await readdir(dir)).toEqual([`preview-${edlHash(edl)}.mp4`]);
+    expect(await readFile(r.outputPath, 'utf8')).toBe('placeholder render');
   });
 
   it('rejects a render 0.15 s off the EDL (spec tolerance is 0.1 s)', async () => {
