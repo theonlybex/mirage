@@ -15,6 +15,20 @@ describe('pickEncoder', () => {
   });
 });
 
+describe('runFfmpeg', () => {
+  it('reports finite progress in [0,1] ending at exactly 1 when expectedDurationSec is omitted', async () => {
+    const seen: number[] = [];
+    await runFfmpeg(
+      ['-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=30:duration=0.5', '-pix_fmt', 'yuv420p', '-f', 'null', '-'],
+      { onProgress: (f) => seen.push(f) },
+    );
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((f) => Number.isFinite(f))).toBe(true);
+    expect(seen.every((f) => f >= 0 && f <= 1)).toBe(true);
+    expect(seen.at(-1)).toBe(1);
+  });
+});
+
 describe('makeProxy', () => {
   it('writes a 540p proxy and reports progress up to ~1', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we-proxy-'));
