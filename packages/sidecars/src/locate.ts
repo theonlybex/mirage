@@ -11,6 +11,11 @@ export function _resetLocateCache(): void {
 
 const exe = (tool: Tool) => (process.platform === 'win32' ? `${tool}.exe` : tool);
 
+/** What to tell the user when a tool is missing or cannot be started. */
+export function installHint(tool: Tool): string {
+  return `Install FFmpeg (macOS: brew install ffmpeg; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
+}
+
 async function exists(p: string): Promise<boolean> {
   try {
     await access(p, constants.X_OK);
@@ -63,7 +68,7 @@ export async function locate(tool: Tool): Promise<string> {
   throw new SidecarError(
     tool, 'NOT_FOUND',
     `${tool} was not found`,
-    `Install FFmpeg (macOS: brew install ffmpeg; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`,
+    installHint(tool),
   );
 }
 

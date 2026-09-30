@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { _resetLocateCache } from './locate.js';
 import { run, createLineSplitter } from './run.js';
 
 describe('run', () => {
@@ -27,6 +31,44 @@ describe('run', () => {
       onStdoutLine: (l) => lines.push(l),
     });
     expect(lines.some((l) => l.startsWith('out_time_us='))).toBe(true);
+  });
+});
+
+describe('run with a binary that cannot start', () => {
+  const savedDir = process.env.WORDEDITS_FFMPEG_DIR;
+  afterEach(() => {
+    if (savedDir === undefined) delete process.env.WORDEDITS_FFMPEG_DIR;
+    else process.env.WORDEDITS_FFMPEG_DIR = savedDir;
+    _resetLocateCache();
+  });
+
+  it.skipIf(process.platform === 'win32')('reports NOT_FOUND with an install hint instead of "exit code undefined"', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-badbin-'));
+    const bin = join(dir, 'ffmpeg');
+    await writeFile(bin, '#!/nonexistent\ngarbage\n');
+    await chmod(bin, 0o755);
+    process.env.WORDEDITS_FFMPEG_DIR = dir;
+    _resetLocateCache();
+    await expect(run('ffmpeg', ['-version'])).rejects.toMatchObject({
+      name: 'SidecarError',
+      code: 'NOT_FOUND',
+      message: 'ffmpeg could not be started',
+      hint: expect.stringContaining('WORDEDITS_FFMPEG_DIR'),
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')('reports a process killed by a signal as EXIT, not NOT_FOUND', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-killed-'));
+    const bin = join(dir, 'ffmpeg');
+    await writeFile(bin, '#!/bin/sh\nkill -9 $$\n');
+    await chmod(bin, 0o755);
+    process.env.WORDEDITS_FFMPEG_DIR = dir;
+    _resetLocateCache();
+    await expect(run('ffmpeg', ['-version'])).rejects.toMatchObject({
+      name: 'SidecarError',
+      code: 'EXIT',
+      message: 'ffmpeg was stopped by SIGKILL',
+    });
   });
 });
 
