@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { run } from './run.js';
+import { run, createLineSplitter } from './run.js';
 
 describe('run', () => {
   it('runs ffmpeg -version and returns stdout', async () => {
@@ -27,5 +27,26 @@ describe('run', () => {
       onStdoutLine: (l) => lines.push(l),
     });
     expect(lines.some((l) => l.startsWith('out_time_us='))).toBe(true);
+  });
+});
+
+describe('createLineSplitter', () => {
+  it('emits complete lines as they arrive and flushes a trailing unterminated line', () => {
+    const lines: string[] = [];
+    const splitter = createLineSplitter((l) => lines.push(l));
+    splitter.feed('a\nb');
+    splitter.feed('c');
+    expect(lines).toEqual(['a']);
+    splitter.flush();
+    expect(lines).toEqual(['a', 'bc']);
+  });
+
+  it('does not emit anything extra on flush when the buffer already ended on a newline', () => {
+    const lines: string[] = [];
+    const splitter = createLineSplitter((l) => lines.push(l));
+    splitter.feed('a\nb\n');
+    expect(lines).toEqual(['a', 'b']);
+    splitter.flush();
+    expect(lines).toEqual(['a', 'b']);
   });
 });
