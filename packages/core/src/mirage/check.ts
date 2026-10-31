@@ -3,6 +3,7 @@ import type { Episode } from '@wordedits/shared';
 import { loadCatalog } from './ingest.js';
 import { loadLibrary, snapToBeats } from './music.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { dropCollapsed } from './timeline.js';
 import { cutChanged, cutChangedError } from './voiceover.js';
 
 /**
@@ -20,7 +21,9 @@ export async function checkEpisode(project: string, n: number): Promise<{ episod
   if (lib.tracks.length && ep.voiceover) {
     if (ep.items.some((i) => i.onBeat) || ep.music.length) notes.push('Montages were not snapped to the beat: the voice-over is fitted to this cut.');
   } else if (lib.tracks.length) {
-    ep = snapToBeats(ep, catalog, lib);
+    const snapped = dropCollapsed(snapToBeats(ep, catalog, lib));
+    ep = snapped.episode;
+    for (const d of snapped.dropped) warnings.push(`${d} was inside time that beat snapping removed, so it was dropped — place it again on the times above`);
   }
   await saveEpisode(root, ep, n);
 

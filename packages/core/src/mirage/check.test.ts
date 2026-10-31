@@ -47,6 +47,20 @@ describe('checkEpisode', () => {
     expect(r.episode.items[0].src.out).not.toBe(1.3);
   });
 
+  it('drops an overlay that beat snapping squeezed to nothing, with a warning, instead of failing on every later check', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    // a (1.24 s) snaps to 1.0 s: the badge at 1.2–1.25 sat in the removed time.
+    await saveEpisode(dir, base({
+      items: [{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.24 }, onBeat: true }, { id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 9 } }],
+      overlays: [{ kind: 'badge', text: 'FAILED', start: 1.2, end: 1.25 }, { kind: 'label', text: 'kept', start: 2, end: 3 }],
+      music: [{ track: 'beat.wav', start: 0, end: 5 }],
+    }));
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual(['overlay 1 ("FAILED") was inside time that beat snapping removed, so it was dropped — place it again on the times above']);
+    expect(r.episode.overlays.map((o) => o.text)).toEqual(['kept']);
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+  });
+
   it('warns when an item keeps audio from a clip that has no transcript', async () => {
     const { dir } = await project(null);
     await saveEpisode(dir, base({ items: [{ id: 'talk', beat: 'problem', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }] }));
