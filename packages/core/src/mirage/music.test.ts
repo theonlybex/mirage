@@ -11,7 +11,7 @@ import { layoutTimeline } from './timeline.js';
 const lib = (bpm: number, beatOffset: number): MusicLibrary => ({ version: 1, tracks: [{ file: 'beat.wav', mood: 'upbeat', licence: '', bpm, beatOffset, durationSec: 60 }] });
 const catalog = (dur: number): Catalog => ({
   version: 1,
-  clips: [{ id: 'c001', path: '/x.mp4', sha256: 'a'.repeat(64), probe: { durationSec: dur, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: false, videoCodec: 'h264', audioCodec: null }, kind: 'screen', transcript: null, frames: [], notes: '', moments: [] }],
+  clips: [{ id: 'c001', path: '/x.mp4', sha256: 'a'.repeat(64), probe: { durationSec: dur, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: false, videoCodec: 'h264', audioCodec: null, colorTransfer: null }, kind: 'screen', transcript: null, frames: [], notes: '', moments: [] }],
 });
 const episode = (items: object[], extra: object = {}) =>
   EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items, music: [{ track: 'beat.wav', start: 0, end: 20 }], ...extra });

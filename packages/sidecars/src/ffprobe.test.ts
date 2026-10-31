@@ -1,5 +1,9 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseFps, probe } from './ffprobe.js';
+import { run } from './run.js';
 
 describe('parseFps', () => {
   it('parses integer and fractional rates', () => {
@@ -21,6 +25,13 @@ describe('probe', () => {
     expect(info.hasAudio).toBe(true);
     expect(info.videoCodec).toBe('h264');
     expect(info.audioCodec).toBe('aac');
+    expect(info.colorTransfer).toBeNull();
+  });
+
+  it('reads the colour transfer, so HDR (HLG/PQ) clips can be flagged', async () => {
+    const out = join(await mkdtemp(join(tmpdir(), 'we-hdr-')), 'hlg.mp4');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-color_trc', 'arib-std-b67', out]);
+    expect((await probe(out)).colorTransfer).toBe('arib-std-b67');
   });
 
   it('reports fractional fps', async () => {

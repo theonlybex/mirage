@@ -123,6 +123,7 @@ describe('renderEdl', () => {
       hasAudio: true,
       videoCodec: 'h264',
       audioCodec: 'aac',
+      colorTransfer: null,
     };
     const badOutputProbe = { ...validSourceProbe, durationSec: 1 }; // far from edlDuration(edl) = 4.1s
     let probeCalls = 0;
@@ -208,7 +209,7 @@ describe('renderEdl', () => {
 
 /** Stub tools: the first probe is a valid 6 s source; later probes return the given output durations. */
 function probeStub(outputDurations: number[], runFfmpeg?: MediaTools['runFfmpeg']): MediaTools {
-  const source = { durationSec: 6, width: 1280, height: 720, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac' };
+  const source = { durationSec: 6, width: 1280, height: 720, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac', colorTransfer: null };
   let calls = 0;
   return {
     probe: async () => (calls++ === 0 ? source : { ...source, durationSec: outputDurations[Math.min(calls - 2, outputDurations.length - 1)] }),

@@ -7,7 +7,7 @@ import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
 
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm']);
-const MAX_TRANSCRIBE_SEC = 30 * 60;
+const HDR_TRANSFERS = new Set(['arib-std-b67', 'smpte2084']);
 
 export function guessKind(probe: ProbeInfo, transcript: Transcript | null): ClipKind {
   const words = transcript?.words.length ?? 0;
@@ -49,6 +49,22 @@ export function nextClipId(catalog: Catalog): string {
 export interface IngestResult {
   added: Clip[];
   skipped: { file: string; reason: string }[];
+  /** Problems the user should hear about (printed with ⚠). */
+  warnings: string[];
+}
+
+/** Transcribes a clip's audio. Returns null (and warns) when transcription fails; a clip with no speech gets an empty transcript. */
+async function transcribeClip(o: { tools: MediaTools; path: string; name: string; wav: string; durationSec: number; locale?: string; result: IngestResult; onStep?: (m: string) => void }): Promise<Transcript | null> {
+  try {
+    await o.tools.extractWav(o.path, o.wav, { timeoutMs: Math.max(10 * 60_000, o.durationSec * 500) });
+    return await o.tools.transcribe(o.wav, { locale: o.locale, timeoutMs: Math.max(30 * 60_000, o.durationSec * 2000) });
+  } catch (e) {
+    o.onStep?.(`${o.name}: transcription failed, kept as silent footage`);
+    o.result.warnings.push(`${o.name}: transcription failed (${e instanceof Error ? e.message : String(e)}); its speech is invisible to slots and captions — run ingest again to retry`);
+    return null;
+  } finally {
+    await rm(o.wav, { force: true }).catch(() => {});
+  }
 }
 
 export async function ingestClips(o: { project: string; clipsDir: string; tools: MediaTools; locale?: string; onStep?: (m: string) => void }): Promise<IngestResult> {
@@ -58,7 +74,7 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
   const catalog = await loadCatalog(project);
   const known = new Map(catalog.clips.map((c) => [c.sha256, c]));
   const files = (await readdir(dir)).filter((f) => !f.startsWith('.') && VIDEO_EXTENSIONS.has(extname(f).toLowerCase())).sort();
-  const result: IngestResult = { added: [], skipped: [] };
+  const result: IngestResult = { added: [], skipped: [], warnings: [] };
 
   for (const name of files) {
     const path = join(dir, name);
@@ -69,13 +85,23 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
       sha256 = await sha256File(path);
       const prev = known.get(sha256);
       if (prev) {
+        let changed = false;
         if (prev.path !== path && !existsSync(prev.path)) {
           prev.path = path;
-          await saveCatalog(project, catalog);
+          changed = true;
           o.onStep?.(`${name}: moved, path updated`);
-        } else {
-          result.skipped.push({ file: name, reason: 'already in the catalog' });
         }
+        if (prev.path === path && prev.probe.hasAudio && prev.transcript === null) {
+          // A transcription that failed last time: try again, keeping everything else about the clip.
+          const transcript = await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, locale: o.locale, result, onStep: o.onStep });
+          if (transcript) {
+            prev.transcript = transcript;
+            changed = true;
+            o.onStep?.(`${name}: transcribed`);
+          }
+        }
+        if (changed) await saveCatalog(project, catalog);
+        else result.skipped.push({ file: name, reason: 'already in the catalog' });
         continue;
       }
       const probe = await o.tools.probe(path);
@@ -84,6 +110,9 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
         continue;
       }
       o.onStep?.(`${name} → ${id}`);
+      if (probe.colorTransfer && HDR_TRANSFERS.has(probe.colorTransfer)) {
+        result.warnings.push(`${name} is HDR (${probe.colorTransfer}); colours will look washed out — export it as SDR (e.g. Photos → Export → "Most Compatible")`);
+      }
 
       await rm(framesDir, { recursive: true, force: true });
       await mkdir(framesDir, { recursive: true });
@@ -97,20 +126,10 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
         .sort()
         .map((f, i) => ({ t: i * interval, file: `frames/${id}/${f}` }));
 
-      let transcript: Transcript | null = null;
-      if (probe.hasAudio && probe.durationSec <= MAX_TRANSCRIBE_SEC) {
-        const wav = join(project, `.tmp-${id}.wav`);
-        try {
-          await o.tools.extractWav(path, wav);
-          transcript = await o.tools.transcribe(wav, { locale: o.locale });
-        } catch {
-          transcript = null;
-          o.onStep?.(`${name}: transcription failed, kept as silent footage`);
-        } finally {
-          await rm(wav, { force: true }).catch(() => {});
-        }
-        if (transcript && transcript.words.length === 0) transcript = null;
-      }
+      // null = no audio, or transcription failed (retried on the next ingest); no words = transcribed, nothing said.
+      const transcript = probe.hasAudio
+        ? await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${id}.wav`), durationSec: probe.durationSec, locale: o.locale, result, onStep: o.onStep })
+        : null;
 
       const clip: Clip = { id, path, sha256, probe, kind: guessKind(probe, transcript), transcript, frames, notes: '', moments: [] };
       catalog.clips.push(clip);

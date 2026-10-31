@@ -17,7 +17,7 @@ const CLIPS = mkdtempSync(join(tmpdir(), 'we-unit-clips-'));
 for (const id of ['c001', 'c002']) writeFileSync(join(CLIPS, `${id}.mp4`), '');
 const clipOf = (id: string, dur: number, hasAudio: boolean) => ({
   id, path: join(CLIPS, `${id}.mp4`), sha256: 'a'.repeat(64),
-  probe: { durationSec: dur, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio, videoCodec: 'h264', audioCodec: hasAudio ? 'aac' : null },
+  probe: { durationSec: dur, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio, videoCodec: 'h264', audioCodec: hasAudio ? 'aac' : null, colorTransfer: null },
   kind: 'screen' as const, transcript: null, frames: [], notes: '', moments: [],
 });
 const cat: Catalog = { version: 1, clips: [clipOf('c001', 10, true), clipOf('c002', 600, false)] };

@@ -5,7 +5,7 @@ import { computeSlots, mergeSlots } from './slots.js';
 const catalog: Catalog = {
   version: 1,
   clips: [
-    { id: 'c001', path: '/t.mov', sha256: 'a'.repeat(64), probe: { durationSec: 30, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac' }, kind: 'talking', transcript: { words: [{ w: 'Hi', start: 0.5, end: 1 }, { w: 'there.', start: 1.1, end: 2.5 }].map((w) => ({ ...w, conf: 1 })), segments: [], speech: [] }, frames: [], notes: '', moments: [] },
+    { id: 'c001', path: '/t.mov', sha256: 'a'.repeat(64), probe: { durationSec: 30, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac', colorTransfer: null }, kind: 'talking', transcript: { words: [{ w: 'Hi', start: 0.5, end: 1 }, { w: 'there.', start: 1.1, end: 2.5 }].map((w) => ({ ...w, conf: 1 })), segments: [], speech: [] }, frames: [], notes: '', moments: [] },
   ],
 };
 const ep = EpisodeSchema.parse({

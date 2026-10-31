@@ -7,7 +7,7 @@ const tx = (words: Word[]): Transcript => ({ words, segments: [], speech: [] });
 const catalog: Catalog = {
   version: 1,
   clips: [
-    { id: 'c001', path: '/t.mov', sha256: 'a'.repeat(64), probe: { durationSec: 10, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac' }, kind: 'talking', transcript: tx([w('Hello', 1, 1.4), w('um', 1.5, 1.8), w('world.', 2, 2.5), w('later', 6, 6.5)]), frames: [], notes: '', moments: [] },
+    { id: 'c001', path: '/t.mov', sha256: 'a'.repeat(64), probe: { durationSec: 10, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac', colorTransfer: null }, kind: 'talking', transcript: tx([w('Hello', 1, 1.4), w('um', 1.5, 1.8), w('world.', 2, 2.5), w('later', 6, 6.5)]), frames: [], notes: '', moments: [] },
   ],
 };
 const ep = EpisodeSchema.parse({

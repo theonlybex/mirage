@@ -9,7 +9,7 @@ function said(text: string, t0: number, per = 0.3): Word[] {
 const tx = (words: Word[]): Transcript => ({ words, segments: [], speech: [] });
 const catalog = (dur: number): Catalog => ({
   version: 1,
-  clips: [{ id: 'c001', path: '/s.mp4', sha256: 'a'.repeat(64), probe: { durationSec: dur, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: false, videoCodec: 'h264', audioCodec: null }, kind: 'screen', transcript: null, frames: [], notes: '', moments: [] }],
+  clips: [{ id: 'c001', path: '/s.mp4', sha256: 'a'.repeat(64), probe: { durationSec: dur, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: false, videoCodec: 'h264', audioCodec: null, colorTransfer: null }, kind: 'screen', transcript: null, frames: [], notes: '', moments: [] }],
 });
 const episode = (slots: object[]) =>
   EpisodeSchema.parse({
