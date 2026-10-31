@@ -29,7 +29,7 @@ export const TimelineItemSchema = z
     onBeat: z.boolean().default(false),
   })
   .superRefine((it, ctx) => {
-    if (it.src.out <= it.src.in) ctx.addIssue({ code: 'custom', message: `item ${it.id}: src.out must be greater than src.in` });
+    if (it.src.out <= it.src.in) ctx.addIssue({ code: 'custom', path: ['src'], message: `item ${it.id}: src.out must be greater than src.in` });
   });
 export type TimelineItem = z.infer<typeof TimelineItemSchema>;
 

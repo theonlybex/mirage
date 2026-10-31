@@ -30,7 +30,7 @@ export async function sha256File(path: string): Promise<string> {
 
 export async function loadCatalog(project: string): Promise<Catalog> {
   try {
-    return await readJsonFile(join(resolve(project), 'catalog.json'), CatalogSchema);
+    return await readJsonFile(join(resolve(project), 'catalog.json'), CatalogSchema, 'catalog.json');
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, clips: [] };
     throw e;

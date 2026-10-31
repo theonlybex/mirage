@@ -7,7 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips } from './ingest.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
-import { buildVoiceTrack, episodeFinalArgs, itemChunkArgs, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
@@ -172,4 +172,17 @@ describe('renderEpisode (real ffmpeg)', () => {
     await expect(renderEpisode({ project, episode: 2, mode: 'final', tools })).rejects.toMatchObject({ code: 'NO_EPISODE', message: expect.stringContaining('voiceover.transcript.json') });
     expect((await readdir(join(project, 'episodes', '2'))).filter((f) => f.startsWith('.work-') || f.includes('.partial-'))).toEqual([]);
   }, 60_000);
+});
+
+describe('loadEpisode errors', () => {
+  it('names episode.json, the item and the field when an item is invalid', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we-bad-ep-'));
+    await mkdir(join(project, 'episodes', '1'), { recursive: true });
+    const items = [0, 1, 2, 3].map((i) => ({ id: `i${i + 1}`, beat: 'problem', clip: 'c001', src: { in: i === 3 ? 2 : 0, out: 1 } }));
+    await writeFile(join(project, 'episodes', '1', 'episode.json'), JSON.stringify({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items }));
+    await expect(loadEpisode(project, 1)).rejects.toMatchObject({
+      message: 'episodes/1/episode.json: items[3].src: item i4: src.out must be greater than src.in',
+      hint: 'Fix that field and run the command again.',
+    });
+  });
 });

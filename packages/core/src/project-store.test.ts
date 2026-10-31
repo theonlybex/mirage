@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EdlSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { createProject, loadEdl, openProject, saveEdl, slugify, writeJsonFile } from './project-store.js';
+import { createProject, JsonFileError, loadEdl, openProject, readJsonFile, saveEdl, slugify, writeJsonFile } from './project-store.js';
 
 const edl = EdlSchema.parse({
   version: 1,
@@ -76,5 +76,24 @@ describe('writeJsonFile', () => {
     expect(files.some((f) => f.includes('.tmp-'))).toBe(false);
     expect(files).toContain('edl.json');
     expect(JSON.parse(await readFile(target, 'utf8')).version).toBe(1);
+  });
+});
+
+describe('readJsonFile errors', () => {
+  it('names the file, the field and the problem for a schema error', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'we-'));
+    const p = join(root, 'edl.json');
+    await writeFile(p, JSON.stringify({ ...edl, scenes: [{ id: 's1', src: { in: 0, out: -1 } }] }));
+    const err = await readJsonFile(p, EdlSchema, 'edl.json').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(JsonFileError);
+    expect(err).toMatchObject({ file: 'edl.json', hint: 'Fix that field and run the command again.' });
+    expect((err as Error).message).toMatch(/^edl\.json: scenes\[0\]\.src\.out: /);
+  });
+  it('names the file for invalid JSON, and keeps ENOENT as it is', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'we-'));
+    const p = join(root, 'x.json');
+    await writeFile(p, '{ "version": 1, ');
+    await expect(readJsonFile(p, EdlSchema)).rejects.toMatchObject({ name: 'JsonFileError', file: p, message: expect.stringContaining(`${p}: `) });
+    await expect(readJsonFile(join(root, 'nope.json'), EdlSchema)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

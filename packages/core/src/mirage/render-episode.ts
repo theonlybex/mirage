@@ -178,7 +178,7 @@ export const episodeDir = (project: string, n: number) => join(resolve(project),
 
 export async function loadEpisode(project: string, n: number): Promise<Episode> {
   try {
-    return await readJsonFile(join(episodeDir(project, n), 'episode.json'), EpisodeSchema);
+    return await readJsonFile(join(episodeDir(project, n), 'episode.json'), EpisodeSchema, `episodes/${n}/episode.json`);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new MirageError('NO_EPISODE', `episodes/${n}/episode.json does not exist`, 'Ask Claude to write the episode timeline first.');
@@ -197,7 +197,7 @@ export type EpisodeMode = 'rough' | 'guide' | 'final';
 
 async function loadVoiceoverTranscript(dir: string, n: number): Promise<Transcript> {
   try {
-    return await readJsonFile(join(dir, 'voiceover.transcript.json'), TranscriptSchema);
+    return await readJsonFile(join(dir, 'voiceover.transcript.json'), TranscriptSchema, `episodes/${n}/voiceover.transcript.json`);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new MirageError('NO_EPISODE', `episodes/${n}/voiceover.transcript.json is missing`, `Run: pnpm mirage vo <project> ${n} <recording>`);

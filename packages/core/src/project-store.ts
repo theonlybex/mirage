@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { EdlSchema, ProjectSchema, type Edl, type Project } from '@wordedits/shared';
-import type { ZodType } from 'zod';
+import { ZodError, type ZodType } from 'zod';
 
 export interface ProjectHandle {
   dir: string;
@@ -19,8 +19,39 @@ export function slugify(title: string): string {
   return s || 'untitled';
 }
 
-export async function readJsonFile<T>(path: string, schema: ZodType<T>): Promise<T> {
-  return schema.parse(JSON.parse(await readFile(path, 'utf8')));
+/** A project file that is not valid JSON or does not match its schema. `file` is the name shown to the user. */
+export class JsonFileError extends Error {
+  override name = 'JsonFileError';
+  hint = 'Fix that field and run the command again.';
+  constructor(
+    public file: string,
+    message: string,
+  ) {
+    super(`${file}: ${message}`);
+  }
+}
+
+function issuePath(path: PropertyKey[]): string {
+  return path.reduce<string>((s, k) => (typeof k === 'number' ? `${s}[${k}]` : s ? `${s}.${String(k)}` : String(k)), '');
+}
+
+/** Reads and validates a JSON file. `display` names the file in errors (defaults to `path`); ENOENT is rethrown as is. */
+export async function readJsonFile<T>(path: string, schema: ZodType<T>, display: string = path): Promise<T> {
+  const text = await readFile(path, 'utf8');
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (e) {
+    throw new JsonFileError(display, `not valid JSON (${(e as Error).message})`);
+  }
+  try {
+    return schema.parse(raw);
+  } catch (e) {
+    if (!(e instanceof ZodError)) throw e;
+    const issue = e.issues[0];
+    const at = issuePath(issue.path);
+    throw new JsonFileError(display, `${at ? `${at}: ` : ''}${issue.message}`);
+  }
 }
 
 export async function writeJsonFile<T>(path: string, schema: ZodType<T>, value: T): Promise<void> {

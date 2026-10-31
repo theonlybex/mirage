@@ -14,7 +14,7 @@ const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 export async function loadLibrary(dir: string): Promise<MusicLibrary> {
   try {
-    return await readJsonFile(join(resolve(dir), 'library.json'), MusicLibrarySchema);
+    return await readJsonFile(join(resolve(dir), 'library.json'), MusicLibrarySchema, 'music/library.json');
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, tracks: [] };
     throw e;
