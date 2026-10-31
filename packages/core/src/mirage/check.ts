@@ -74,7 +74,7 @@ export async function checkEpisode(project: string, n: number): Promise<{ episod
   if (ep.voiceover) {
     if (ep.items.some((i) => i.onBeat) || ep.music.length) notes.push('Montages were not snapped to the beat: the voice-over is fitted to this cut.');
   } else if (lib) {
-    const snapped = dropCollapsed(snapToBeats(ep, catalog, lib));
+    const snapped = dropCollapsed(snapToBeats(ep, catalog, lib), ep);
     ep = snapped.episode;
     for (const d of snapped.dropped) warnings.push(`${d} was inside time that beat snapping removed, so it was dropped — place it again on the times above`);
   }

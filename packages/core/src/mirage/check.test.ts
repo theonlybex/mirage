@@ -65,6 +65,18 @@ describe('checkEpisode', () => {
     expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
   });
 
+  it('leaves alone an overlay written shorter than one frame that beat snapping never touched', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base({
+      items: [{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.24 }, onBeat: true }, { id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 9 } }],
+      overlays: [{ kind: 'badge', text: 'LIVE', start: 3, end: 3.02 }],
+      music: [{ track: 'beat.wav', start: 0, end: 5 }],
+    }));
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual([]);
+    expect(r.episode.overlays.map((o) => o.text)).toEqual(['LIVE']);
+  });
+
   it('warns when an item keeps audio from a clip that has no transcript', async () => {
     const { dir } = await project(null);
     await saveEpisode(dir, base({ items: [{ id: 'talk', beat: 'problem', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }] }));

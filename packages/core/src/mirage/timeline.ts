@@ -66,18 +66,22 @@ export function shiftAfter(ep: Episode, at: number, delta: number): Episode {
   };
 }
 
-/** Removes overlays, music cues and slots left shorter than one frame (by shiftAfter closing a gap), naming each one removed. */
-export function dropCollapsed(ep: Episode): { episode: Episode; dropped: string[] } {
+/**
+ * Removes overlays, music cues and slots that closing a gap (shiftAfter) left shorter than one frame, naming each one
+ * removed. `before` is the episode before the shifts (same lists, same order): a range already that short there was
+ * written so and is kept.
+ */
+export function dropCollapsed(ep: Episode, before: Episode): { episode: Episode; dropped: string[] } {
   const min = 1 / ep.output.fps - EPS;
   const dropped: string[] = [];
-  const keep = <T extends { start: number; end: number }>(list: T[], name: (x: T, i: number) => string) =>
+  const keep = <T extends { start: number; end: number }>(list: T[], was: T[], name: (x: T, i: number) => string) =>
     list.filter((x, i) => {
-      if (x.end - x.start >= min) return true;
+      if (x.end - x.start >= min || !was[i] || was[i].end - was[i].start < min) return true;
       dropped.push(name(x, i));
       return false;
     });
-  const overlays = keep(ep.overlays, (o, i) => `overlay ${i + 1} ("${o.text}")`);
-  const music = keep(ep.music, (c, i) => `music cue ${i + 1} (${c.track})`);
-  const slots = keep(ep.slots, (s) => `slot ${s.id}${s.line.trim() ? ` (line "${s.line}")` : ''}`);
+  const overlays = keep(ep.overlays, before.overlays, (o, i) => `overlay ${i + 1} ("${o.text}")`);
+  const music = keep(ep.music, before.music, (c, i) => `music cue ${i + 1} (${c.track})`);
+  const slots = keep(ep.slots, before.slots, (s) => `slot ${s.id}${s.line.trim() ? ` (line "${s.line}")` : ''}`);
   return dropped.length ? { episode: { ...ep, overlays, music, slots }, dropped } : { episode: ep, dropped };
 }

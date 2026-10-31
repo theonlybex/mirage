@@ -58,12 +58,18 @@ describe('dropCollapsed', () => {
       music: [{ track: 'drive.mp3', start: 2, end: 2, gainDb: -5, fadeIn: 0, fadeOut: 0, offset: 0 }],
       slots: [{ id: 'n1', start: 3, end: 3.01, maxWords: 0, line: 'Gone.' }],
     };
-    const r = dropCollapsed(collapsed);
+    const before = { ...collapsed, overlays: [{ ...collapsed.overlays[0], end: 2 }, ep.overlays[1]], music: [{ ...collapsed.music[0], end: 4 }], slots: [{ ...collapsed.slots[0], end: 4 }] };
+    const r = dropCollapsed(collapsed, before);
     expect(r.episode.overlays).toEqual([ep.overlays[1]]);
     expect(r.episode.music).toEqual([]);
     expect(r.episode.slots).toEqual([]);
     expect(r.dropped).toEqual(['overlay 1 ("FAILED")', 'music cue 1 (drive.mp3)', 'slot n1 (line "Gone.")']);
-    expect(dropCollapsed(ep)).toEqual({ episode: ep, dropped: [] });
+    expect(dropCollapsed(ep, ep)).toEqual({ episode: ep, dropped: [] });
+  });
+
+  it('leaves a range that was already shorter than one frame before snapping alone', () => {
+    const short = { ...ep, overlays: [{ ...ep.overlays[0], text: 'LIVE', start: 4, end: 4.02 }, ep.overlays[1]] };
+    expect(dropCollapsed(short, short)).toEqual({ episode: short, dropped: [] });
   });
 });
 
