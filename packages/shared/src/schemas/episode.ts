@@ -101,8 +101,14 @@ export const EpisodeSchema = strictObject({
     fittedItemsFingerprint: z.string().optional(),
     /** The items before the fit held the picture: a full re-fit starts from them again. */
     baseItems: z.array(TimelineItemSchema).optional(),
-    /** Time the fits opened (output time `at`, `sec` seconds), in order, so a full re-fit can close it again. */
-    holds: z.array(strictObject({ at: z.number(), sec: z.number() })).optional(),
+    /**
+     * Time the fits opened (output time `at`, `sec` seconds), in order, so a full re-fit can close it again; and what each
+     * did to its item (`hold` seconds of frozen frame added, source extended to `out` by `outAdded`, `split` = the id of the
+     * second half it created), so a full re-fit after a re-cut can undo whatever of it is still there.
+     */
+    holds: z
+      .array(strictObject({ at: z.number(), sec: z.number(), item: z.string().optional(), hold: z.number().optional(), out: z.number().optional(), outAdded: z.number().optional(), split: z.string().optional() }))
+      .optional(),
   })
     .nullable()
     .default(null),

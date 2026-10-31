@@ -376,13 +376,30 @@ describe('fitVoiceover from the cut before the voice-over', () => {
     expect(refit.report.extendedSec).toBeCloseTo(first.report.extendedSec, 6);
   });
 
-  it('a full fit after a re-cut starts from the cut as it is now', () => {
+  it('after a re-cut, a full fit still undoes the freezes and splits earlier fits added (re-cut → slots → vo)', () => {
     const first = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
-    const recut = { ...first.episode, items: [{ ...first.episode.items[0], src: { in: 0, out: 19 } }] };
-    const ep = { ...recut, slotsCut: cutOf(recut) };
-    const refit = fitVoiceover({ episode: ep, catalog: catalog(20), recording: 'short.m4a', transcript: short });
-    expect(refit.episode.items).toEqual(recut.items);
-    expect(refit.episode.voiceover!.cutFingerprint).toBe(itemsFingerprint(recut.items));
+    expect(first.episode.items.map((i) => i.id)).toEqual(['a', 'a-b']); // n2 ends inside a: split and frozen
+    const tail = { id: 'c', beat: 'outro' as const, clip: 'c001', src: { in: 0, out: 2 }, speed: 1, audio: 'mute' as const, zoom: 1, hold: 0, quiet: false, onBeat: false };
+    const recut = { ...first.episode, items: [...first.episode.items, tail] };
+    const refit = fitVoiceover({ episode: { ...recut, slotsCut: cutOf(recut) }, catalog: catalog(20), recording: 'short.m4a', transcript: short });
+    expect(refit.report.extendedSec).toBe(0);
+    expect(refit.episode.items).toEqual([episode(SLOTS).items[0], tail]);
+    expect(refit.episode.overlays).toEqual(episode(SLOTS).overlays);
+    expect(refit.episode.voiceover!.cutFingerprint).toBe(itemsFingerprint(refit.episode.items));
+  });
+
+  it('after a re-cut, keeps a hold the user wrote and undoes only what the fit added to it', () => {
+    const LONG = 'This one is a much longer line than the slot can hold.';
+    const items = [
+      { id: 'a', beat: 'problem', clip: 'c001', src: { in: 15, out: 20 }, hold: 1 },
+      { id: 'b', beat: 'problem', clip: 'c001', src: { in: 0, out: 10 } },
+    ];
+    const ep0 = EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items, slots: [{ id: 'n1', start: 1, end: 6, maxWords: 8, line: LONG }] });
+    const first = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: tx(said(LONG, 0, 0.55)) });
+    expect(first.episode.items[0].hold).toBeGreaterThan(2);
+    const recut = { ...first.episode, items: [first.episode.items[0], { ...first.episode.items[1], src: { in: 0, out: 9 } }] };
+    const refit = fitVoiceover({ episode: { ...recut, slotsCut: cutOf(recut) }, catalog: catalog(20), recording: 'short.m4a', transcript: tx(said(LONG, 0, 0.3)) });
+    expect(refit.episode.items.map((i) => [i.id, i.src.in, i.src.out, i.hold])).toEqual([['a', 15, 20, 1], ['b', 0, 9, 0]]);
   });
 });
 

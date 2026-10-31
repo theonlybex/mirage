@@ -101,7 +101,9 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
 }
 
 /** holdAt, also saying where the time opened and by how much everything after it moved (so it can be closed again). */
-function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { episode: Episode; at: number; shift: number } {
+type Hold = NonNullable<NonNullable<Episode['voiceover']>['holds']>[number];
+
+function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { episode: Episode; hold: Hold } {
   const fps = ep.output.fps;
   const laid = layoutTimeline(ep);
   const l = laid.find((x) => t > x.start + 1e-9 && t <= x.end + 1e-9) ?? laid[laid.length - 1];
@@ -119,7 +121,8 @@ function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { epis
     const next = checkHold({ ...item, src: { in: item.src.in, out: r6(item.src.out + useSource * item.speed) }, hold: r6(item.hold + (delta - useSource)) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    return { episode: { ...shiftAfter(ep, l.end, grown), items }, at: l.end, shift: grown };
+    const source = useSource > 0 ? { out: next.src.out, outAdded: r6(next.src.out - item.src.out) } : {};
+    return { episode: { ...shiftAfter(ep, l.end, grown), items }, hold: { at: r6(l.end), sec: r6(grown), item: item.id, hold: r6(next.hold - item.hold), ...source } };
   }
 
   if (t >= srcEnd - 1e-9 || splitFrames >= l.srcFrames) {
@@ -127,7 +130,7 @@ function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { epis
     const next = checkHold({ ...item, hold: r6(item.hold + delta) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    return { episode: { ...shiftAfter(ep, t, grown), items }, at: t, shift: grown };
+    return { episode: { ...shiftAfter(ep, t, grown), items }, hold: { at: r6(t), sec: r6(grown), item: item.id, hold: r6(delta) } };
   }
 
   const splitSrc = r6(item.src.in + (splitFrames / fps) * item.speed);
@@ -138,7 +141,43 @@ function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { epis
   const second = { ...item, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
   const at = l.start + splitFrames / fps;
-  return { episode: { ...shiftAfter(ep, at, delta), items }, at, shift: delta };
+  return { episode: { ...shiftAfter(ep, at, delta), items }, hold: { at: r6(at), sec: r6(delta), item: item.id, hold: first.hold, split: second.id } };
+}
+
+/**
+ * After a re-cut, undoes what earlier fits did to items that are still there (newest first): the frozen frames they
+ * added (never more than the item still has, so a hold the user wrote stays), source they added (when the item still
+ * ends where the fit left it), and splits (merged back when both halves are still side by side and unchanged at the
+ * seam). The time removed closes at the item's end, moving everything after it back.
+ */
+export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[] } {
+  const fps = ep.output.fps;
+  let out: Episode = ep;
+  for (const h of [...(ep.voiceover?.holds ?? [])].reverse()) {
+    const i = out.items.findIndex((x) => x.id === h.item);
+    if (i < 0) continue;
+    const laid = layoutTimeline(out);
+    const item = out.items[i];
+    let next = { ...item, hold: r6(Math.max(0, item.hold - (h.hold ?? 0))) };
+    if (h.outAdded && h.out !== undefined && Math.abs(item.src.out - h.out) < 1e-6 && item.src.out - h.outAdded > item.src.in) {
+      next = { ...next, src: { in: item.src.in, out: r6(item.src.out - h.outAdded) } };
+    }
+    const items = [...out.items];
+    // The frozen frame (and added source) sit at the end of this item, also when it was the first half of a split.
+    const end = laid[i].end;
+    let frames = laid[i].frames;
+    const b = out.items[i + 1];
+    const same = (k: 'clip' | 'speed' | 'audio' | 'zoom' | 'quiet' | 'onBeat' | 'beat') => b !== undefined && b[k] === item[k];
+    if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && (['clip', 'speed', 'audio', 'zoom', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
+      next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold };
+      items.splice(i + 1, 1);
+      frames += laid[i + 1].frames;
+    }
+    items[i] = next;
+    const removed = (frames - itemFrames(next, fps).frames) / fps;
+    out = { ...(removed > 1e-9 ? shiftAfter(out, end, -removed) : out), items };
+  }
+  return dropCollapsed(out, ep);
 }
 
 /**
@@ -216,12 +255,12 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   // Slots of another cut would put the lines over the wrong picture (or past the end).
   if (slotsStale(o.episode)) throw slotsStaleError(o.episode.number);
   const report: FitReport = { lines: [], extendedSec: 0, warnings: [] };
-  // A full fit starts from the cut before the voice-over, so holds never pile up across re-fits. After a re-cut the
-  // cut as it is now is the starting point (its slots were computed for it).
+  // A full fit starts from the cut before the voice-over, so holds never pile up across re-fits. After a re-cut (its
+  // slots were computed for the cut as it is now) it undoes what earlier fits did to the items still there.
   let start = o.episode;
-  if (!o.only && !cutChanged(o.episode)) {
-    const reverted = revertHolds(o.episode);
-    start = reverted.episode;
+  if (!o.only) {
+    const reverted = cutChanged(o.episode) ? undoFitEdits(o.episode) : revertHolds(o.episode);
+    start = { ...reverted.episode, voiceover: null };
     for (const d of reverted.dropped) report.warnings.push(`${d} was inside a frozen frame the earlier fit added, so it was dropped — place it again`);
   }
   const allWritten = start.slots.filter((s) => hasWords(s.line)).sort((a, b) => a.start - b.start);
@@ -343,7 +382,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       const held = withoutOld(opened.episode);
       const grown = timelineDuration(held) - before;
       // The narration stretch really grew; keep the slot in step so a re-fit finds no overrun left.
-      const holds = [...(held.voiceover!.holds ?? []), { at: r6(opened.at), sec: r6(opened.shift) }];
+      const holds = [...(held.voiceover!.holds ?? []), opened.hold];
       ep = { ...held, slots: held.slots.map((x) => (x.id === slot.id ? { ...x, end: r6(slot.end + grown) } : x)), voiceover: { ...held.voiceover!, holds } };
       report.extendedSec = r6(report.extendedSec + grown);
     } else {
