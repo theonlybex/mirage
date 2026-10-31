@@ -1,3 +1,6 @@
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import { describeError, MirageError } from './errors.js';
@@ -16,6 +19,19 @@ describe('describeError', () => {
     expect(describeError(errno('EACCES', 'mkdir', '/p/episodes/1/.work-1')).message).toBe("can't write in /p/episodes/1: permission denied");
     expect(describeError(errno('EROFS', 'open', '/Volumes/ro/x')).message).toBe("can't write in /Volumes/ro: the disk is read-only");
     expect(describeError(errno('EACCES', 'scandir', '/clips')).message).toBe("can't read /clips: permission denied");
+  });
+
+  it('says which file cannot be read when opening an existing file fails', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-perm-'));
+    const file = join(dir, 'catalog.json');
+    await writeFile(file, '{}');
+    await chmod(file, 0o000);
+    try {
+      const e = await readFile(file, 'utf8').catch((x: unknown) => x);
+      expect(describeError(e)).toMatchObject({ message: `can't read ${file}: permission denied`, hint: expect.stringContaining('readable') });
+    } finally {
+      await chmod(file, 0o644);
+    }
   });
 
   it('keeps the message and hint of errors that have one', () => {

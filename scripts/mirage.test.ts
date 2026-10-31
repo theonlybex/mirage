@@ -110,4 +110,18 @@ describe('pnpm mirage errors', () => {
       await chmod(epDir, 0o755);
     }
   });
+
+  it('says which file cannot be read', async () => {
+    const dir = await project();
+    const cat = join(dir, 'catalog.json');
+    await writeFile(cat, JSON.stringify({ version: 1, clips: [] }));
+    await chmod(cat, 0o000);
+    try {
+      const r = await mirage(['check', dir, '1']);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`✖ can't read ${cat}: permission denied`);
+    } finally {
+      await chmod(cat, 0o644);
+    }
+  });
 });
