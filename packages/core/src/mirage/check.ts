@@ -2,6 +2,7 @@ import { join, resolve } from 'node:path';
 import type { Episode, MusicLibrary } from '@wordedits/shared';
 import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
+import { undrawable } from './overlays.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { dropCollapsed, layoutTimeline, timelineDuration } from './timeline.js';
 import { cutChanged, cutChangedError } from './voiceover.js';
@@ -17,6 +18,7 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
   const D = timelineDuration(ep);
   ep.overlays.forEach((o, i) => {
     if (o.start >= D - 1e-6) out.push(`overlay ${i + 1} ("${o.text}") starts at ${s2(o.start)} s, after the episode ends (${s2(D)} s) — it will never show`);
+    if (undrawable(o.text)) out.push(`overlay ${i + 1} ("${o.text}") has emoji, which can't be drawn — they are left out`);
   });
   ep.music.forEach((c, i) => {
     if (c.start >= D - 1e-6) out.push(`music cue ${i + 1} (${c.track}) starts at ${s2(c.start)} s, after the episode ends (${s2(D)} s) — it will never play`);

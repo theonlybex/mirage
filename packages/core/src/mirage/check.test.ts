@@ -125,7 +125,7 @@ describe('checkEpisode', () => {
         { id: 'b', beat: 'montage', clip: 'c001', src: { in: 2, out: 3 }, onBeat: true },
         { id: 'c', beat: 'montage', clip: 'c001', src: { in: 5, out: 15 }, onBeat: true },
       ],
-      overlays: [{ kind: 'badge', text: 'LATE', start: 20, end: 22 }],
+      overlays: [{ kind: 'badge', text: 'LATE', start: 20, end: 22 }, { kind: 'label', text: 'Shipped 🚀', start: 1, end: 2 }],
       music: [
         { track: 'beat.wav', start: 0, end: 1.5, gainDb: -18 },
         { track: 'pad.wav', start: 1.5, end: 2.5, offset: 7.5 },
@@ -135,6 +135,7 @@ describe('checkEpisode', () => {
     const r = await checkEpisode(dir, 1);
     expect(r.warnings).toEqual([
       'overlay 1 ("LATE") starts at 20.00 s, after the episode ends (12.50 s) — it will never show',
+      'overlay 2 ("Shipped 🚀") has emoji, which can\'t be drawn — they are left out',
       'music cue 3 (beat.wav) starts at 30.00 s, after the episode ends (12.50 s) — it will never play',
       'item b is onBeat but pad.wav has no clear beat — left unsnapped',
       'item c is onBeat but no music plays under it — left unsnapped',

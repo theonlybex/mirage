@@ -371,7 +371,9 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
     await o.tools.runFfmpeg(
       episodeFinalArgs({
         chunkList: 'chunks.txt', output: partial, encoder, mode: final ? 'final' : 'preview', width: W, height: H, fps, durationSec: D,
-        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir: process.platform === 'darwin' ? '/System/Library/Fonts' : undefined, musicWav, voiceRaw,
+        // No fontsdir: libass would load every font in it into memory (about 1 GB for /System/Library/Fonts), and it
+        // finds system fonts and fallbacks itself; buildAss names a font for the scripts whose fallback it can't open.
+        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', musicWav, voiceRaw,
         liveAudio: laid.some((l) => l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), onProgress: (f) => report(0.7 + 0.3 * f) },

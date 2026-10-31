@@ -1,6 +1,10 @@
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
+import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
-import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
+import { buildAss, groupCaptions, keptSegments, speechWords, toSrt, undrawable } from './overlays.js';
 
 const w = (text: string, start: number, end: number): Word => ({ w: text, start, end, conf: 1 });
 const tx = (words: Word[]): Transcript => ({ words, segments: [], speech: [] });
@@ -139,4 +143,41 @@ describe('speechWords with several recordings', () => {
     const map = new Map([['vo.m4a', tx([w('First.', 0.1, 0.5)])], ['n2.m4a', tx([w('Second.', 0.2, 0.6)])]]);
     expect(speechWords(e, catalog, map).map((x) => [x.w, x.start])).toEqual([['First.', 0.1], ['Second.', 2.2]]);
   });
+});
+
+describe('buildAss text the fonts can draw', () => {
+  const one = (text: string, o: { font?: string; cjkFont?: string | null } = {}, kind: 'label' | 'counter' = 'label') =>
+    buildAss({ width: 640, height: 360, captions: [], overlays: [{ kind, text, start: 0, end: 2, tone: 'neutral' }], prompts: [], ...o });
+  const dialogue = (ass: string) => ass.split('\n').find((l) => l.startsWith('Dialogue:'))!;
+
+  it('leaves emoji out of overlay text, as captions do', () => {
+    expect(dialogue(one('Shipped 🚀 it ✅', { cjkFont: null }))).toMatch(/,\{\\fad\(150,150\)\}Shipped it$/);
+  });
+
+  it('sets CJK runs in a font that has them', () => {
+    expect(dialogue(one('Day 3 漢字かな done', { cjkFont: 'Hiragino Sans GB' }))).toMatch(/Day 3 \{\\fnHiragino Sans GB\}漢字かな\{\\fn\} done$/);
+    expect(dialogue(one('Day 3 漢字', { cjkFont: null }))).toMatch(/Day 3 漢字$/);
+  });
+
+  it('names overlay text that has characters which cannot be drawn', () => {
+    expect(undrawable('Ship it 🚀')).toBe(true);
+    expect(undrawable('漢字 עברית')).toBe(false);
+  });
+
+  it.runIf(process.platform === 'darwin')('draws Han characters on macOS instead of empty boxes (real frame)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-ass-'));
+    const frame = async (name: string, ass: string) => {
+      await writeFile(join(dir, `${name}.ass`), ass);
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=gray:s=640x360:d=1', '-vf', `ass=${name}.ass,format=gray`, '-frames:v', '1', '-f', 'rawvideo', `${name}.gray`], { cwd: dir });
+      return readFile(join(dir, `${name}.gray`));
+    };
+    const diff = (a: Buffer, b: Buffer) => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0) / a.length;
+    // A counter has no fade-in, so it is fully drawn on the first frame.
+    const drawn = await frame('drawn', one('漢字', {}, 'counter'));
+    // The same text set in the CJK font throughout is the reference; the style font alone shows boxes.
+    const reference = await frame('reference', one('漢字', { font: 'Hiragino Sans GB', cjkFont: null }, 'counter'));
+    const boxes = await frame('boxes', one('漢字', { cjkFont: null }, 'counter'));
+    expect(diff(drawn, reference)).toBeLessThan(0.01);
+    expect(diff(boxes, reference)).toBeGreaterThan(0.05);
+  }, 60_000);
 });

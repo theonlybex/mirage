@@ -120,6 +120,10 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
 
 const SENTENCE_END = /[.?!]["'”’)\]]*$/;
 const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
+/** libass draws no emoji (colour glyphs): they come out as empty boxes, so captions and overlays leave them out. */
+export const undrawable = (text: string) => new RegExp(EMOJI.source, 'u').test(text);
+/** Runs of Chinese/Japanese text. macOS's fallback for Han is a font libass can't open, so they get an explicit one. */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]+/gu;
 const tidy = (t: string) => t.replace(EMOJI, '').replace(/\s+([.,!?;:])/g, '$1').trim();
 
 export function groupCaptions(words: Word[], o: { durationSec: number; maxChars?: number; maxGap?: number; lead?: number; minDur?: number }): Cue[] {
@@ -174,6 +178,10 @@ function assTime(sec: number): string {
 
 const assText = (t: string) => t.replace(/\\/g, '/').replace(/\{/g, '(').replace(/\}/g, ')').replace(/\r?\n/g, '\\N');
 
+function defaultCjkFont(): string | null {
+  return process.platform === 'darwin' ? 'Hiragino Sans GB' : null;
+}
+
 function defaultFont(): string {
   if (process.platform === 'darwin') return 'Helvetica Neue';
   if (process.platform === 'win32') return 'Segoe UI';
@@ -185,7 +193,13 @@ const WHITE = '&H00FFFFFF';
 const BLACK = '&H00000000';
 const BOX = '&H4D000000';
 
-export function buildAss(o: { width: number; height: number; font?: string; captions: Cue[]; overlays: Overlay[]; prompts: Slot[] }): string {
+export function buildAss(o: { width: number; height: number; font?: string; cjkFont?: string | null; captions: Cue[]; overlays: Overlay[]; prompts: Slot[] }): string {
+  const cjk = o.cjkFont === undefined ? defaultCjkFont() : o.cjkFont;
+  // Emoji left out; CJK runs switch to a font that has them and back to the style's font (\fn alone).
+  const draw = (t: string) => {
+    const s = assText(t.replace(EMOJI, '').replace(/ {2,}/g, ' ').trim());
+    return cjk ? s.replace(CJK, (run) => `{\\fn${cjk}}${run}{\\fn}`) : s;
+  };
   const k = Math.min(o.width, o.height) / 1080;
   const px = (n: number) => Math.max(1, Math.round(n * k));
   const font = o.font ?? defaultFont();
@@ -214,9 +228,9 @@ export function buildAss(o: { width: number; height: number; font?: string; capt
   const ev = (layer: number, start: number, end: number, style: string, text: string) =>
     events.push(`Dialogue: ${layer},${assTime(start)},${assTime(end)},${style},,0,0,0,,${text}`);
 
-  for (const c of o.captions) ev(2, c.start, c.end, 'Caption', assText(c.text));
+  for (const c of o.captions) ev(2, c.start, c.end, 'Caption', draw(c.text));
   for (const ov of o.overlays) {
-    const text = assText(ov.text);
+    const text = draw(ov.text);
     switch (ov.kind) {
       case 'callout':
         ev(5, ov.start, ov.end, 'Callout', `{\\fad(120,200)\\t(0,150,\\fscx115\\fscy115)\\t(150,300,\\fscx100\\fscy100)}${text}`);
@@ -241,8 +255,8 @@ export function buildAss(o: { width: number; height: number; font?: string; capt
   }
   for (const p of o.prompts) {
     if (!p.line.trim()) continue;
-    ev(6, Math.max(0, p.start - 1.5), p.start, 'PromptNext', `Next: ${assText(p.line)}`);
-    ev(6, p.start, p.end, 'Prompt', assText(p.line));
+    ev(6, Math.max(0, p.start - 1.5), p.start, 'PromptNext', `Next: ${draw(p.line)}`);
+    ev(6, p.start, p.end, 'Prompt', draw(p.line));
   }
 
   return [
