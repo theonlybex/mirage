@@ -9,6 +9,7 @@ import { decodeMono, detectTempo } from './tempo.js';
 import { itemFrames, shiftAfter } from './timeline.js';
 
 export const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.wav', '.aif', '.aiff', '.flac', '.ogg']);
+const MIN_CONFIDENCE = 0.1;
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 export async function loadLibrary(dir: string): Promise<MusicLibrary> {
@@ -32,18 +33,24 @@ export async function analyzeLibrary(dir: string, tools: MediaTools): Promise<Mu
     const path = join(root, track.file);
     const p = await tools.probe(path).catch(() => null);
     if (!p?.hasAudio) throw new MirageError('NO_MUSIC_TRACK', `${track.file} is missing or has no audio`, 'Remove it from music/library.json or add the file.');
-    const tempo = detectTempo(await decodeMono(path, join(root, `.tmp-${randomUUID()}.f32`), tools, { sampleRate: 11025, maxSec: 90 }), 11025);
-    track.bpm = tempo.bpm;
-    track.beatOffset = tempo.beatOffset;
-    track.durationSec = p.durationSec;
+    if (track.bpm === null || track.beatOffset === null) {
+      const tempo = detectTempo(await decodeMono(path, join(root, `.tmp-${randomUUID()}.f32`), tools, { sampleRate: 11025, maxSec: 90 }), 11025);
+      // A weak or silent pulse is not a tempo: leave the grid unset so snapToBeats never snaps to an invented one.
+      if (tempo.confidence >= MIN_CONFIDENCE) {
+        track.bpm ??= tempo.bpm;
+        track.beatOffset ??= tempo.beatOffset;
+      }
+    }
+    track.durationSec ??= p.durationSec;
   }
   await writeJsonFile(join(root, 'library.json'), MusicLibrarySchema, lib);
   return lib;
 }
 
 /**
- * Starts each cue on a beat of its track, then gives every onBeat item a whole number of beats
- * of the cue playing under it (extending the source, or slowing it when the clip runs out).
+ * Starts each cue on a beat of its track, then ends every onBeat item on a beat of the cue playing under
+ * it (extending the source, or slowing it when the clip runs out). Item ends are snapped to the cue's
+ * beat grid, not given a rounded duration, so frame rounding never accumulates into drift.
  * Everything after a changed item shifts with it.
  */
 export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): Episode {
@@ -54,7 +61,7 @@ export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): E
       const t = track(c.track);
       if (!t?.bpm || t.beatOffset === null) return c;
       const beat = 60 / t.bpm;
-      const k = Math.max(0, Math.ceil((c.offset - t.beatOffset) / beat - 1e-9));
+      const k = Math.max(0, Math.ceil((c.offset - t.beatOffset) / beat - 1e-4));
       return { ...c, offset: r6(t.beatOffset + k * beat) };
     }),
   };
@@ -68,23 +75,31 @@ export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): E
     if (item.onBeat) {
       const cue = cur.music.find((c) => t >= c.start - 1e-6 && t < c.end);
       const tr = cue ? track(cue.track) : undefined;
-      if (tr?.bpm) {
+      if (cue && tr?.bpm) {
         const beat = 60 / tr.bpm;
-        const target = Math.max(1, Math.round(oldDur / beat)) * beat;
+        // Grid times are cue.start + k * beat (the offset step above puts a beat at the cue start).
+        const kEnd = Math.max(Math.floor((t - cue.start) / beat + 1e-6) + 1, Math.round((t + oldDur - cue.start) / beat));
+        const startFrame = Math.round(t * fps);
+        const frames = Math.max(1, Math.round((cue.start + kEnd * beat) * fps) - startFrame);
+        const target = frames / fps;
         const clipDur = catalog.clips.find((c) => c.id === item.clip)?.probe.durationSec ?? item.src.out;
+        const avail = clipDur - item.src.in;
         let srcLen = target * item.speed;
         let speed = item.speed;
-        if (item.src.in + srcLen > clipDur) {
-          srcLen = clipDur - item.src.in;
+        if (avail > 0 && srcLen > avail) {
+          srcLen = avail;
           speed = srcLen / target;
         }
-        const next = { ...item, speed: r6(speed), hold: 0, src: { in: item.src.in, out: r6(item.src.in + srcLen) } };
-        const newDur = itemFrames(next, fps).frames / fps;
-        const items = [...cur.items];
-        items[i] = next;
-        cur = { ...shiftAfter(cur, t + oldDur, newDur - oldDur), items };
-        t += newDur;
-        continue;
+        // No footage left, or slowing it down would go below the schema's minimum speed: leave the item alone.
+        if (avail > 0 && speed >= 0.25) {
+          const next = { ...item, speed: r6(speed), hold: 0, src: { in: item.src.in, out: r6(item.src.in + srcLen) } };
+          const newDur = itemFrames(next, fps).frames / fps;
+          const items = [...cur.items];
+          items[i] = next;
+          cur = { ...shiftAfter(cur, t + oldDur, newDur - oldDur), items };
+          t += newDur;
+          continue;
+        }
       }
     }
     t += oldDur;
