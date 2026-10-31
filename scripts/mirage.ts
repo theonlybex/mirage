@@ -130,7 +130,7 @@ async function main() {
       const n = episodeNumber();
       const ep = await loadEpisode(project, n);
       const slots = mergeSlots(ep.slots, computeSlots(ep, await loadCatalog(project)));
-      await saveEpisode(project, { ...ep, slots });
+      await saveEpisode(project, { ...ep, slots }, n);
       for (const s of slots) {
         const words = wordCount(s.line);
         const over = words > s.maxWords ? `  ⚠ over budget (${words} > ${s.maxWords} words)` : '';

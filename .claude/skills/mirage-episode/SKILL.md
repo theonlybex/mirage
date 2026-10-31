@@ -46,6 +46,7 @@ The schema is `packages/shared/src/schemas/episode.ts`. A minimal file:
 - `output`: 1920×1080 unless the user says otherwise; `fps` 30 or 60.
 - `items[].clip` is a catalog id (`c001`…); `src` is in that clip's own seconds. Item `id`s are yours (short, unique).
 - `overlays` and `music` are in output-timeline seconds; `track` is a file name in `music/`.
+- `number` must be the episode's folder number: when you start an episode from a copy of another's `episode.json`, set `number` to the new folder's number and remove `voiceover` (its transcripts stay in the old folder) — every command refuses a mismatch.
 
 Work in this order: write the items → `pnpm mirage check <project> <n>` (it prints each item's output start–end) → place overlays and music cues on those output times → `pnpm mirage cut <project> <n>`. `check` and `cut` rewrite `episode.json` (beat snapping shifts times), so re-read it before editing it again.
 

@@ -22,7 +22,7 @@ export async function checkEpisode(project: string, n: number): Promise<{ episod
   } else if (lib.tracks.length) {
     ep = snapToBeats(ep, catalog, lib);
   }
-  await saveEpisode(root, ep);
+  await saveEpisode(root, ep, n);
 
   if (cutChanged(ep)) {
     const e = cutChangedError();

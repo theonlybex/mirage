@@ -29,6 +29,16 @@ const base = (extra: object = {}) =>
   });
 
 describe('checkEpisode', () => {
+  it('refuses a copied episode whose number is another folder, leaving that episode untouched', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base());
+    const original = await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8');
+    await mkdir(join(dir, 'episodes', '3'), { recursive: true });
+    await writeFile(join(dir, 'episodes', '3', 'episode.json'), original.replace('"title": "t"', '"title": "copy"'));
+    await expect(checkEpisode(dir, 3)).rejects.toMatchObject({ message: 'episodes/3/episode.json says it is episode 1' });
+    expect(await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8')).toBe(original);
+  });
+
   it('snaps montages to the beat and has nothing to warn about for a plain cut', async () => {
     const { dir } = await project({ words: [], segments: [], speech: [] });
     await saveEpisode(dir, base());

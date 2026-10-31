@@ -336,4 +336,13 @@ describe('loadEpisode errors', () => {
       hint: 'Fix that field and run the command again.',
     });
   });
+
+  it('refuses an episode.json whose number is not its folder, so saving never overwrites another episode', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we-copied-ep-'));
+    await saveEpisode(project, ep([{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }]));
+    await mkdir(join(project, 'episodes', '3'), { recursive: true });
+    await writeFile(join(project, 'episodes', '3', 'episode.json'), await readFile(join(project, 'episodes', '1', 'episode.json'), 'utf8'));
+    await expect(loadEpisode(project, 3)).rejects.toMatchObject({ code: 'NO_EPISODE', message: 'episodes/3/episode.json says it is episode 1', hint: 'Set "number" to 3 in episodes/3/episode.json.' });
+    await expect(saveEpisode(project, ep([{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }]), 3)).rejects.toMatchObject({ code: 'NO_EPISODE' });
+  });
 });

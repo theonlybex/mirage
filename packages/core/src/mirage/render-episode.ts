@@ -201,19 +201,28 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
 
 export const episodeDir = (project: string, n: number) => join(resolve(project), 'episodes', String(n));
 
+const wrongNumber = (n: number, found: number) =>
+  new MirageError('NO_EPISODE', `episodes/${n}/episode.json says it is episode ${found}`, `Set "number" to ${n} in episodes/${n}/episode.json.`);
+
+/** Loads episodes/<n>/episode.json. Refuses a file whose `number` is not `n` (a copied episode), so no save lands in another episode's folder. */
 export async function loadEpisode(project: string, n: number): Promise<Episode> {
+  let ep: Episode;
   try {
-    return await readJsonFile(join(episodeDir(project, n), 'episode.json'), EpisodeSchema, `episodes/${n}/episode.json`);
+    ep = await readJsonFile(join(episodeDir(project, n), 'episode.json'), EpisodeSchema, `episodes/${n}/episode.json`);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new MirageError('NO_EPISODE', `episodes/${n}/episode.json does not exist`, 'Ask Claude to write the episode timeline first.');
     }
     throw e;
   }
+  if (ep.number !== n) throw wrongNumber(n, ep.number);
+  return ep;
 }
 
-export async function saveEpisode(project: string, ep: Episode): Promise<void> {
-  const dir = episodeDir(project, ep.number);
+/** Writes episodes/<n>/episode.json; `n` (the folder it was loaded from) defaults to the episode's number and must match it. */
+export async function saveEpisode(project: string, ep: Episode, n: number = ep.number): Promise<void> {
+  if (ep.number !== n) throw wrongNumber(n, ep.number);
+  const dir = episodeDir(project, n);
   await mkdir(dir, { recursive: true });
   await writeJsonFile(join(dir, 'episode.json'), EpisodeSchema, ep);
 }
