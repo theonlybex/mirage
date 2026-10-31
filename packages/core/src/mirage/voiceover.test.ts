@@ -176,3 +176,30 @@ describe('holdAt in the frozen tail', () => {
 function layoutDur(ep: ReturnType<typeof EpisodeSchema.parse>) {
   return timelineDuration(ep);
 }
+
+describe('fitVoiceover with a line re-read at the end', () => {
+  const slotsOf = (...s: [string, number, number, string][]) => s.map(([id, start, end, line]) => ({ id, start, end, maxWords: 8, line }));
+  it('places a line read after later lines without consuming them', () => {
+    const rec = tx([...said('Open settings.', 0), ...said('Pick a nice accent colour.', 2), ...said('Save and close the window.', 4.5), ...said('Then toggle dark mode on.', 7)]);
+    const slots = slotsOf(['n1', 0, 3, 'Open settings.'], ['n2', 4, 7, 'Then toggle dark mode on.'], ['n3', 8, 11, 'Pick a nice accent colour.'], ['n4', 12, 15, 'Save and close the window.']);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(report.lines.map((l) => [l.slot, l.status])).toEqual([['n1', 'placed'], ['n2', 'placed'], ['n3', 'placed'], ['n4', 'placed']]);
+    expect(ep.voiceover!.lines.find((l) => l.slot === 'n2')!.src.in).toBeCloseTo(6.95);
+    expect(ep.voiceover!.lines.find((l) => l.slot === 'n3')!.src.in).toBeCloseTo(1.95);
+  });
+});
+
+describe('over-long lines', () => {
+  it('fitVoiceover names the line when it runs more than 10 s past its slot', () => {
+    const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty.';
+    const rec = tx(said(long, 0, 0.7));
+    const slots = [{ id: 'n1', start: 1, end: 3, maxWords: 4, line: long }];
+    expect(() => fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec })).toThrow(
+      expect.objectContaining({ code: 'BAD_ITEM', message: expect.stringMatching(/^Line n1 runs 1[0-9.]+s past its slot \(more than 10 s\)$/), hint: 'Shorten the line, or give it a longer slot by extending the picture' }),
+    );
+  });
+  it('holdAt refuses a frozen frame longer than 10 s with a MirageError, not a schema error', () => {
+    const ep = EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 5 }, hold: 4 }] });
+    expect(() => holdAt(ep, catalog(5), 9, 7)).toThrow(expect.objectContaining({ name: 'MirageError', code: 'BAD_ITEM' }));
+  });
+});

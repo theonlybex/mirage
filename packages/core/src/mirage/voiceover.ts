@@ -7,6 +7,17 @@ import { itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './time
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
+/** The schema's limit on an item's frozen frame. */
+const MAX_HOLD = 10;
+const HOLD_HINT = 'Shorten the line, or give it a longer slot by extending the picture';
+
+function checkHold(item: Episode['items'][number]): typeof item {
+  if (item.hold > MAX_HOLD + 1e-9) {
+    throw new MirageError('BAD_ITEM', `item ${item.id} would freeze its frame for ${r3(item.hold)}s (more than ${MAX_HOLD} s)`, HOLD_HINT);
+  }
+  return item;
+}
+
 export interface FitLine {
   slot: string;
   status: 'placed' | 'missing';
@@ -38,7 +49,7 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
     const clipDur = catalog.clips.find((c) => c.id === item.clip)?.probe.durationSec ?? item.src.out;
     const available = Math.max(0, (clipDur - item.src.out) / item.speed);
     const useSource = Math.min(delta, available);
-    const next = { ...item, src: { in: item.src.in, out: r6(item.src.out + useSource * item.speed) }, hold: r6(item.hold + (delta - useSource)) };
+    const next = checkHold({ ...item, src: { in: item.src.in, out: r6(item.src.out + useSource * item.speed) }, hold: r6(item.hold + (delta - useSource)) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
     return { ...shiftAfter(ep, l.end, grown), items };
@@ -46,7 +57,7 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
 
   if (t >= srcEnd - 1e-9 || splitFrames >= l.srcFrames) {
     // Inside the item's frozen tail: it is already a held frame, so just hold longer.
-    const next = { ...item, hold: r6(item.hold + delta) };
+    const next = checkHold({ ...item, hold: r6(item.hold + delta) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
     return { ...shiftAfter(ep, t, grown), items };
@@ -56,7 +67,7 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
   const ids = new Set(ep.items.map((x) => x.id));
   let suffix = 'b';
   while (ids.has(`${item.id}-${suffix}`)) suffix = String.fromCharCode(suffix.charCodeAt(0) + 1);
-  const first = { ...item, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) };
+  const first = checkHold({ ...item, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) });
   const second = { ...item, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
   return { ...shiftAfter(ep, l.start + splitFrames / fps, delta), items };
@@ -128,7 +139,10 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     let nextFirst = Infinity;
     for (let m = k + 1; m < written.length; m++) for (const c of cands[m]) if (c.from > prevEnd && c.from < nextFirst) nextFirst = c.from;
     let pool = after.filter((c) => c.to < nextFirst);
-    if (pool.length === 0) pool = after;
+    // Only takes past a later line's first read: a line re-read at the end. Place it (placement is by slot), but keep
+    // the recording cursor where it was so the later lines it jumped over can still be found.
+    const reReadLate = pool.length === 0;
+    if (reReadLate) pool = after;
     if (pool.length === 0) {
       report.lines.push({ slot: written[k].id, status: 'missing', takes: 0, overrunSec: 0 });
       continue;
@@ -137,7 +151,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     const good = pool.filter((c) => c.score >= best - 0.15);
     const chosen = good.reduce((a, b) => (b.from > a.from ? b : a));
     const takes = new Set(good.map((c) => c.from)).size;
-    prevEnd = chosen.to;
+    if (!reReadLate) prevEnd = chosen.to;
 
     const span = words.slice(sentences[chosen.from].from, sentences[chosen.to].to + 1);
     const spoken = span.filter((w) => !isFiller(w));
@@ -158,6 +172,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     let overrun = at + duration - (slot.end + 0.2);
     if (overrun > 1e-3) {
       overrun = Math.ceil(overrun * fps - 1e-9) / fps;
+      if (overrun > MAX_HOLD + 1e-9) throw new MirageError('BAD_ITEM', `Line ${slot.id} runs ${r3(overrun)}s past its slot (more than ${MAX_HOLD} s)`, HOLD_HINT);
       const before = timelineDuration(ep);
       const held = holdAt(ep, o.catalog, slot.end, overrun);
       const grown = timelineDuration(held) - before;
