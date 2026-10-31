@@ -17,10 +17,13 @@ A `✖` line stops the command; its next line says what to do. `✖ episode <n> 
 - `⚠ skipped <file>: not a video Mirage reads` — photos and other formats are not used; if it belongs in the episode, ask for an .mp4 or .mov export.
 - `⚠ <file> is HDR …` — colours will look washed out: ask for an SDR export (Photos → Export → "Most Compatible").
 - `⚠ <file>: transcription failed …` — its speech is invisible to slots and captions; running `ingest` again on the same folder retries just those clips.
+- `⚠ <file> looks cut short …` — the copy or recording is incomplete (only the seconds it names are there): ask whether a full copy exists.
+- `⚠ <file>: its picture stops at … but its sound runs to …` — items can only use the seconds with picture (`probe.videoDurationSec`).
+- `⚠ <file>: its first audio track is silent, so its sound is taken from track …` — nothing to do; worth a mention if the user expected the other track.
 - `• <file>: moved, path updated` needs nothing: a clip found in a new folder keeps its id.
 
 Then for each new clip in `<project>/catalog.json`:
-- Read 3–8 of its frames (`frames[].file`, relative to the project) and the transcript if any.
+- Read 3–8 of its frames (`frames[].file`, relative to the project) and the transcript if any. A frame's `t` is the clip time it shows (a clip shorter than the frame interval has one frame, from its middle).
 - Set `kind` if the guess is wrong (`screen`, `camera`, `talking`, `timelapse`).
 - Write `notes` (one sentence: what it shows) and `moments` (`{t, label}` for errors appearing, tests passing, deploys, before/after screens, reactions).
 - Ask the user only for what frames cannot tell you (what went wrong, how long it took, numbers for counters).
@@ -47,7 +50,8 @@ The schema is `packages/shared/src/schemas/episode.ts`. A minimal file:
 }
 ```
 - `output`: 1920×1080 unless the user says otherwise; `fps` 30 or 60.
-- `items[].clip` is a catalog id (`c001`…); `src` is in that clip's own seconds. Item `id`s are yours (short, unique).
+- `items[].clip` is a catalog id (`c001`…); `src` is in that clip's own seconds, and must end by the clip's `probe.videoDurationSec` when it has one (its sound can run on after the picture): otherwise `check` stops with `item …: c019 has video only until 3.0 s`. Item `id`s are yours (short, unique).
+- Overlay text can be in any script, but emoji are left out (they can't be drawn; `check` warns).
 - `overlays` and `music` are in output-timeline seconds; `track` is a file name in `music/`.
 - `number` must be the episode's folder number: when you start an episode from a copy of another's `episode.json`, set `number` to the new folder's number and remove `voiceover` (its transcripts stay in the old folder) — every command refuses a mismatch.
 
@@ -55,6 +59,7 @@ Work in this order: write the items → `pnpm mirage check <project> <n>` (it pr
 `check` stops on a misspelled key (`unknown key "…"`: rename it) and on a cue whose track is not in `music/library.json` or whose file is gone. Act on its `⚠` lines:
 - `… starts at … after the episode ends` — that overlay or cue never shows: move it onto the timeline or delete it.
 - `item … is onBeat but no music plays under it` / `… has no clear beat — left unsnapped` — put a cue with a beat under it, or drop `onBeat`.
+- `item … keeps its live audio … no footage left to reach a beat` / `item … could not reach a beat` — snapping never slows an item that keeps its audio (its sound plays only at 1×), so it ends on the nearest beat inside its clip; this one couldn't: start it earlier in the clip, or drop `onBeat`. A `hold` is kept: the item with its hold ends on the beat.
 - `music cue … will loop` — the track is shorter than offset + cue length: shorten the cue or lower its `offset`, unless a loop is fine.
 - `music cue … has gainDb -18, the old default` — delete `gainDb` (or set it per mood, below).
 - `… was inside time that beat snapping removed, so it was dropped` — place that overlay, cue or line again on the new times.
