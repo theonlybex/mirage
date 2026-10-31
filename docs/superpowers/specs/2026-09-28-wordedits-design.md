@@ -244,3 +244,18 @@ Each becomes a section of the implementation plan; 1–3 have no UI and can be b
 - Music library: three bundled CC0 tracks in v1.
 - Windows: supported and tested at the end of v1, not per sub-project.
 - Project folder location and API key storage are configurable in Settings only.
+
+## 13. Addendum (2026-10-30): fast-track auto-edit CLI
+
+The user needs to edit real videos before the desktop app exists. Sub-projects 2 and 3 are re-cut into one command-line deliverable, built on the sub-project 1 core, with this chat (Claude Code) standing in for the app's chat until sub-project 4.
+
+**Command:** `pnpm edit <take> [--script script.md] [--pace natural|fast|extra-fast] [--music track] [--no-captions] [--edl edl.json] [--out dir]`
+
+**Does:** transcribes locally, cuts restart cues, retakes (keep the last take), hesitation fillers and long pauses, burns in phrase captions and writes an `.srt`, mixes optional music ducked under the voice, renders a YouTube-spec MP4, and writes `edl.json`, `transcript.json` and a plain-language `report.md` of every cut. `--edl` re-renders a hand- or chat-edited EDL without re-transcribing.
+
+**Decisions:**
+- macOS transcription uses Apple SpeechAnalyzer (macOS 26+) through a small Swift helper built locally with `swiftc`; it keeps fillers and gives word timings. whisper.cpp remains the Windows path (later).
+- Only hesitation sounds are removed as fillers (um, uh, er, ah, hmm…); "like", "you know" and similar stay until a context-aware pass exists.
+- Spec §7's per-side padding values are read as the *total* pause kept when a pause is shortened (0.4 / 0.25 / 0.15 s), split evenly before and after the cut.
+- Renders run in chunks of at most 30 segments to near-lossless intermediates, then one final pass applies captions, the audio chain and music, and encodes. This replaces the single command that hit Windows' command-line limit and macOS's thread limit on long takes.
+- Out of scope for this deliverable: punch-in zooms, section titles, end screen, YouTube upload, the desktop app.
