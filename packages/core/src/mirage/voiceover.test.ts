@@ -1,7 +1,7 @@
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { cutOf } from './slots.js';
-import { cutChanged, fitVoiceover, hasWords, holdAt, missingSlots } from './voiceover.js';
+import { cutChanged, fitVoiceover, hasWords, holdAt, lineChanges, lineChangeWarnings, missingSlots } from './voiceover.js';
 import { itemsFingerprint, layoutTimeline, timelineDuration } from './timeline.js';
 
 function said(text: string, t0: number, per = 0.3): Word[] {
@@ -376,5 +376,24 @@ describe('lines with no words', () => {
     expect(report.lines.map((l) => l.slot)).toEqual(['n1']);
     expect(missingSlots(ep)).toEqual([]);
     expect(() => fitVoiceover({ episode: episode(slots.slice(1)), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).toThrow(expect.objectContaining({ message: 'No narration lines are written yet' }));
+  });
+});
+
+describe('lines edited after vo', () => {
+  it('names each fitted line whose slot line changed or was cleared since', () => {
+    const { episode: ep } = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(lineChanges(ep)).toEqual([]);
+    const edited = { ...ep, slots: ep.slots.map((s) => (s.id === 'n1' ? { ...s, line: 'This is the very first line.' } : { ...s, line: '' })) };
+    expect(lineChanges(edited)).toEqual([
+      { slot: 'n1', cleared: false, fitted: 'This is the first line.' },
+      { slot: 'n2', cleared: true, fitted: 'And here is the second one.' },
+    ]);
+    expect(lineChangeWarnings(edited, 'check')).toEqual([
+      "n1's line changed since vo — re-record it with vo --add --slots n1",
+      "n2's line was cleared since vo, but its voice-over still plays — run vo again without --add to drop it",
+    ]);
+    expect(lineChangeWarnings(edited, 'render')[0]).toBe('n1\'s line changed since vo — it plays and is captioned as fitted ("This is the first line."); re-record it with vo --add --slots n1');
+    // Whitespace alone is no change.
+    expect(lineChanges({ ...ep, slots: ep.slots.map((s) => ({ ...s, line: ` ${s.line}  ` })) })).toEqual([]);
   });
 });

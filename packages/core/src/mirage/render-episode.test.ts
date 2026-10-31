@@ -368,6 +368,8 @@ describe('renderEpisode (real ffmpeg)', () => {
     await writeFile(join(dir, 't2.json'), JSON.stringify(said('Second 2 here.')));
     const e = ep([{ id: 'v', beat: 'problem', clip: 'c003', src: { in: 0, out: 6 } }], {
       number: 8,
+      // n2's line was edited after the fit: the render plays and captions what was fitted, and says so.
+      slots: [{ id: 'n1', start: 0, end: 3, maxWords: 8, line: 'First line here.' }, { id: 'n2', start: 3, end: 6, maxWords: 8, line: 'Second line, edited.' }],
       voiceover: {
         recording: 'take1.wav', transcripts: { 'take1.wav': 't1.json', 'take2.wav': 't2.json' },
         lines: [
@@ -382,6 +384,7 @@ describe('renderEpisode (real ffmpeg)', () => {
     const srt = await readFile(r.srtPath!, 'utf8');
     expect(srt).toContain('First line here.');
     expect(srt).toContain('Second two here.');
+    expect(r.warnings).toEqual(['n2\'s line changed since vo — it plays and is captioned as fitted ("Second two here."); re-record it with vo --add --slots n2']);
     const peakHz = async (ss: number, f: number) => {
       const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-ss', String(ss), '-t', '1', '-i', r.outputPath, '-map', '0:a:0', '-af', `bandpass=f=${f}:width_type=q:w=8,astats=metadata=0`, '-f', 'null', '-']);
       return Number(/Overall[\s\S]*?RMS level dB:\s+(-?[\d.]+)/.exec(stderr)![1]);

@@ -13,7 +13,7 @@ import { checkCueFiles, cueTrack, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
-import { cutChanged, cutChangedError, fittedRecordingSha } from './voiceover.js';
+import { cutChanged, cutChangedError, fittedRecordingSha, lineChangeWarnings } from './voiceover.js';
 
 export const CHUNK_ITEMS = 30;
 /** Items per chunk when a source is larger than 1080p: every input of a chunk opens a decoder, and 4K ones are big. */
@@ -309,8 +309,16 @@ type RenderOptions = {
   beforeRender?: () => Promise<unknown>;
 };
 
+type RenderResult = {
+  outputPath: string;
+  srtPath: string | null;
+  durationSec: number;
+  /** Things the user should hear about (printed with ⚠): lines edited since the voice-over was fitted. */
+  warnings: string[];
+};
+
 /** Renders episode `episode` in `mode`, holding the episode's lock so a second render of it refuses instead of deleting this one's work. */
-export async function renderEpisode(o: RenderOptions): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
+export async function renderEpisode(o: RenderOptions): Promise<RenderResult> {
   const lock = await lockEpisode(resolve(o.project), o.episode, COMMAND[o.mode]);
   try {
     await o.beforeRender?.();
@@ -320,7 +328,7 @@ export async function renderEpisode(o: RenderOptions): Promise<{ outputPath: str
   }
 }
 
-async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
+async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   const project = resolve(o.project);
   const ep = await loadEpisode(project, o.episode);
   const catalog = await loadCatalog(project);
@@ -420,7 +428,8 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
       await writeFile(srtPath, toSrt(cues));
     }
     report(1);
-    return { outputPath, srtPath, durationSec: D };
+    // The voice-over says what was fitted, and its captions say the same: a line edited since then is only flagged.
+    return { outputPath, srtPath, durationSec: D, warnings: final ? lineChangeWarnings(ep, 'render') : [] };
   } catch (e) {
     await rm(partial, { force: true }).catch(() => {});
     throw e;

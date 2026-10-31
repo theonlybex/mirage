@@ -127,6 +127,7 @@ async function main() {
       // cut checks under the episode's lock: during a vo it says busy without touching episode.json.
       const r = await renderEpisode({ project, episode: n, mode, tools, onProgress: progress, beforeRender: cmd === 'cut' ? () => check(project, n) : undefined });
       console.log(`\n✓ ${r.outputPath} (${formatTime(r.durationSec)})${r.srtPath ? `\n  captions: ${r.srtPath}` : ''}`);
+      for (const w of r.warnings) console.log(`⚠ ${w}`);
       break;
     }
     case 'slots': {

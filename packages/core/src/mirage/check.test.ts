@@ -95,6 +95,9 @@ describe('checkEpisode', () => {
     expect(clean.notes).toEqual(['Montages were not snapped to the beat: the voice-over is fitted to this cut.']);
     expect(clean.warnings).toEqual([]);
 
+    await saveEpisode(dir, { ...fitted, slots: [{ ...fitted.slots[0], line: 'This is the new line.' }] });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["n1's line changed since vo — re-record it with vo --add --slots n1"]);
+
     await saveEpisode(dir, { ...fitted, items: [fitted.items[0], { ...fitted.items[1], src: { in: 5, out: 9 } }] });
     const changed = await checkEpisode(dir, 1);
     expect(changed.warnings).toEqual(['The cut changed after the voice-over was fitted. Run: pnpm mirage slots <project> <n>, then pnpm mirage vo <project> <n> <recording> (it reuses the saved transcript)']);

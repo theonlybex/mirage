@@ -6,7 +6,7 @@ import { undrawable } from './overlays.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { slotsStale } from './slots.js';
 import { dropCollapsed, layoutTimeline, timelineDuration } from './timeline.js';
-import { cutChanged, cutChangedError, hasWords } from './voiceover.js';
+import { cutChanged, cutChangedError, hasWords, lineChangeWarnings } from './voiceover.js';
 
 /** The music cue gain every cue got before 9af3199; cues saved by a check back then carry it explicitly. */
 const OLD_DEFAULT_GAIN_DB = -18;
@@ -87,6 +87,7 @@ export async function checkEpisode(project: string, n: number): Promise<{ episod
   } else if (slotsStale(ep) && ep.slots.some((s) => hasWords(s.line))) {
     warnings.push(`The cut changed since slots were written — run: pnpm mirage slots <project> ${n}, and check the lines it carried over`);
   }
+  warnings.push(...lineChangeWarnings(ep, 'check'));
   for (const item of ep.items) {
     if (item.audio !== 'keep' || item.speed !== 1) continue;
     const clip = catalog.clips.find((c) => c.id === item.clip);

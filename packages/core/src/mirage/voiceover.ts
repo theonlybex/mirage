@@ -42,6 +42,30 @@ export function missingSlots(ep: Episode): string[] {
     .map((s) => s.id);
 }
 
+/** Fitted lines whose slot's written line changed (or was cleared) since the fit; `fitted` is what the voice-over says. */
+export function lineChanges(ep: Episode): { slot: string; cleared: boolean; fitted: string }[] {
+  const tidy = (t: string) => t.trim().replace(/\s+/g, ' ');
+  const out: { slot: string; cleared: boolean; fitted: string }[] = [];
+  for (const l of ep.voiceover?.lines ?? []) {
+    if (l.text === undefined) continue;
+    const line = ep.slots.find((s) => s.id === l.slot)?.line ?? '';
+    if (!hasWords(line)) out.push({ slot: l.slot, cleared: true, fitted: l.text });
+    else if (tidy(line) !== tidy(l.text)) out.push({ slot: l.slot, cleared: false, fitted: l.text });
+  }
+  return out;
+}
+
+/** lineChanges as ⚠ warnings: `check` says what to do; `render` also says the line plays and is captioned as fitted. */
+export function lineChangeWarnings(ep: Episode, command: 'check' | 'render'): string[] {
+  return lineChanges(ep).map(({ slot, cleared, fitted }) => {
+    const asFitted = command === 'render' ? ` (captioned as fitted: "${fitted}")` : '';
+    if (cleared) return `${slot}'s line was cleared since vo, but its voice-over still plays${asFitted} — run vo again without --add to drop it`;
+    return command === 'render'
+      ? `${slot}'s line changed since vo — it plays and is captioned as fitted ("${fitted}"); re-record it with vo --add --slots ${slot}`
+      : `${slot}'s line changed since vo — re-record it with vo --add --slots ${slot}`;
+  });
+}
+
 /** The schema's limit on an item's frozen frame. */
 const MAX_HOLD = 10;
 const HOLD_HINT = 'Shorten the line, or give it a longer slot by extending the picture';
