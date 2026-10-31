@@ -99,6 +99,36 @@ describe('snapToBeats', () => {
     expect(snapToBeats(once, catalog(60), l)).toEqual(once);
   });
 
+  it('never changes the speed of an item that keeps its live audio: it ends on an earlier beat inside the clip instead', () => {
+    // 100 BPM (0.6 s beats); the nearest beat end (1.2 s) needs 1.2 s of footage but only 1.0 s is left after src.in.
+    const ep = episode([{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0.2, out: 1.2 }, onBeat: true, audio: 'keep' }]);
+    const s = snapToBeats(ep, catalog(1.2), lib(100, 0));
+    expect(s.items[0]).toMatchObject({ speed: 1, src: { in: 0.2, out: 0.8 } });
+    expect(layoutTimeline(s)[0].frames).toBe(18);
+    expect(snapToBeats(s, catalog(1.2), lib(100, 0))).toEqual(s);
+  });
+
+  it('leaves a kept-audio item unsnapped when no beat end fits in its clip', () => {
+    // 60 BPM: the first beat is 1 s away, but only 0.3 s of footage is left.
+    const ep = episode([{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0.9, out: 1.1 }, onBeat: true, audio: 'keep' }]);
+    expect(snapToBeats(ep, catalog(1.2), lib(60, 0)).items).toEqual(ep.items);
+  });
+
+  it('keeps a manual hold: the source part ends earlier so the item with its hold ends on the beat', () => {
+    const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.3 }, onBeat: true, hold: 0.5 }]);
+    const s = snapToBeats(ep, catalog(60), lib(120, 0));
+    expect(s.items[0]).toMatchObject({ hold: 0.5, speed: 1, src: { in: 0, out: 1.5 } });
+    expect(layoutTimeline(s)[0].end).toBeCloseTo(2);
+    expect(snapToBeats(s, catalog(60), lib(120, 0))).toEqual(s);
+  });
+
+  it('extends a sped-up item only within the video of its clip, not into audio past it', () => {
+    const short = catalog(10);
+    short.clips[0].probe.videoDurationSec = 1.2;
+    const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0.2, out: 1.2 }, onBeat: true }]);
+    expect(snapToBeats(ep, short, lib(100, 0)).items[0].src.out).toBe(1.2);
+  });
+
   it('leaves items alone when no cue with a known tempo plays under them', () => {
     const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.3 }, onBeat: true }], { music: [] });
     expect(snapToBeats(ep, catalog(60), lib(120, 0))).toEqual(ep);

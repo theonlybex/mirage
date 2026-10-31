@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
-import { MusicLibrarySchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type MusicTrack } from '@wordedits/shared';
+import { MusicLibrarySchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type MusicTrack, type TimelineItem } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { errorReason, MirageError } from './errors.js';
@@ -133,8 +133,46 @@ async function analyzeLocked(root: string, tools: MediaTools): Promise<LibraryRe
 }
 
 /**
+ * `item` (starting at output time `t`, lasting `oldDur`) ending on a beat of `cue`, or null to leave it alone. Its hold
+ * is kept: the source part ends so that the item with its hold ends on the beat. The source runs on (or stops earlier)
+ * within the clip's video; when the clip runs out, the item is slowed — except an item that keeps its live audio, which
+ * only plays at its own speed: it takes the nearest beat its footage reaches instead.
+ */
+function snapItem(item: TimelineItem, t: number, oldDur: number, cue: MusicCue, beat: number, fps: number, catalog: Catalog): TimelineItem | null {
+  const probe = catalog.clips.find((c) => c.id === item.clip)?.probe;
+  const avail = (probe ? (probe.videoDurationSec ?? probe.durationSec) : item.src.out) - item.src.in;
+  if (!(avail > 0)) return null;
+  const keepsAudio = item.audio === 'keep';
+  const holdFrames = Math.round(item.hold * fps);
+  const startFrame = Math.round(t * fps);
+  // Grid times are cue.start + k * beat (the offset step in snapToBeats puts a beat at the cue start).
+  const kMin = Math.floor((t - cue.start) / beat + 1e-6) + 1;
+  const kNear = Math.max(kMin, Math.round((t + oldDur - cue.start) / beat));
+  // Beat ends nearest first (earlier before later at the same distance), a few beats either way.
+  const ks = [kNear];
+  for (let d = 1; d <= 8; d++) ks.push(kNear - d, kNear + d);
+  for (const k of ks.filter((k) => k >= kMin)) {
+    const srcFrames = Math.round((cue.start + k * beat) * fps) - startFrame - holdFrames;
+    if (srcFrames < 1) continue;
+    const target = srcFrames / fps;
+    let srcLen = target * item.speed;
+    let speed = item.speed;
+    if (srcLen > avail - 1e-5) {
+      // Kept audio plays only at its own speed: try a beat its footage reaches.
+      if (keepsAudio) continue;
+      srcLen = avail;
+      speed = srcLen / target;
+    }
+    // Slowing it down below the schema's minimum speed: leave the item alone.
+    if (speed < 0.25) return null;
+    return { ...item, speed: r6(speed), src: { in: item.src.in, out: r6(item.src.in + srcLen) } };
+  }
+  return null;
+}
+
+/**
  * Starts each cue on a beat of its track, then ends every onBeat item on a beat of the cue playing under
- * it (extending the source, or slowing it when the clip runs out). Item ends are snapped to the cue's
+ * it (extending the source, or slowing it when the clip runs out; see snapItem). Item ends are snapped to the cue's
  * beat grid, not given a rounded duration, so frame rounding never accumulates into drift.
  * Everything after a changed item shifts with it. An episode with a fitted voice-over is returned unchanged.
  */
@@ -163,23 +201,8 @@ export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): E
       const cue = cur.music.find((c) => t >= c.start - 1e-6 && t < c.end);
       const tr = cue ? track(cue.track) : undefined;
       if (cue && tr?.bpm && tr.beatOffset !== null) {
-        const beat = 60 / tr.bpm;
-        // Grid times are cue.start + k * beat (the offset step above puts a beat at the cue start).
-        const kEnd = Math.max(Math.floor((t - cue.start) / beat + 1e-6) + 1, Math.round((t + oldDur - cue.start) / beat));
-        const startFrame = Math.round(t * fps);
-        const frames = Math.max(1, Math.round((cue.start + kEnd * beat) * fps) - startFrame);
-        const target = frames / fps;
-        const clipDur = catalog.clips.find((c) => c.id === item.clip)?.probe.durationSec ?? item.src.out;
-        const avail = clipDur - item.src.in;
-        let srcLen = target * item.speed;
-        let speed = item.speed;
-        if (avail > 0 && srcLen > avail - 1e-5) {
-          srcLen = avail;
-          speed = srcLen / target;
-        }
-        // No footage left, or slowing it down would go below the schema's minimum speed: leave the item alone.
-        if (avail > 0 && speed >= 0.25) {
-          const next = { ...item, speed: r6(speed), hold: 0, src: { in: item.src.in, out: r6(item.src.in + srcLen) } };
+        const next = snapItem(item, t, oldDur, cue, 60 / tr.bpm, fps, catalog);
+        if (next) {
           const newDur = itemFrames(next, fps).frames / fps;
           const items = [...cur.items];
           items[i] = next;

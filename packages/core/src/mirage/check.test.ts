@@ -142,4 +142,23 @@ describe('checkEpisode', () => {
       'music cue 1 has gainDb -18, the old default (now -5) — delete gainDb to use the new one',
     ]);
   });
+
+  it('warns when an onBeat item could not reach a beat, saying why for an item that keeps its audio', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base({
+      items: [
+        // 0.1 s of footage left; the first beat is 0.5 s away and kept audio cannot be slowed.
+        { id: 'a', beat: 'problem', clip: 'c001', src: { in: 29.9, out: 30 }, onBeat: true, audio: 'keep' },
+        // Would need slowing below 0.25x.
+        { id: 'b', beat: 'montage', clip: 'c001', src: { in: 29.95, out: 30 }, onBeat: true },
+      ],
+      music: [{ track: 'beat.wav', start: 0, end: 10 }],
+    }));
+    const r = await checkEpisode(dir, 1);
+    expect(r.episode.items.map((i) => [i.speed, i.src.out])).toEqual([[1, 30], [1, 30]]);
+    expect(r.warnings).toEqual([
+      'item a keeps its live audio, which plays only at normal speed, and c001 has no footage left to reach a beat — left unsnapped',
+      'item b could not reach a beat: c001 has too little footage left — left unsnapped',
+    ]);
+  });
 });

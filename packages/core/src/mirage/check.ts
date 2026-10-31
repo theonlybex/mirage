@@ -29,6 +29,16 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
       const track = cue && lib ? findTrack(lib, cue.track) : undefined;
       if (!cue) out.push(`item ${l.item.id} is onBeat but no music plays under it — left unsnapped`);
       else if (!track?.bpm || track.beatOffset === null) out.push(`item ${l.item.id} is onBeat but ${cue.track} has no clear beat — left unsnapped`);
+      else {
+        const beat = 60 / track.bpm;
+        const k = Math.round((l.end - cue.start) / beat);
+        if (Math.abs(cue.start + k * beat - l.end) <= 0.5 / ep.output.fps + 1e-6) continue;
+        out.push(
+          l.item.audio === 'keep'
+            ? `item ${l.item.id} keeps its live audio, which plays only at normal speed, and ${l.item.clip} has no footage left to reach a beat — left unsnapped`
+            : `item ${l.item.id} could not reach a beat: ${l.item.clip} has too little footage left — left unsnapped`,
+        );
+      }
     }
   }
   ep.music.forEach((c, i) => {
