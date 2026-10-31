@@ -9,7 +9,7 @@ import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog } from './ingest.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
-import { buildVoiceTrack, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover } from './voiceover.js';
 
@@ -57,8 +57,8 @@ describe('itemChunkArgs', () => {
   const graph = args[args.indexOf('-filter_complex') + 1];
   it('seeks each item and reads only the source it needs at its speed', () => {
     expect(args.slice(0, 7)).toEqual(['-threads', '1', '-noaccurate_seek', '-ss', '1', '-i', join(CLIPS, 'c001.mp4')]);
-    // Sped-up items decode with all threads: they read far more source than they output.
-    expect(args.slice(7, 12)).toEqual(['-noaccurate_seek', '-ss', '0', '-i', join(CLIPS, 'c002.mp4')]);
+    // Sped-up items decode with more threads: they read far more source than they output.
+    expect(args.slice(7, 14)).toEqual(['-threads', '4', '-noaccurate_seek', '-ss', '0', '-i', join(CLIPS, 'c002.mp4')]);
   });
   it('speeds up, punches in, letterboxes and cuts to exact frames', () => {
     expect(graph).toContain('[0:v]setpts=PTS/1,fps=30:start_time=0:round=up,trim=end_frame=61,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
@@ -75,6 +75,15 @@ describe('itemChunkArgs', () => {
     const h = ep([{ id: 'h', beat: 'problem', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep', hold: 0.5 }]);
     const g = itemChunkArgs(layoutTimeline(h), { width: 960, height: 540, fps: 30 }, sourcesFor(h, cat), '/w/c.mov');
     expect(g[g.indexOf('-filter_complex') + 1]).toContain('aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2.5,asetpts=PTS-STARTPTS[a0]');
+  });
+});
+
+describe('chunkSize', () => {
+  it('puts fewer items in a chunk when a source is larger than 1080p', () => {
+    const src = (width: number, height: number) => ({ path: '/x', hasAudio: false, durationSec: 1, width, height });
+    expect(chunkSize(new Map([['a', src(1920, 1080)], ['b', src(1080, 1920)]]))).toBe(30);
+    expect(chunkSize(new Map([['a', src(1920, 1080)], ['b', src(3840, 2160)]]))).toBe(12);
+    expect(chunkItems(layoutTimeline(ep(Array.from({ length: 25 }, (_, i) => ({ id: `i${i}`, beat: 'montage', clip: 'c001', src: { in: 0, out: 1 } })))), 12).map((c) => c.length)).toEqual([12, 12, 1]);
   });
 });
 

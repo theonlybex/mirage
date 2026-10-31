@@ -16,6 +16,8 @@ import { layoutTimeline, type LaidItem } from './timeline.js';
 import { cutChanged, cutChangedError } from './voiceover.js';
 
 export const CHUNK_ITEMS = 30;
+/** Items per chunk when a source is larger than 1080p: every input of a chunk opens a decoder, and 4K ones are big. */
+export const CHUNK_ITEMS_LARGE = 12;
 const pad3 = (i: number) => String(i).padStart(3, '0');
 
 export interface ClipSource {
@@ -24,6 +26,9 @@ export interface ClipSource {
   durationSec: number;
   /** The audio stream with the clip's sound (default the first). */
   audioStream?: number;
+  /** Picture size as displayed (0 when unknown). */
+  width?: number;
+  height?: number;
 }
 
 export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSource> {
@@ -43,15 +48,20 @@ export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSourc
     if (!existsSync(clip.path)) {
       throw new MirageError('BAD_ITEM', `item ${item.id}: clip file ${clip.path} is missing`, 'Reconnect the drive or re-ingest the folder it moved to');
     }
-    map.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec, audioStream: clip.probe.audioStream });
+    map.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec, audioStream: clip.probe.audioStream, width: clip.probe.width, height: clip.probe.height });
   }
   return map;
 }
 
-export function chunkItems(laid: LaidItem[]): LaidItem[][] {
+export function chunkItems(laid: LaidItem[], size = CHUNK_ITEMS): LaidItem[][] {
   const out: LaidItem[][] = [];
-  for (let i = 0; i < laid.length; i += CHUNK_ITEMS) out.push(laid.slice(i, i + CHUNK_ITEMS));
+  for (let i = 0; i < laid.length; i += size) out.push(laid.slice(i, i + size));
   return out;
+}
+
+/** Chunk size for these sources: smaller when any is larger than 1080p. */
+export function chunkSize(sources: Map<string, ClipSource>): number {
+  return [...sources.values()].some((s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
 }
 
 const FLTP_STEREO = 'aformat=sample_fmts=fltp:channel_layouts=stereo';
@@ -68,8 +78,8 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     const { item } = l;
     const src = sources.get(item.clip)!;
     // Real-time items decode on one thread each (a chunk opens up to 30 inputs); sped-up items read far more source
-    // than they output, so they get every thread.
-    if (item.speed <= 1) inputs.push('-threads', '1');
+    // than they output, so they get four (all threads cost a 4K decoder over 1 GB; four keep most of the speed).
+    inputs.push('-threads', item.speed <= 1 ? '1' : '4');
     // Seek to the keyframe before src.in and keep the source clock (time 0 = src.in) instead of starting at the first
     // frame after the seek point: VFR screen recordings write no frames while the screen is still, and a video stream
     // can start after the container does.
@@ -332,7 +342,7 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
   const report = (f: number) => o.onProgress?.(Math.min(1, Math.max(0, f)));
 
   try {
-    const chunks = chunkItems(laid);
+    const chunks = chunkItems(laid, chunkSize(sources));
     let done = 0;
     for (const [i, chunk] of chunks.entries()) {
       const dur = chunk.reduce((s, l) => s + l.frames / fps, 0);
