@@ -6,7 +6,7 @@ import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
 import { realMediaTools } from '../media-tools.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
-import { analyzeLibrary, snapToBeats } from './music.js';
+import { analyzeLibrary, findTrack, snapToBeats } from './music.js';
 import { layoutTimeline } from './timeline.js';
 
 const lib = (bpm: number, beatOffset: number): MusicLibrary => ({ version: 1, tracks: [{ file: 'beat.wav', mood: 'upbeat', licence: '', bpm, beatOffset, durationSec: 60 }] });
@@ -138,5 +138,55 @@ describe('analyzeLibrary', () => {
     } finally {
       await lock.release();
     }
+  });
+
+  it('skips a file that is not audio with a warning, and still analyses the rest and writes the library', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, 'quiet.wav')]);
+    await writeFile(join(dir, 'notes.mp3'), 'not audio at all');
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.warnings).toEqual([expect.stringMatching(/^skipped notes\.mp3: ffprobe exited with code 1 — /)]);
+    expect(out.tracks.map((t) => t.file)).toEqual(['quiet.wav']);
+    expect(JSON.parse(await readFile(join(dir, 'library.json'), 'utf8')).tracks.map((t: { file: string }) => t.file)).toEqual(['quiet.wav']);
+  });
+
+  it('skips a track whose duration cannot be read instead of failing on the library schema', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, 'stream.wav')]);
+    const real = await realMediaTools();
+    const out = await analyzeLibrary(dir, { ...real, probe: async (f) => ({ ...(await real.probe(f)), durationSec: 0 }) });
+    expect(out.warnings).toEqual(["skipped stream.wav: its duration can't be read (a damaged or streamed file) — re-export it"]);
+    expect(out.tracks).toEqual([]);
+    expect(out.library.tracks).toEqual([]);
+  });
+
+  it('reports a listed track whose file is gone, and does not list it as present', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    const gone = { file: 'gone.mp3', mood: 'tension', licence: 'CC0', bpm: 100, beatOffset: 0, durationSec: 30 };
+    await writeFile(join(dir, 'library.json'), JSON.stringify({ version: 1, tracks: [gone] }));
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.warnings).toEqual(['gone.mp3 is in library.json but not in the music folder — put it back, or remove its entry']);
+    expect(out.tracks).toEqual([]);
+    expect(out.library.tracks).toEqual([gone]);
+  });
+
+  it('matches file names however their accents are encoded (NFC or NFD), so a track is never listed twice', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    const nfd = 'café.wav'.normalize('NFD');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, nfd)]);
+    const entry = { file: 'café.wav'.normalize('NFC'), mood: 'relaxed', licence: 'mine', bpm: 90, beatOffset: 0, durationSec: 2 };
+    await writeFile(join(dir, 'library.json'), JSON.stringify({ version: 1, tracks: [entry] }));
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.library.tracks).toEqual([entry]);
+    expect(out.tracks).toEqual([entry]);
+    expect(out.warnings).toEqual([]);
+  });
+});
+
+describe('findTrack', () => {
+  it('finds a track by name in either Unicode form', () => {
+    const l = { version: 1 as const, tracks: [{ file: 'café.wav'.normalize('NFD'), mood: 'upbeat' as const, licence: '', bpm: null, beatOffset: null, durationSec: null }] };
+    expect(findTrack(l, 'café.wav'.normalize('NFC'))).toBe(l.tracks[0]);
+    expect(findTrack(l, 'cafe.wav')).toBeUndefined();
   });
 });

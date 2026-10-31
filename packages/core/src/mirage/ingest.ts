@@ -5,7 +5,7 @@ import { extname, join, resolve } from 'node:path';
 import { CatalogSchema, type Catalog, type Clip, type ClipKind, type ProbeInfo, type Transcript } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
-import { MirageError } from './errors.js';
+import { errorReason, MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
 
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm']);
@@ -53,13 +53,6 @@ export interface IngestResult {
   skipped: { file: string; reason: string }[];
   /** Problems the user should hear about (printed with ⚠). */
   warnings: string[];
-}
-
-/** An error's message plus the tool's own reason (a SidecarError's hint: ffmpeg's last stderr line). */
-export function errorReason(e: unknown): string {
-  if (!(e instanceof Error)) return String(e);
-  const hint = (e as { hint?: unknown }).hint;
-  return typeof hint === 'string' && hint && !e.message.includes(hint) ? `${e.message} — ${hint}` : e.message;
 }
 
 /** Transcribes a clip's audio. Returns null (and warns) when transcription fails; a clip with no speech gets an empty transcript. */

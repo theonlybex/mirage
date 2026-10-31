@@ -124,12 +124,13 @@ async function main() {
     case 'music': {
       const dir = join(project, 'music');
       if (!existsSync(dir)) throw new MirageError('NO_MUSIC_TRACK', `${dir} does not exist`, 'Create it and put your music tracks in it.');
-      const lib = await analyzeLibrary(dir, tools);
-      if (!lib.tracks.length) console.log(`  no tracks in ${dir}`);
-      for (const t of lib.tracks) {
+      const { tracks, warnings } = await analyzeLibrary(dir, tools);
+      if (!tracks.length) console.log(`  no tracks in ${dir}`);
+      for (const t of tracks) {
         const tempo = t.bpm === null ? 'no clear beat' : `${t.bpm.toFixed(1)} BPM`;
         console.log(`  ${t.file}  ${t.mood}  ${tempo}${t.durationSec === null ? '' : `  ${t.durationSec.toFixed(0)} s`}`);
       }
+      for (const w of warnings) console.log(`⚠ ${w}`);
       break;
     }
     case 'check':

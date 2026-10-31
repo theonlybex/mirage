@@ -9,7 +9,7 @@ import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { MirageError } from './errors.js';
 import { loadCatalog } from './ingest.js';
 import { acquireLock, clearLeftovers, type Lock } from './lock.js';
-import { loadLibrary } from './music.js';
+import { checkCueFiles, cueTrack, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
@@ -96,18 +96,11 @@ export function chunkTimeoutMs(chunk: LaidItem[], fps: number): number {
   return Math.round(Math.max(120, srcSec * 3 + outSec * 30) * 1000);
 }
 
-function checkCueInLibrary(c: MusicCue, i: number, lib: MusicLibrary): void {
-  if (!lib.tracks.some((t) => t.file === c.track)) {
-    throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is not in music/library.json`, 'Run: pnpm mirage music <project>, or fix the track name.');
-  }
-}
-
 export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: string, durationSec: number, loudnessLufs: number, output: string): string[] {
   const inputs: string[] = [];
   const chains: string[] = [];
   cues.forEach((c, i) => {
-    checkCueInLibrary(c, i, lib);
-    inputs.push('-stream_loop', '-1', '-ss', ffNum(c.offset), '-i', join(musicDir, c.track));
+    inputs.push('-stream_loop', '-1', '-ss', ffNum(c.offset), '-i', join(musicDir, cueTrack(c, i, lib).file));
     const dur = c.end - c.start;
     const fades = [
       c.fadeIn > 0 ? `afade=t=in:d=${ffNum(Math.min(c.fadeIn, dur / 2))}` : '',
@@ -300,12 +293,7 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
   // Everything below is checked before any rendering, so a missing file fails fast.
   const musicDir = resolve(o.musicDir ?? join(project, 'music'));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
-  ep.music.forEach((c, i) => {
-    checkCueInLibrary(c, i, lib!);
-    if (!existsSync(join(musicDir, c.track))) {
-      throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is missing from music/`, `Put ${c.track} back in ${musicDir}, or remove the cue.`);
-    }
-  });
+  if (lib) checkCueFiles(ep.music, lib, musicDir);
   const voTranscripts = final && ep.voiceover ? await loadVoiceoverTranscripts(project, ep) : null;
   const recordings = final ? voiceRecordings(ep) : [];
   for (const rec of recordings) {

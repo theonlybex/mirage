@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
-import { MusicLibrarySchema, type Catalog, type Episode, type MusicLibrary } from '@wordedits/shared';
+import { MusicLibrarySchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type MusicTrack } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
-import { MirageError } from './errors.js';
+import { errorReason, MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
 import { decodeMono, detectTempo } from './tempo.js';
 import { itemFrames, shiftAfter } from './timeline.js';
@@ -22,7 +23,39 @@ export async function loadLibrary(dir: string): Promise<MusicLibrary> {
   }
 }
 
-export async function analyzeLibrary(dir: string, tools: MediaTools): Promise<MusicLibrary> {
+/** The same file name, whichever Unicode form (NFC/NFD) each side uses: macOS and other tools disagree on accents. */
+export const sameFileName = (a: string, b: string) => a.normalize('NFC') === b.normalize('NFC');
+
+export function findTrack(lib: MusicLibrary, file: string): MusicTrack | undefined {
+  return lib.tracks.find((t) => sameFileName(t.file, file));
+}
+
+/** The library track a cue plays; NO_MUSIC_TRACK when library.json does not list it. */
+export function cueTrack(c: MusicCue, i: number, lib: MusicLibrary): MusicTrack {
+  const t = findTrack(lib, c.track);
+  if (!t) throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is not in music/library.json`, 'Run: pnpm mirage music <project>, or fix the track name.');
+  return t;
+}
+
+/** Stops with NO_MUSIC_TRACK when a cue's track is not in library.json or its file is gone from `musicDir`. */
+export function checkCueFiles(cues: MusicCue[], lib: MusicLibrary, musicDir: string): void {
+  cues.forEach((c, i) => {
+    if (!existsSync(join(musicDir, cueTrack(c, i, lib).file))) {
+      throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is missing from music/`, `Put ${c.track} back in ${musicDir}, or remove the cue.`);
+    }
+  });
+}
+
+export interface LibraryReport {
+  library: MusicLibrary;
+  /** Tracks whose file is in the folder and was read. */
+  tracks: MusicTrack[];
+  /** Tracks that were skipped or are missing (printed with ⚠). */
+  warnings: string[];
+}
+
+/** The `music` command: adds the folder's new tracks to library.json and detects their tempo and duration. */
+export async function analyzeLibrary(dir: string, tools: MediaTools): Promise<LibraryReport> {
   const root = resolve(dir);
   const lock = await acquireLock(root, 'music', 'the music folder');
   try {
@@ -33,19 +66,57 @@ export async function analyzeLibrary(dir: string, tools: MediaTools): Promise<Mu
   }
 }
 
-async function analyzeLocked(root: string, tools: MediaTools): Promise<MusicLibrary> {
+async function analyzeLocked(root: string, tools: MediaTools): Promise<LibraryReport> {
   const lib = await loadLibrary(root);
   const files = (await readdir(root)).filter((f) => !f.startsWith('.') && AUDIO_EXTENSIONS.has(extname(f).toLowerCase())).sort();
+  const added = new Set<MusicTrack>();
   for (const file of files) {
-    if (!lib.tracks.some((t) => t.file === file)) lib.tracks.push({ file, mood: 'upbeat', licence: '', bpm: null, beatOffset: null, durationSec: null });
+    if (findTrack(lib, file)) continue;
+    const track: MusicTrack = { file, mood: 'upbeat', licence: '', bpm: null, beatOffset: null, durationSec: null };
+    lib.tracks.push(track);
+    added.add(track);
   }
+  const report: LibraryReport = { library: lib, tracks: [], warnings: [] };
+  const unreadable = new Set<MusicTrack>();
+  const skip = (track: MusicTrack, reason: string) => {
+    report.warnings.push(`skipped ${track.file}: ${reason}`);
+    unreadable.add(track);
+  };
   for (const track of lib.tracks) {
-    if (track.bpm !== null && track.beatOffset !== null && track.durationSec !== null) continue;
-    const path = join(root, track.file);
-    const p = await tools.probe(path).catch(() => null);
-    if (!p?.hasAudio) throw new MirageError('NO_MUSIC_TRACK', `${track.file} is missing or has no audio`, 'Remove it from music/library.json or add the file.');
+    const onDisk = files.find((f) => sameFileName(f, track.file));
+    if (!onDisk) {
+      report.warnings.push(`${track.file} is in library.json but not in the music folder — put it back, or remove its entry`);
+      continue;
+    }
+    if (track.bpm !== null && track.beatOffset !== null && track.durationSec !== null) {
+      report.tracks.push(track);
+      continue;
+    }
+    const path = join(root, onDisk);
+    let p;
+    try {
+      p = await tools.probe(path);
+    } catch (e) {
+      skip(track, errorReason(e));
+      continue;
+    }
+    if (!p.hasAudio) {
+      skip(track, 'no audio stream');
+      continue;
+    }
+    if (!(p.durationSec > 0)) {
+      skip(track, "its duration can't be read (a damaged or streamed file) — re-export it");
+      continue;
+    }
     if (track.bpm === null || track.beatOffset === null) {
-      const tempo = detectTempo(await decodeMono(path, join(root, `.tmp-${randomUUID()}.f32`), tools, { sampleRate: 11025, maxSec: 90 }), 11025);
+      let samples: Float32Array;
+      try {
+        samples = await decodeMono(path, join(root, `.tmp-${randomUUID()}.f32`), tools, { sampleRate: 11025, maxSec: 90 });
+      } catch (e) {
+        skip(track, errorReason(e));
+        continue;
+      }
+      const tempo = detectTempo(samples, 11025);
       // A weak or silent pulse is not a tempo: leave the grid unset so snapToBeats never snaps to an invented one.
       if (tempo.confidence >= MIN_CONFIDENCE) {
         track.bpm ??= tempo.bpm;
@@ -53,9 +124,12 @@ async function analyzeLocked(root: string, tools: MediaTools): Promise<MusicLibr
       }
     }
     track.durationSec ??= p.durationSec;
+    report.tracks.push(track);
   }
+  // A new file that could not be read is not added (it is retried next time); a listed one keeps its mood and licence.
+  lib.tracks = lib.tracks.filter((t) => !(added.has(t) && unreadable.has(t)));
   await writeJsonFile(join(root, 'library.json'), MusicLibrarySchema, lib, 'music/library.json');
-  return lib;
+  return report;
 }
 
 /**
@@ -67,7 +141,7 @@ async function analyzeLocked(root: string, tools: MediaTools): Promise<MusicLibr
 export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): Episode {
   // The voice-over is fitted to these exact items (holds, splits): snapping now would pull them out of step.
   if (ep.voiceover) return ep;
-  const track = (file: string) => lib.tracks.find((t) => t.file === file);
+  const track = (file: string) => findTrack(lib, file);
   let cur: Episode = {
     ...ep,
     music: ep.music.map((c) => {

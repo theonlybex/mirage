@@ -25,7 +25,7 @@ Then for each new clip in `<project>/catalog.json`:
 Remind the user once per project that frames are sent to Anthropic, so screens with secrets should not be recorded.
 
 ## 2. Music
-Tracks go in `<project>/music/`. `pnpm mirage music <project>` writes `library.json`; set each track's `mood` (`punchy`, `light`, `tension`, `upbeat`, `riser`, `reveal`, `relaxed`) and `licence`. A track shown as `no clear beat` has no beat grid: montages under it are not snapped, so prefer another track for `onBeat` montages.
+Tracks go in `<project>/music/`. `pnpm mirage music <project>` writes `library.json`; set each track's `mood` (`punchy`, `light`, `tension`, `upbeat`, `riser`, `reveal`, `relaxed`) and `licence`. A track shown as `no clear beat` has no beat grid: montages under it are not snapped, so prefer another track for `onBeat` montages. `⚠ skipped <file>: …` means it could not be read as audio (ask for another export); `⚠ <file> is in library.json but not in the music folder` means its file is gone: ask the user to put it back, or remove its entry and any cue using it.
 
 ## 3. Write `episodes/<n>/episode.json` (version 2)
 The schema is `packages/shared/src/schemas/episode.ts`. A minimal file:

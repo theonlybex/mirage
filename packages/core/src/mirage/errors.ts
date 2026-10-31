@@ -32,3 +32,10 @@ export function describeError(e: unknown): { message: string; hint?: string } {
   if (path && err.code === 'ENOSPC') return { message: `the disk is full (writing ${path})`, hint: 'Free some space and run the command again.' };
   return { message: err.message, hint: err.hint };
 }
+
+/** An error's message plus the tool's own reason (a SidecarError's hint: ffmpeg's last stderr line), for ⚠ skip lines. */
+export function errorReason(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  const hint = (e as { hint?: unknown }).hint;
+  return typeof hint === 'string' && hint && !e.message.includes(hint) ? `${e.message} — ${hint}` : e.message;
+}
