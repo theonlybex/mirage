@@ -103,6 +103,12 @@ describe('musicTrackArgs', () => {
     expect(graph).toContain('adelay=delays=2000:all=1');
     expect(graph).toContain('amix=inputs=1:duration=longest:normalize=0,apad,atrim=end=15[out]');
   });
+  it('measures a cue shorter than 3 s over 3.1 s of its looping track, then cuts it to length', () => {
+    const args = musicTrackArgs([{ track: 'a.mp3', start: 0, end: 1, gainDb: -5, fadeIn: 0, fadeOut: 0, offset: 0 }], lib, '/m', 2, -14, '/w/m.wav');
+    const graph = args[args.indexOf('-filter_complex') + 1];
+    expect(graph).toContain('[0:a]asetpts=N/SR/TB,atrim=duration=3.1,');
+    expect(graph).toMatch(/loudnorm=I=-19:TP=-2:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=1,adelay/);
+  });
   it('clamps the loudnorm target to the range ffmpeg accepts', () => {
     const args = musicTrackArgs([{ track: 'a.mp3', start: 0, end: 4, gainDb: -60, fadeIn: 0, fadeOut: 0, offset: 0 }], lib, '/m', 4, -14, '/w/m.wav');
     expect(args[args.indexOf('-filter_complex') + 1]).toContain('loudnorm=I=-70:TP=-2:LRA=11');
@@ -151,6 +157,13 @@ describe('episodeFinalArgs', () => {
     const args = episodeFinalArgs({ chunkList: 'chunks.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -14, assFile: 'overlays.ass' });
     expect(args.filter((a) => a === '-i')).toHaveLength(1);
     expect(args[args.indexOf('-filter_complex') + 1]).toContain('[0:a]anull[speechraw]');
+  });
+  it('does not loudnorm a silent speech bus or an episode under 3 s (loudnorm returns NaN on short silence)', () => {
+    const graph = (o: object) => { const a = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -14, assFile: 'o.ass', ...o }); return a[a.indexOf('-filter_complex') + 1]; };
+    expect(graph({ liveAudio: false })).toContain('[speechraw]highpass=f=90,aresample=48000');
+    expect(graph({ liveAudio: false, voiceRaw: 'vo.f32' })).toContain('loudnorm=I=-14');
+    expect(graph({ durationSec: 2.5 })).not.toContain('loudnorm');
+    expect(graph({})).toContain('loudnorm=I=-14');
   });
   it('clamps the speech loudnorm target', () => {
     const lo = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -90, assFile: 'o.ass' });
@@ -257,6 +270,24 @@ describe('renderEpisode (real ffmpeg)', () => {
     await expect(renderEpisode({ project, episode: 9, mode: 'rough', tools: shortPicture })).rejects.toMatchObject({ code: 'DURATION_MISMATCH', message: 'Rendered 0.5s of picture but the timeline is 1s' });
     expect(existsSync(join(project, 'episodes', '9', 'rough.mp4'))).toBe(false);
   }, 60_000);
+
+  it('renders episodes under 3 s with no live sound, with silent live sound, and with a 1 s music cue', async () => {
+    const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+    await gen(['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '6', join(project, 'music', 'hush.wav')]);
+    await analyzeLibrary(join(project, 'music'), tools);
+    const cases: [object[], object][] = [
+      [[{ id: 'p', beat: 'problem', clip: 'c002', src: { in: 0, out: 2.5 } }], {}],
+      [[{ id: 'k', beat: 'problem', clip: 'c001', src: { in: 0, out: 2 }, audio: 'keep' }], { music: [{ track: 'hush.wav', start: 0, end: 1 }] }],
+      [[{ id: 'm', beat: 'problem', clip: 'c003', src: { in: 0, out: 2 } }], { music: [{ track: 'loop.wav', start: 0.5, end: 1.5 }] }],
+    ];
+    for (const [items, extra] of cases) {
+      await saveEpisode(project, ep(items, { number: 10, ...extra }));
+      for (const mode of ['rough', 'guide'] as const) {
+        const r = await renderEpisode({ project, episode: 10, mode, tools });
+        expect(Math.abs((await tools.probe(r.outputPath)).durationSec - r.durationSec)).toBeLessThanOrEqual(0.1);
+      }
+    }
+  }, 120_000);
 
   it('stops before rendering anything when a music cue is not in the library or its file is gone', async () => {
     await saveEpisode(project, ep(one, { number: 4, music: [{ track: 'nope.wav', start: 0, end: 1 }] }));

@@ -53,6 +53,8 @@ export function chunkItems(laid: LaidItem[]): LaidItem[][] {
 }
 
 const FLTP_STEREO = 'aformat=sample_fmts=fltp:channel_layouts=stereo';
+/** Shorter than this, loudnorm turns digital silence into NaN (and the AAC encoder then fails). */
+const LOUDNORM_MIN_SEC = 3.1;
 /** loudnorm rejects targets outside [-70, -5] LUFS. */
 const lufs = (n: number) => ffNum(Math.min(-5, Math.max(-70, n)));
 
@@ -113,6 +115,8 @@ export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: st
   cues.forEach((c, i) => {
     inputs.push('-stream_loop', '-1', '-ss', ffNum(c.offset), '-i', join(musicDir, cueTrack(c, i, lib).file));
     const dur = c.end - c.start;
+    // loudnorm turns under 3 s of digital silence into NaN: a short cue is measured over 3 s of its (looping) track.
+    const measured = Math.max(dur, LOUDNORM_MIN_SEC);
     const fades = [
       c.fadeIn > 0 ? `afade=t=in:d=${ffNum(Math.min(c.fadeIn, dur / 2))}` : '',
       c.fadeOut > 0 ? `afade=t=out:st=${ffNum(Math.max(0, dur - c.fadeOut))}:d=${ffNum(Math.min(c.fadeOut, dur))}` : '',
@@ -121,11 +125,12 @@ export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: st
       [
         // With -stream_loop and -ss, loop seams overlap timestamps by the offset; renumbering by sample count
         // keeps atrim and afade (both timestamp-based) on the cue's real length.
-        `[${i}:a]asetpts=N/SR/TB,atrim=duration=${ffNum(dur)}`,
+        `[${i}:a]asetpts=N/SR/TB,atrim=duration=${ffNum(measured)}`,
         'asetpts=PTS-STARTPTS',
         `aresample=48000,${FLTP_STEREO}`,
         `loudnorm=I=${lufs(loudnessLufs + c.gainDb)}:TP=-2:LRA=11`,
         `aresample=48000,${FLTP_STEREO}`,
+        ...(measured > dur ? [`atrim=duration=${ffNum(dur)}`] : []),
         ...fades,
         `adelay=delays=${Math.round(c.start * 1000)}:all=1[m${i}]`,
       ].join(','),
@@ -171,6 +176,8 @@ export interface FinalEpisodeOptions {
   fontsDir?: string;
   musicWav?: string;
   voiceRaw?: string;
+  /** Some item keeps its live sound (default true). */
+  liveAudio?: boolean;
 }
 
 export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
@@ -188,8 +195,11 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   } else {
     chains.push('[0:a]anull[speechraw]');
   }
+  // A speech bus with no live sound and no voice-over is silence, which needs no normalising; and loudnorm turns
+  // digital silence shorter than 3 s into NaN, so an episode that short plays its sound as recorded.
+  const normalise = (o.liveAudio !== false || o.voiceRaw !== undefined) && o.durationSec >= LOUDNORM_MIN_SEC;
   chains.push(
-    `[speechraw]highpass=f=90,loudnorm=I=${lufs(o.loudnessLufs)}:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${o.musicWav ? '[speech]' : '[aout]'}`,
+    `[speechraw]highpass=f=90,${normalise ? `loudnorm=I=${lufs(o.loudnessLufs)}:TP=-1:LRA=11,` : ''}aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${o.musicWav ? '[speech]' : '[aout]'}`,
   );
   if (o.musicWav) {
     chains.push(
@@ -360,6 +370,7 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
       episodeFinalArgs({
         chunkList: 'chunks.txt', output: partial, encoder, mode: final ? 'final' : 'preview', width: W, height: H, fps, durationSec: D,
         loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir: process.platform === 'darwin' ? '/System/Library/Fonts' : undefined, musicWav, voiceRaw,
+        liveAudio: laid.some((l) => l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), onProgress: (f) => report(0.7 + 0.3 * f) },
     );
