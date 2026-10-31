@@ -189,6 +189,25 @@ describe('fitVoiceover span choice', () => {
   });
 });
 
+describe('fitVoiceover with a false start', () => {
+  it('plays only the re-read when the false start and the re-read were transcribed differently', () => {
+    const line = 'The Supabase migration broke. I spent a thousand dollars and rewrote the whole app.';
+    const rec = tx([...said('The Supabase migration broke.', 0), ...said('The super base migration broke.', 3), ...said('I spent a thousand dollars and rewrote the whole app.', 4.8)]);
+    const slots = [{ id: 'n1', start: 0, end: 8, maxWords: 20, line }];
+    const { episode: ep } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(ep.voiceover!.lines[0].src.in).toBeCloseTo(2.95);
+  });
+
+  it('never plays a flubbed sentence and its re-read together', () => {
+    const line = 'I shipped an app. Everything broke on every single request today.';
+    const rec = tx([...said('I shipped an app.', 0), ...said('Everything broke on every', 1.5), { w: 'uh.', start: 2.8, end: 3, conf: 1 }, ...said('Everything broke on every single request today.', 3.5)]);
+    const slots = [{ id: 'n1', start: 0, end: 8, maxWords: 20, line }];
+    const { episode: ep } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    // One contiguous span can't skip the flub, so the re-read is used alone (its opening sentence is lost, not doubled).
+    expect(ep.voiceover!.lines[0].src.in).toBeCloseTo(3.45);
+  });
+});
+
 describe('fitVoiceover with the same line in two slots', () => {
   it('gives each slot its own reading, in order', () => {
     const slots = [

@@ -180,18 +180,22 @@ function mergeCuts(cuts: [number, number][]): [number, number][] {
   return out;
 }
 
-/** A run of sentences [from, to] that reads a line: `matched` of the line's words, in order. */
-type Cand = { from: number; to: number; score: number; matched: number };
+/** A run of sentences [from, to] that reads a line: `matched` of the line's words, in order, among its `length` words. */
+type Cand = { from: number; to: number; score: number; matched: number; length: number };
 
 /**
  * The separate readings of a line among its candidate spans, in recording order. Overlapping spans are one reading: the
- * one covering most of the line wins (then the best score), so a later sub-span never drops the line's opening. A reading
+ * one covering most of the line with least extra speech wins (then the best score), so a later sub-span never drops
+ * the line's opening and a false start before a re-read is never played with it. A reading
  * counts as a take only when it covers about as much of the line as the best one (a re-read of just its second half
  * does not replace a full read).
  */
 function takesOf(pool: Cand[], lineLength: number): Cand[] {
   const best = Math.max(...pool.map((c) => c.score));
-  const ranked = pool.filter((c) => c.score >= best - 0.15).sort((a, b) => b.matched - a.matched || b.score - a.score || b.from - a.from);
+  // Coverage minus extra speech: a span reaching back over a false start gains a word at most (a transcription
+  // difference between the reads) but carries the whole false start.
+  const worth = (c: Cand) => 2 * c.matched - c.length;
+  const ranked = pool.filter((c) => c.score >= best - 0.15).sort((a, b) => worth(b) - worth(a) || b.score - a.score || b.from - a.from);
   const picked: Cand[] = [];
   for (const c of ranked) if (!picked.some((p) => c.from <= p.to && p.from <= c.to)) picked.push(c);
   const most = Math.max(...picked.map((c) => c.matched));
@@ -238,7 +242,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
         tokens = tokens.concat(sTokens[j]);
         if (!belongs[j]) continue;
         const score = similarity(tokens, lineTokens);
-        if (score >= 0.6) out.push({ from: i, to: j, score, matched: lcsLength(tokens, lineTokens) });
+        if (score >= 0.6) out.push({ from: i, to: j, score, matched: lcsLength(tokens, lineTokens), length: tokens.length });
       }
     }
     return out;
