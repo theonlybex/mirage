@@ -7,7 +7,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips } from './ingest.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
-import { buildVoiceTrack, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
@@ -36,11 +36,13 @@ describe('itemChunkArgs', () => {
   const graph = args[args.indexOf('-filter_complex') + 1];
   it('seeks each item and reads only the source it needs at its speed', () => {
     expect(args.slice(0, 8)).toEqual(['-threads', '1', '-ss', '1', '-t', '2.033333', '-i', '/clips/c001.mp4']);
-    expect(args.slice(8, 16)).toEqual(['-threads', '1', '-ss', '0', '-t', '60.666667', '-i', '/clips/c002.mp4']);
+    // Sped-up items decode with all threads: they read far more source than they output.
+    expect(args.slice(8, 14)).toEqual(['-ss', '0', '-t', '60.666667', '-i', '/clips/c002.mp4']);
   });
   it('speeds up, punches in, letterboxes and cuts to exact frames', () => {
-    expect(graph).toContain('[0:v]setpts=(PTS-STARTPTS)/1,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
-    expect(graph).toContain('[1:v]setpts=(PTS-STARTPTS)/20,');
+    expect(graph).toContain('[0:v]setpts=(PTS-STARTPTS)/1,fps=30,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
+    // Frames are dropped to the output rate before any scaling, so a 20x item scales 1 frame in 20.
+    expect(graph).toContain('[1:v]setpts=(PTS-STARTPTS)/20,fps=30,scale=960:540:');
   });
   it('keeps live audio only at real-time speed; sped-up items get silence', () => {
     expect(graph).toContain('[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
@@ -52,6 +54,18 @@ describe('itemChunkArgs', () => {
     const h = ep([{ id: 'h', beat: 'problem', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep', hold: 0.5 }]);
     const g = itemChunkArgs(layoutTimeline(h), { width: 960, height: 540, fps: 30 }, sourcesFor(h, cat), '/w/c.mov');
     expect(g[g.indexOf('-filter_complex') + 1]).toContain('aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2.5,asetpts=PTS-STARTPTS[a0]');
+  });
+});
+
+describe('chunkTimeoutMs', () => {
+  it('scales with the source seconds read and the output seconds written, at least 2 minutes', () => {
+    const e = ep([
+      { id: 'a', beat: 'montage', clip: 'c002', src: { in: 0, out: 400 }, speed: 100 },
+      { id: 'b', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 } },
+    ]);
+    // 402 s of source × 3 s + 6 s of output × 30 s
+    expect(chunkTimeoutMs(layoutTimeline(e), 30)).toBe((402 * 3 + 6 * 30) * 1000);
+    expect(chunkTimeoutMs(layoutTimeline(ep([{ id: 'c', beat: 'montage', clip: 'c001', src: { in: 0, out: 1 } }])), 30)).toBe(120_000);
   });
 });
 

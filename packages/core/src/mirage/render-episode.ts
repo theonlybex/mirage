@@ -51,13 +51,17 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
   laid.forEach((l, k) => {
     const { item } = l;
     const src = sources.get(item.clip)!;
+    // Real-time items decode on one thread each (a chunk opens up to 30 inputs); sped-up items read far more source
+    // than they output, so they get every thread.
+    if (item.speed <= 1) inputs.push('-threads', '1');
     // One extra output frame of source so fps never comes up short.
-    inputs.push('-threads', '1', '-ss', ffNum(item.src.in), '-t', ffNum(((l.srcFrames + 1) / o.fps) * item.speed), '-i', src.path);
+    inputs.push('-ss', ffNum(item.src.in), '-t', ffNum(((l.srcFrames + 1) / o.fps) * item.speed), '-i', src.path);
     const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2,` : '';
+    // fps right after setpts drops frames to the output rate before any crop or scale touches them.
     chains.push(
-      `[${k}:v]setpts=(PTS-STARTPTS)/${ffNum(item.speed)},${zoom}` +
+      `[${k}:v]setpts=(PTS-STARTPTS)/${ffNum(item.speed)},fps=${ffNum(o.fps)},${zoom}` +
         `scale=${o.width}:${o.height}:force_original_aspect_ratio=decrease,pad=${o.width}:${o.height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,` +
-        `fps=${ffNum(o.fps)},tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`,
+        `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`,
     );
     const dur = ffNum(l.frames / o.fps);
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
@@ -77,6 +81,13 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2',
     output,
   ];
+}
+
+/** Time allowed for one chunk: decoding grows with the source seconds read, encoding with the output seconds written. */
+export function chunkTimeoutMs(chunk: LaidItem[], fps: number): number {
+  const srcSec = chunk.reduce((s, l) => s + (l.item.src.out - l.item.src.in), 0);
+  const outSec = chunk.reduce((s, l) => s + l.frames / fps, 0);
+  return Math.round(Math.max(120, srcSec * 3 + outSec * 30) * 1000);
 }
 
 export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: string, durationSec: number, loudnessLufs: number, output: string): string[] {
@@ -237,7 +248,7 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
       const dur = chunk.reduce((s, l) => s + l.frames / fps, 0);
       await o.tools.runFfmpeg(itemChunkArgs(chunk, { width: W, height: H, fps }, sources, join(work, `chunk-${pad3(i)}.mov`)), {
         expectedDurationSec: dur,
-        timeoutMs: Math.max(120_000, dur * 30 * 1000),
+        timeoutMs: chunkTimeoutMs(chunk, fps),
         onProgress: (f) => report((0.6 * (done + f * dur)) / D),
       });
       done += dur;
