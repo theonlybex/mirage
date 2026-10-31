@@ -1,5 +1,5 @@
 import type { Catalog, Episode, Overlay, Slot, Transcript, VoiceLine, Word } from '@wordedits/shared';
-import { isFiller } from '../autoedit/takes.js';
+import { isFiller, normalizeWord } from '../autoedit/takes.js';
 import { layoutTimeline } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -32,8 +32,58 @@ export function keptSegments(line: VoiceLine): { in: number; out: number; offset
   return out.map((s) => ({ in: r3(s.in), out: r3(s.out), offset: r3(s.offset) }));
 }
 
+/**
+ * Re-spells transcribed words (already on the output timeline) with the written line: tokens are aligned by LCS on
+ * normalized words. Matches take the written spelling with the spoken timing; a differing run between matches becomes
+ * the written run spread over the spoken run's time; extra spoken words stay; written words never spoken are dropped.
+ */
+export function alignWritten(spoken: Word[], text: string): Word[] {
+  const written: string[] = [];
+  for (const tok of text.split(/\s+/).filter(Boolean)) {
+    // Punctuation-only tokens ("—") ride on the word before them.
+    if (!normalizeWord(tok) && written.length) written[written.length - 1] += ` ${tok}`;
+    else written.push(tok);
+  }
+  const a = spoken.map((x) => normalizeWord(x.w));
+  const b = written.map(normalizeWord);
+  const n = a.length;
+  const m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] && a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const pairs: [number, number][] = [];
+  for (let i = 0, j = 0; i < n && j < m; ) {
+    if (a[i] && a[i] === b[j]) pairs.push([i++, j++]);
+    else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else j++;
+  }
+  const out: Word[] = [];
+  const gap = (i0: number, i1: number, j0: number, j1: number) => {
+    if (i1 <= i0) return; // written words never spoken
+    if (j1 <= j0) {
+      out.push(...spoken.slice(i0, i1)); // extra spoken words
+      return;
+    }
+    const t0 = spoken[i0].start;
+    const step = (spoken[i1 - 1].end - t0) / (j1 - j0);
+    for (let j = j0; j < j1; j++) out.push({ w: written[j], start: r3(t0 + (j - j0) * step), end: r3(t0 + (j - j0 + 1) * step), conf: 1 });
+  };
+  let i = 0;
+  let j = 0;
+  for (const [pi, pj] of pairs) {
+    gap(i, pi, j, pj);
+    out.push({ ...spoken[pi], w: written[pj] });
+    i = pi + 1;
+    j = pj + 1;
+  }
+  gap(i, n, j, m);
+  return out;
+}
+
+/** Voice-over transcripts: one for every line, or one per recording path. */
+export type VoTranscripts = Transcript | Map<string, Transcript>;
+
 /** Every spoken (non-filler) word on the output timeline: live audio of kept real-time items, plus the fitted voice-over. */
-export function speechWords(ep: Episode, catalog: Catalog, vo: Transcript | null): Word[] {
+export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | null): Word[] {
   const fps = ep.output.fps;
   const out: Word[] = [];
   for (const l of layoutTimeline(ep)) {
@@ -48,13 +98,17 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: Transcript | null
   }
   if (vo && ep.voiceover) {
     for (const line of ep.voiceover.lines) {
+      const tx = vo instanceof Map ? vo.get(line.recording ?? ep.voiceover.recording) : vo;
+      if (!tx) continue;
       const segs = keptSegments(line);
-      for (const w of vo.words) {
+      const spoken: Word[] = [];
+      for (const w of tx.words) {
         if (isFiller(w)) continue;
         const seg = segs.find((g) => w.start >= g.in - EPS && w.start < g.out);
         if (!seg) continue;
-        out.push({ ...w, start: r3(line.at + seg.offset + w.start - seg.in), end: r3(line.at + seg.offset + Math.min(w.end, seg.out) - seg.in) });
+        spoken.push({ ...w, start: r3(line.at + seg.offset + w.start - seg.in), end: r3(line.at + seg.offset + Math.min(w.end, seg.out) - seg.in) });
       }
+      out.push(...(line.text?.trim() ? alignWritten(spoken, line.text) : spoken));
     }
   }
   return out.sort((a, b) => a.start - b.start);

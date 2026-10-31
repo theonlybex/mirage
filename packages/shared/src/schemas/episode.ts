@@ -66,6 +66,10 @@ export const VoiceLineSchema = z.object({
   src: z.object({ in: z.number().min(0), out: z.number().positive() }),
   /** Ranges of the recording removed inside the line (fillers, long pauses). */
   cuts: z.array(z.tuple([z.number(), z.number()])).default([]),
+  /** The recording this line was cut from; absent = the voice-over's `recording`. */
+  recording: z.string().min(1).optional(),
+  /** The written line, used for caption spelling. */
+  text: z.string().optional(),
 });
 export type VoiceLine = z.infer<typeof VoiceLineSchema>;
 
@@ -81,7 +85,19 @@ export const EpisodeSchema = z
     overlays: z.array(OverlaySchema).default([]),
     music: z.array(MusicCueSchema).default([]),
     slots: z.array(SlotSchema).default([]),
-    voiceover: z.object({ recording: z.string().min(1), lines: z.array(VoiceLineSchema) }).nullable().default(null),
+    voiceover: z
+      .object({
+        recording: z.string().min(1),
+        lines: z.array(VoiceLineSchema),
+        /** Recording path → its transcript file in the episode folder. Absent: voiceover.transcript.json (older episodes). */
+        transcripts: z.record(z.string(), z.string()).default({}),
+        /** Fingerprint of the cut the voice-over was fitted to (items before the fit's holds). */
+        cutFingerprint: z.string().optional(),
+        /** Fingerprint of the items right after the fit; any other value means the cut changed since. */
+        fittedItemsFingerprint: z.string().optional(),
+      })
+      .nullable()
+      .default(null),
     loudnessLufs: z.number().default(-14),
   })
   .superRefine((ep, ctx) => {

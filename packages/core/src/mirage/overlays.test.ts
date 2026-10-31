@@ -91,3 +91,41 @@ describe('buildAss', () => {
     expect(ass).toContain('Dialogue: 6,0:00:04.00,0:00:09.00,Prompt,,0,0,0,,Every request took ten seconds.');
   });
 });
+
+describe('speechWords with the written line', () => {
+  const said = (text: string, t0: number) => text.split(' ').map((x, i) => w(x, +(t0 + i * 0.4).toFixed(3), +(t0 + i * 0.4 + 0.3).toFixed(3)));
+  const withLine = (text: string, src: { in: number; out: number }) =>
+    EpisodeSchema.parse({ ...ep, items: [{ id: 'b', beat: 'montage', clip: 'c001', src: { in: 5, out: 10 } }], voiceover: { recording: 'vo.m4a', lines: [{ slot: 'n1', at: 1, src, cuts: [], text }] } });
+
+  it('captions voice-over in the written spelling, with the transcribed timing', () => {
+    const vo = tx(said('Every request took 10 seconds so I rewrote the back end.', 20));
+    const words = speechWords(withLine('Every request took ten seconds, so I rewrote the backend.', { in: 19.95, out: 24.5 }), catalog, vo);
+    expect(words.map((x) => x.w)).toEqual(['Every', 'request', 'took', 'ten', 'seconds,', 'so', 'I', 'rewrote', 'the', 'backend.']);
+    const ten = words[3];
+    expect([ten.start, ten.end]).toEqual([2.25, 2.55]);
+    const backend = words[9];
+    expect(backend.start).toBeCloseTo(1 + 0.05 + 3.6, 3);
+    expect(backend.end).toBeCloseTo(1 + 0.05 + 4.3, 3);
+    for (const x of words) {
+      expect(x.start).toBeGreaterThanOrEqual(1);
+      expect(x.end).toBeLessThanOrEqual(1 + 4.55);
+    }
+  });
+
+  it('keeps extra spoken words and drops written words that were never said', () => {
+    const vo = tx(said('So the build really kept failing.', 20));
+    const words = speechWords(withLine('So the build kept failing badly.', { in: 19.95, out: 23 }), catalog, vo);
+    expect(words.map((x) => x.w)).toEqual(['So', 'the', 'build', 'really', 'kept', 'failing']);
+  });
+});
+
+describe('speechWords with several recordings', () => {
+  it('reads each line\'s words from its own recording\'s transcript', () => {
+    const e = EpisodeSchema.parse({ ...ep, items: [{ id: 'b', beat: 'montage', clip: 'c001', src: { in: 5, out: 10 } }], voiceover: { recording: 'vo.m4a', lines: [
+      { slot: 'n1', at: 0, src: { in: 0, out: 1 }, cuts: [] },
+      { slot: 'n2', at: 2, src: { in: 0, out: 1 }, cuts: [], recording: 'n2.m4a' },
+    ] } });
+    const map = new Map([['vo.m4a', tx([w('First.', 0.1, 0.5)])], ['n2.m4a', tx([w('Second.', 0.2, 0.6)])]]);
+    expect(speechWords(e, catalog, map).map((x) => [x.w, x.start])).toEqual([['First.', 0.1], ['Second.', 2.2]]);
+  });
+});

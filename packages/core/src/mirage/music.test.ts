@@ -17,6 +17,11 @@ const episode = (items: object[], extra: object = {}) =>
   EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items, music: [{ track: 'beat.wav', start: 0, end: 20 }], ...extra });
 
 describe('snapToBeats', () => {
+  it('leaves an episode with a fitted voice-over alone, so the holds and splits of the fit stay in step', () => {
+    const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.3 }, onBeat: true }], { voiceover: { recording: 'vo.m4a', lines: [] } });
+    expect(snapToBeats(ep, catalog(60), lib(120, 0.1))).toBe(ep);
+  });
+
   it('starts each cue on a beat and gives onBeat items whole-beat lengths, shifting what follows', () => {
     const ep = episode(
       [

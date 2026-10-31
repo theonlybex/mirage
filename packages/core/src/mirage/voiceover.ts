@@ -1,4 +1,5 @@
-import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
+import { createHash } from 'node:crypto';
+import { EpisodeSchema, type Catalog, type Episode, type TimelineItem, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { isFiller, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
 import { MirageError } from './errors.js';
 import { keptSegments } from './overlays.js';
@@ -6,6 +7,38 @@ import { itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './time
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/**
+ * Identifies a cut: sha256 (first 16 hex) of each item's id, clip, source range, speed and hold. Hold is included
+ * because a changed hold moves everything after it just like a changed source range.
+ */
+export function itemsFingerprint(items: TimelineItem[]): string {
+  const key = items.map((i) => [i.id, i.clip, i.src.in, i.src.out, i.speed, i.hold]);
+  return createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 16);
+}
+
+/** True when the episode's items are no longer the ones its voice-over was fitted to. */
+export function cutChanged(ep: Episode): boolean {
+  const fp = ep.voiceover?.fittedItemsFingerprint;
+  return fp !== undefined && fp !== itemsFingerprint(ep.items);
+}
+
+export function cutChangedError(): MirageError {
+  return new MirageError(
+    'BAD_ITEM',
+    'The cut changed after the voice-over was fitted',
+    'Run: pnpm mirage slots <project> <n>, then pnpm mirage vo <project> <n> <recording> (it reuses the saved transcript)',
+  );
+}
+
+/** Slots with a written line but no fitted voice-over line. */
+export function missingSlots(ep: Episode): string[] {
+  const placed = new Set(ep.voiceover?.lines.map((l) => l.slot) ?? []);
+  return ep.slots
+    .filter((s) => s.line.trim() && !placed.has(s.id))
+    .sort((a, b) => a.start - b.start)
+    .map((s) => s.id);
+}
 
 /** The schema's limit on an item's frozen frame. */
 const MAX_HOLD = 10;
@@ -97,11 +130,19 @@ function mergeCuts(cuts: [number, number][]): [number, number][] {
   return out;
 }
 
-export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording: string; transcript: Transcript }): { episode: Episode; report: FitReport } {
+/**
+ * Fits the lines read in `recording` into their slots. With `only`, fits just those slots (lines re-recorded in a new
+ * take) and keeps every other placed line; without it, replaces the whole voice-over.
+ */
+export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording: string; transcript: Transcript; only?: string[] }): { episode: Episode; report: FitReport } {
   const words = o.transcript.words;
   const sentences = splitSentences(words);
   const sTokens = sentences.map((s) => sentenceTokens(s, words));
-  const written = o.episode.slots.filter((s) => s.line.trim()).sort((a, b) => a.start - b.start);
+  const allWritten = o.episode.slots.filter((s) => s.line.trim()).sort((a, b) => a.start - b.start);
+  const prev = o.only ? o.episode.voiceover : null;
+  if (prev && cutChanged(o.episode)) throw cutChangedError();
+  const targets = o.only ? new Set(o.only) : null;
+  const written = targets ? allWritten.filter((s) => targets.has(s.id)) : allWritten;
   const fps = o.episode.output.fps;
 
   type Cand = { from: number; to: number; score: number };
@@ -124,12 +165,25 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     return out;
   });
 
-  if (written.length === 0) {
+  if (allWritten.length === 0) {
     throw new MirageError('NOTHING_MATCHED', 'No narration lines are written yet', 'Run slots and write a line for each slot first.');
   }
+  if (written.length === 0) {
+    throw new MirageError('NOTHING_MATCHED', 'None of those slots has a written line', 'List slots that have a line (see pnpm mirage slots).');
+  }
 
-  let ep = o.episode;
-  const lines: VoiceLine[] = [];
+  // Placed lines live in ep.voiceover while fitting, so a later hold shifts every line after it (kept ones included).
+  const recording = prev ? prev.recording : o.recording;
+  const lineRecording = o.recording === recording ? {} : { recording: o.recording };
+  let ep: Episode = {
+    ...o.episode,
+    voiceover: {
+      recording,
+      lines: prev ? prev.lines.filter((l) => !targets!.has(l.slot)) : [],
+      transcripts: prev ? prev.transcripts : {},
+      cutFingerprint: prev?.cutFingerprint ?? itemsFingerprint(o.episode.items),
+    },
+  };
   const report: FitReport = { lines: [], extendedSec: 0 };
   let prevEnd = -1;
 
@@ -164,7 +218,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       const b = spoken[i].start;
       if (b - a > 0.6) cuts.push([r3(a + 0.15), r3(b - 0.15)]);
     }
-    const draft: VoiceLine = { slot: written[k].id, at: 0, src: { in: r3(srcIn), out: r3(srcOut) }, cuts: mergeCuts(cuts) };
+    const draft: VoiceLine = { slot: written[k].id, at: 0, src: { in: r3(srcIn), out: r3(srcOut) }, cuts: mergeCuts(cuts), ...lineRecording, text: written[k].line };
     const duration = keptSegments(draft).reduce((s, g) => s + g.out - g.in, 0);
 
     const slot = ep.slots.find((s) => s.id === written[k].id)!;
@@ -182,12 +236,14 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     } else {
       overrun = 0;
     }
-    lines.push({ ...draft, at });
+    ep = { ...ep, voiceover: { ...ep.voiceover!, lines: [...ep.voiceover!.lines, { ...draft, at }] } };
     report.lines.push({ slot: slot.id, status: 'placed', takes, overrunSec: r3(overrun) });
   }
 
   if (!report.lines.some((l) => l.status === 'placed')) {
     throw new MirageError('NOTHING_MATCHED', 'None of the script lines were found in the recording', 'Check that you read the current lines; re-run slots and guide if the cut changed.');
   }
-  return { episode: EpisodeSchema.parse({ ...ep, voiceover: { recording: o.recording, lines } }), report };
+  const vo = ep.voiceover!;
+  const lines = [...vo.lines].sort((a, b) => a.at - b.at);
+  return { episode: EpisodeSchema.parse({ ...ep, voiceover: { ...vo, lines, fittedItemsFingerprint: itemsFingerprint(ep.items) } }), report };
 }

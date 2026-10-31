@@ -12,6 +12,7 @@ import { loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
+import { cutChanged, cutChangedError } from './voiceover.js';
 
 export const CHUNK_ITEMS = 30;
 const pad3 = (i: number) => String(i).padStart(3, '0');
@@ -129,19 +130,22 @@ export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: st
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', output];
 }
 
-export function buildVoiceTrack(o: { recording: Float32Array; sampleRate: number; lines: VoiceLine[]; durationSec: number }): Float32Array {
+/** Lays the fitted lines out on the timeline. `recording` is one decoded recording, or one per path (lines without their own `recording` use `defaultRecording`). */
+export function buildVoiceTrack(o: { recording: Float32Array | Map<string, Float32Array>; defaultRecording?: string; sampleRate: number; lines: VoiceLine[]; durationSec: number }): Float32Array {
   const sr = o.sampleRate;
   const out = new Float32Array(Math.round(o.durationSec * sr));
   const fade = Math.max(1, Math.round(0.008 * sr));
   for (const line of o.lines) {
+    const rec = o.recording instanceof Map ? o.recording.get(line.recording ?? o.defaultRecording ?? '') : o.recording;
+    if (!rec) throw new MirageError('BAD_ITEM', `line ${line.slot}: its recording ${line.recording ?? o.defaultRecording} was not loaded`, 'Run vo again for that recording.');
     for (const seg of keptSegments(line)) {
       const from = Math.round(seg.in * sr);
-      const to = Math.min(o.recording.length, Math.round(seg.out * sr));
+      const to = Math.min(rec.length, Math.round(seg.out * sr));
       const at = Math.round((line.at + seg.offset) * sr);
       const n = to - from;
       for (let i = 0; i < n && at + i < out.length; i++) {
         const gain = Math.max(0, Math.min(1, i / fade, (n - 1 - i) / fade));
-        out[at + i] += o.recording[from + i] * (fade <= 1 ? 1 : gain);
+        out[at + i] += rec[from + i] * (fade <= 1 ? 1 : gain);
       }
     }
   }
@@ -216,15 +220,30 @@ export async function saveEpisode(project: string, ep: Episode): Promise<void> {
 
 export type EpisodeMode = 'rough' | 'guide' | 'final';
 
-async function loadVoiceoverTranscript(dir: string, n: number): Promise<Transcript> {
-  try {
-    return await readJsonFile(join(dir, 'voiceover.transcript.json'), TranscriptSchema, `episodes/${n}/voiceover.transcript.json`);
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new MirageError('NO_EPISODE', `episodes/${n}/voiceover.transcript.json is missing`, `Run: pnpm mirage vo <project> ${n} <recording>`);
+/** Every recording the voice-over's lines use (the voice-over's own recording when it has no lines yet). */
+export function voiceRecordings(ep: Episode): string[] {
+  const vo = ep.voiceover;
+  if (!vo) return [];
+  return vo.lines.length ? [...new Set(vo.lines.map((l) => l.recording ?? vo.recording))] : [vo.recording];
+}
+
+/** The transcript of each recording the voice-over uses, keyed by recording path. */
+export async function loadVoiceoverTranscripts(project: string, ep: Episode): Promise<Map<string, Transcript>> {
+  const n = ep.number;
+  const dir = episodeDir(project, n);
+  const out = new Map<string, Transcript>();
+  for (const rec of voiceRecordings(ep)) {
+    const file = ep.voiceover!.transcripts[rec] ?? 'voiceover.transcript.json';
+    try {
+      out.set(rec, await readJsonFile(join(dir, file), TranscriptSchema, `episodes/${n}/${file}`));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new MirageError('NO_EPISODE', `episodes/${n}/${file} is missing`, `Run: pnpm mirage vo <project> ${n} ${rec}`);
+      }
+      throw e;
     }
-    throw e;
   }
+  return out;
 }
 
 /** Best-effort removal of work folders and partial outputs left behind by a render that was killed. */
@@ -239,6 +258,8 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
   const catalog = await loadCatalog(project);
   if (catalog.clips.length === 0) throw new MirageError('NO_CATALOG', 'The project has no catalogued clips', 'Run: pnpm mirage ingest <project> <clips folder>');
   const sources = sourcesFor(ep, catalog);
+  // A voice-over fitted to another cut would play out of step with the picture.
+  if (o.mode === 'final' && cutChanged(ep)) throw cutChangedError();
   const laid = layoutTimeline(ep);
   const D = laid[laid.length - 1].end;
   const fps = ep.output.fps;
@@ -255,10 +276,11 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
       throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is missing from music/`, `Put ${c.track} back in ${musicDir}, or remove the cue.`);
     }
   });
-  const voTranscript: Transcript | null = final && ep.voiceover ? await loadVoiceoverTranscript(dir, o.episode) : null;
-  if (final && ep.voiceover) {
-    const rec = resolve(project, ep.voiceover.recording);
-    if (!existsSync(rec)) throw new MirageError('BAD_ITEM', `voice-over recording ${rec} is missing`, 'Reconnect the drive or put the recording back, then render again.');
+  const voTranscripts = final && ep.voiceover ? await loadVoiceoverTranscripts(project, ep) : null;
+  const recordings = final ? voiceRecordings(ep) : [];
+  for (const rec of recordings) {
+    const abs = resolve(project, rec);
+    if (!existsSync(abs)) throw new MirageError('BAD_ITEM', `voice-over recording ${abs} is missing`, 'Reconnect the drive or put the recording back, then render again.');
   }
   const outputPath = join(dir, `${o.mode}.mp4`);
   const id = randomUUID();
@@ -293,13 +315,14 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
 
     let voiceRaw: string | undefined;
     if (final && ep.voiceover) {
-      const pcm = await decodeMono(resolve(project, ep.voiceover.recording), join(work, 'rec.f32'), o.tools, { sampleRate: 48000 });
-      const track = buildVoiceTrack({ recording: pcm, sampleRate: 48000, lines: ep.voiceover.lines, durationSec: D });
+      const pcm = new Map<string, Float32Array>();
+      for (const [i, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve(project, rec), join(work, `rec-${i}.f32`), o.tools, { sampleRate: 48000 }));
+      const track = buildVoiceTrack({ recording: pcm, defaultRecording: ep.voiceover.recording, sampleRate: 48000, lines: ep.voiceover.lines, durationSec: D });
       await writeFile(join(work, 'vo.f32'), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
       voiceRaw = 'vo.f32';
     }
 
-    const cues = o.mode === 'guide' ? [] : groupCaptions(speechWords(ep, catalog, voTranscript), { durationSec: D });
+    const cues = o.mode === 'guide' ? [] : groupCaptions(speechWords(ep, catalog, voTranscripts), { durationSec: D });
     await writeFile(join(work, 'overlays.ass'), buildAss({ width: W, height: H, captions: cues, overlays: ep.overlays, prompts: o.mode === 'guide' ? ep.slots : [] }));
 
     const encoder = final ? await o.tools.pickEncoder() : { name: 'libx264' as const, extraArgs: [] };

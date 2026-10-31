@@ -1,6 +1,6 @@
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { fitVoiceover, holdAt } from './voiceover.js';
+import { cutChanged, fitVoiceover, holdAt, itemsFingerprint, missingSlots } from './voiceover.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 
 function said(text: string, t0: number, per = 0.3): Word[] {
@@ -201,5 +201,54 @@ describe('over-long lines', () => {
   it('holdAt refuses a frozen frame longer than 10 s with a MirageError, not a schema error', () => {
     const ep = EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 5 }, hold: 4 }] });
     expect(() => holdAt(ep, catalog(5), 9, 7)).toThrow(expect.objectContaining({ name: 'MirageError', code: 'BAD_ITEM' }));
+  });
+});
+
+describe('fitVoiceover records what it fitted to', () => {
+  it('stores the written line, the approved cut and the fitted items as fingerprints', () => {
+    const before = episode(SLOTS);
+    const { episode: ep } = fitVoiceover({ episode: before, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(ep.voiceover!.lines.map((l) => l.text)).toEqual(['This is the first line.', 'And here is the second one.']);
+    expect(ep.voiceover!.cutFingerprint).toBe(itemsFingerprint(before.items));
+    expect(ep.voiceover!.fittedItemsFingerprint).toBe(itemsFingerprint(ep.items));
+    expect(ep.voiceover!.fittedItemsFingerprint).not.toBe(ep.voiceover!.cutFingerprint); // n2 held the picture
+    expect(itemsFingerprint(before.items)).toMatch(/^[0-9a-f]{16}$/);
+    expect(cutChanged(ep)).toBe(false);
+    expect(cutChanged({ ...ep, items: [{ ...ep.items[0], src: { in: 0, out: 19 } }] })).toBe(true);
+    expect(cutChanged(before)).toBe(false);
+  });
+});
+
+describe('fitVoiceover adding re-recorded lines', () => {
+  const slotsOf = (...s: [string, number, number, string][]) => s.map(([id, start, end, line]) => ({ id, start, end, maxWords: 8, line }));
+  const slots = slotsOf(['n1', 0, 3, 'Open settings.'], ['n2', 5, 7, 'Then toggle dark mode on and wait for it.'], ['n3', 10, 13, 'Pick a nice accent colour.']);
+  const full = tx([...said('Open settings.', 0), ...said('Pick a nice accent colour.', 2)]);
+  const retake = tx(said('Then toggle dark mode on and wait for it.', 1));
+
+  it('fits only the missing lines from the new recording and keeps the placed ones', () => {
+    const first = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: full });
+    expect(first.report.lines.map((l) => l.status)).toEqual(['placed', 'missing', 'placed']);
+    expect(missingSlots(first.episode)).toEqual(['n2']);
+    const second = fitVoiceover({ episode: first.episode, catalog: catalog(20), recording: 'n2.m4a', transcript: retake, only: missingSlots(first.episode) });
+    expect(second.report.lines.map((l) => [l.slot, l.status])).toEqual([['n2', 'placed']]);
+    const vo = second.episode.voiceover!;
+    expect(vo.recording).toBe('vo.m4a');
+    expect(vo.lines.map((l) => [l.slot, l.recording])).toEqual([['n1', undefined], ['n2', 'n2.m4a'], ['n3', undefined]]);
+    const was = (id: string) => first.episode.voiceover!.lines.find((l) => l.slot === id)!;
+    const now = (id: string) => vo.lines.find((l) => l.slot === id)!;
+    expect(now('n1')).toEqual(was('n1'));
+    // n2 ran past its slot, so the picture held and n3 moved later by exactly that much, with the same audio.
+    expect(second.report.extendedSec).toBeGreaterThan(0);
+    expect(now('n3')).toEqual({ ...was('n3'), at: expect.closeTo(was('n3').at + second.report.extendedSec, 6) });
+    expect(vo.cutFingerprint).toBe(first.episode.voiceover!.cutFingerprint);
+    expect(vo.fittedItemsFingerprint).toBe(itemsFingerprint(second.episode.items));
+  });
+
+  it('refuses to add lines once the cut has changed', () => {
+    const first = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: full });
+    const recut = { ...first.episode, items: [{ ...first.episode.items[0], src: { in: 1, out: 20 } }] };
+    expect(() => fitVoiceover({ episode: recut, catalog: catalog(20), recording: 'n2.m4a', transcript: retake, only: ['n2'] })).toThrow(
+      expect.objectContaining({ code: 'BAD_ITEM', message: 'The cut changed after the voice-over was fitted' }),
+    );
   });
 });

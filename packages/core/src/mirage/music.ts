@@ -51,9 +51,11 @@ export async function analyzeLibrary(dir: string, tools: MediaTools): Promise<Mu
  * Starts each cue on a beat of its track, then ends every onBeat item on a beat of the cue playing under
  * it (extending the source, or slowing it when the clip runs out). Item ends are snapped to the cue's
  * beat grid, not given a rounded duration, so frame rounding never accumulates into drift.
- * Everything after a changed item shifts with it.
+ * Everything after a changed item shifts with it. An episode with a fitted voice-over is returned unchanged.
  */
 export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): Episode {
+  // The voice-over is fitted to these exact items (holds, splits): snapping now would pull them out of step.
+  if (ep.voiceover) return ep;
   const track = (file: string) => lib.tracks.find((t) => t.file === file);
   let cur: Episode = {
     ...ep,

@@ -1,15 +1,16 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
 import { run } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
-import { ingestClips } from './ingest.js';
+import { ingestClips, loadCatalog } from './ingest.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildVoiceTrack, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
+import { fitVoiceover } from './voiceover.js';
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
 // Clip files must exist: sourcesFor refuses a catalogued clip whose file is gone.
@@ -109,6 +110,18 @@ describe('buildVoiceTrack', () => {
     expect(out[5]).toBe(0);
     expect(out[15]).toBeCloseTo(0.5);
     expect(out[50]).toBe(0);
+  });
+});
+
+describe('buildVoiceTrack with several recordings', () => {
+  it('takes each line from its own recording', () => {
+    const recordings = new Map([['vo.m4a', new Float32Array(100).fill(0.5)], ['n2.m4a', new Float32Array(100).fill(-0.25)]]);
+    const out = buildVoiceTrack({
+      recording: recordings, defaultRecording: 'vo.m4a', sampleRate: 10, durationSec: 8,
+      lines: [{ slot: 'n1', at: 0, src: { in: 0, out: 2 }, cuts: [] }, { slot: 'n2', at: 4, src: { in: 0, out: 2 }, cuts: [], recording: 'n2.m4a' }],
+    });
+    expect(out[10]).toBeCloseTo(0.5);
+    expect(out[50]).toBeCloseTo(-0.25);
   });
 });
 
@@ -247,6 +260,53 @@ describe('renderEpisode (real ffmpeg)', () => {
     await expect(renderEpisode({ project, episode: 5, mode: 'final', tools: a.tools })).rejects.toMatchObject({ code: 'BAD_ITEM', message: `voice-over recording ${join(project, 'gone.m4a')} is missing` });
     expect(a.calls).toEqual([]);
   }, 60_000);
+
+  it('refuses a final render when the cut changed after the voice-over was fitted', async () => {
+    const words = 'This is the line.'.split(' ').map((w, i) => ({ w, start: i * 0.3, end: i * 0.3 + 0.25, conf: 1 }));
+    const base = ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 5 } }], { number: 7, slots: [{ id: 'n1', start: 0.5, end: 4, maxWords: 8, line: 'This is the line.' }] });
+    const fitted = fitVoiceover({ episode: base, catalog: await loadCatalog(project), recording: 'vo.wav', transcript: { words, segments: [], speech: [] } }).episode;
+    await saveEpisode(project, { ...fitted, items: [{ ...fitted.items[0], src: { in: 0, out: 4.5 } }] });
+    const a = counting();
+    await expect(renderEpisode({ project, episode: 7, mode: 'final', tools: a.tools })).rejects.toMatchObject({
+      code: 'BAD_ITEM',
+      message: 'The cut changed after the voice-over was fitted',
+      hint: 'Run: pnpm mirage slots <project> <n>, then pnpm mirage vo <project> <n> <recording> (it reuses the saved transcript)',
+    });
+    expect(a.calls).toEqual([]);
+  }, 60_000);
+
+  it('renders a final cut whose lines come from two recordings, with written-line captions', async () => {
+    const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+    await gen(['-f', 'lavfi', '-i', 'sine=frequency=500:sample_rate=48000:duration=3', join(project, 'take1.wav')]);
+    await gen(['-f', 'lavfi', '-i', 'sine=frequency=700:sample_rate=48000:duration=3', join(project, 'take2.wav')]);
+    const dir = join(project, 'episodes', '8');
+    await mkdir(dir, { recursive: true });
+    const said = (text: string) => ({ words: text.split(' ').map((w, i) => ({ w, start: 0.2 + i * 0.4, end: 0.5 + i * 0.4, conf: 1 })), segments: [], speech: [] });
+    await writeFile(join(dir, 't1.json'), JSON.stringify(said('First line here.')));
+    await writeFile(join(dir, 't2.json'), JSON.stringify(said('Second 2 here.')));
+    const e = ep([{ id: 'v', beat: 'problem', clip: 'c003', src: { in: 0, out: 6 } }], {
+      number: 8,
+      voiceover: {
+        recording: 'take1.wav', transcripts: { 'take1.wav': 't1.json', 'take2.wav': 't2.json' },
+        lines: [
+          { slot: 'n1', at: 0.2, src: { in: 0, out: 1.6 }, text: 'First line here.' },
+          { slot: 'n2', at: 3.2, src: { in: 0, out: 1.6 }, recording: 'take2.wav', text: 'Second two here.' },
+        ],
+      },
+    });
+    await saveEpisode(project, e);
+    const r = await renderEpisode({ project, episode: 8, mode: 'final', tools });
+    expect(Math.abs((await tools.probe(r.outputPath)).durationSec - 6)).toBeLessThanOrEqual(0.1);
+    const srt = await readFile(r.srtPath!, 'utf8');
+    expect(srt).toContain('First line here.');
+    expect(srt).toContain('Second two here.');
+    const peakHz = async (ss: number, f: number) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-ss', String(ss), '-t', '1', '-i', r.outputPath, '-map', '0:a:0', '-af', `bandpass=f=${f}:width_type=q:w=8,astats=metadata=0`, '-f', 'null', '-']);
+      return Number(/Overall[\s\S]*?RMS level dB:\s+(-?[\d.]+)/.exec(stderr)![1]);
+    };
+    expect(await peakHz(0.5, 500)).toBeGreaterThan((await peakHz(0.5, 700)) + 10);
+    expect(await peakHz(3.5, 700)).toBeGreaterThan((await peakHz(3.5, 500)) + 10);
+  }, 120_000);
 
   it('clears work folders and partial files left by a render that was killed', async () => {
     const dir = join(project, 'episodes', '6');
