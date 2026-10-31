@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-10-30):** replaced by the build-story format, spec §14. Not to be executed; its transcriber, retake, caption and chunked-render tasks are reused by the Phase A plan.
+
 # Fast-Track Auto-Edit CLI Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
