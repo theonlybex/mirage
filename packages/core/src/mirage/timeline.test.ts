@@ -1,6 +1,6 @@
 import { EpisodeSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
+import { formatTime, itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
 
 const ep = EpisodeSchema.parse({
   version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
@@ -38,5 +38,15 @@ describe('shiftAfter', () => {
     expect(s.overlays.map((o) => [o.start, o.end])).toEqual([[1, 4], [4, 5], [0, 1]]);
     expect(s.slots[0]).toMatchObject({ start: 3.5, end: 6 });
     expect(s.items).toBe(ep.items);
+  });
+});
+
+describe('formatTime', () => {
+  it('prints m:ss under an hour and h:mm:ss above, rounding to whole seconds', () => {
+    expect(formatTime(0)).toBe('0:00');
+    expect(formatTime(9.4)).toBe('0:09');
+    expect(formatTime(59.5)).toBe('1:00');
+    expect(formatTime(781)).toBe('13:01');
+    expect(formatTime(3725)).toBe('1:02:05');
   });
 });

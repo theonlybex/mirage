@@ -32,6 +32,14 @@ export function timelineDuration(ep: Episode): number {
   return laid.length ? laid[laid.length - 1].end : 0;
 }
 
+export function formatTime(sec: number): string {
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
 const EPS = 1e-9;
 const shiftRange = <T extends { start: number; end: number }>(r: T, at: number, delta: number): T => ({
   ...r,
