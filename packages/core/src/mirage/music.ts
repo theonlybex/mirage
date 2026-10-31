@@ -83,7 +83,7 @@ async function analyzeLocked(root: string, tools: MediaTools): Promise<LibraryRe
     unreadable.add(track);
   };
   for (const track of lib.tracks) {
-    const onDisk = files.find((f) => sameFileName(f, track.file));
+    const onDisk = files.find((f) => sameFileName(f, track.file)) ?? (existsSync(join(root, track.file)) ? track.file : undefined);
     if (!onDisk) {
       report.warnings.push(`${track.file} is in library.json but not in the music folder — put it back, or remove its entry`);
       continue;
