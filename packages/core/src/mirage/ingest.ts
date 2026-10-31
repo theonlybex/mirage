@@ -62,14 +62,15 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
 
   for (const name of files) {
     const path = join(dir, name);
-    const sha256 = await sha256File(path);
-    if (known.has(sha256)) {
-      result.skipped.push({ file: name, reason: 'already in the catalog' });
-      continue;
-    }
     const id = nextClipId(catalog);
     const framesDir = join(project, 'frames', id);
+    let sha256 = '';
     try {
+      sha256 = await sha256File(path);
+      if (known.has(sha256)) {
+        result.skipped.push({ file: name, reason: 'already in the catalog' });
+        continue;
+      }
       const probe = await o.tools.probe(path);
       if (!probe.hasVideo) {
         result.skipped.push({ file: name, reason: 'no video stream' });
@@ -99,7 +100,7 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
           transcript = null;
           o.onStep?.(`${name}: transcription failed, kept as silent footage`);
         } finally {
-          await rm(wav, { force: true });
+          await rm(wav, { force: true }).catch(() => {});
         }
         if (transcript && transcript.words.length === 0) transcript = null;
       }
@@ -114,9 +115,9 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
       if (catalog.clips.at(-1)?.id === id) {
         catalog.clips.pop();
         result.added.pop();
-        known.delete(sha256);
+        if (sha256) known.delete(sha256);
       }
-      await rm(framesDir, { recursive: true, force: true });
+      await rm(framesDir, { recursive: true, force: true }).catch(() => {});
       result.skipped.push({ file: name, reason: `failed: ${e instanceof Error ? e.message : String(e)}` });
     }
   }

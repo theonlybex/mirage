@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeInfo, Transcript } from '@wordedits/shared';
@@ -72,7 +72,7 @@ describe('ingestClips resilience', () => {
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=360x640:rate=30:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', join(good, 'phone.mov')]);
   });
 
-  it('skips a corrupt file with a failed reason, cleans its frames, and still ingests later clips', async () => {
+  it('skips a corrupt file with a failed reason and still ingests later clips', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we-bad-'));
     await writeFile(join(dir, 'bad.mp4'), Buffer.alloc(2048, 7));
     await copyFile(join(good, 'phone.mov'), join(dir, 'zgood.mov'));
@@ -87,6 +87,7 @@ describe('ingestClips resilience', () => {
     const cat = await loadCatalog(project);
     expect(cat.clips.map((c) => c.id)).toEqual(['c001']);
     expect(existsSync(join(project, 'frames', 'c001'))).toBe(true);
+    expect(existsSync(join(project, 'frames', 'c002'))).toBe(false);
     expect(cat.clips[0].frames.every((f) => !f.file.includes('\\'))).toBe(true);
   });
 
@@ -99,5 +100,40 @@ describe('ingestClips resilience', () => {
     expect(r.added).toHaveLength(1);
     expect(r.added[0].transcript).toBeNull();
     expect(steps.some((m) => m.includes('transcription failed, kept as silent footage'))).toBe(true);
+  });
+
+  it('reports an unreadable entry (a directory named like a clip) as failed and continues', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-dir-'));
+    await mkdir(join(dir, 'aaa.mp4'));
+    await copyFile(join(good, 'phone.mov'), join(dir, 'zgood.mov'));
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const tools: MediaTools = { ...real, transcribe: async () => words(10, 3) };
+    const r = await ingestClips({ project, clipsDir: dir, tools });
+    expect(r.added.map((c) => [c.id, c.path])).toEqual([['c001', join(dir, 'zgood.mov')]]);
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0].file).toBe('aaa.mp4');
+    expect(r.skipped[0].reason.startsWith('failed:')).toBe(true);
+  });
+
+  it('removes frames/<id> when frame extraction fails after the directory was created', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-ff-'));
+    await copyFile(join(good, 'phone.mov'), join(dir, 'a.mov'));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30:duration=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(dir, 'b.mp4')]);
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    let calls = 0;
+    const tools: MediaTools = {
+      ...real,
+      transcribe: async () => words(10, 3),
+      runFfmpeg: async (args, opts) => {
+        calls += 1;
+        if (calls === 2) throw new Error('ffmpeg blew up');
+        return real.runFfmpeg(args, opts);
+      },
+    };
+    const r = await ingestClips({ project, clipsDir: dir, tools });
+    expect(r.added.map((c) => c.id)).toEqual(['c001']);
+    expect(r.skipped).toEqual([{ file: 'b.mp4', reason: 'failed: ffmpeg blew up' }]);
+    expect(existsSync(join(project, 'frames', 'c001'))).toBe(true);
+    expect(existsSync(join(project, 'frames', 'c002'))).toBe(false);
   });
 });
