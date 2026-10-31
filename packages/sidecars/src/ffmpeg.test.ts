@@ -54,6 +54,14 @@ describe('measureLoudness', () => {
     expect(r.integratedLufs).toBeGreaterThan(-70);
     expect(r.truePeakDb).toBeLessThan(3);
   });
+
+  it('measures only the first maxSec seconds when asked', async () => {
+    const f = join(await mkdtemp(join(tmpdir(), 'we-loud-')), 'late-tone.m4a');
+    // Silence for 2 s, then a tone.
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', "aevalsrc='if(gte(t,2),0.3*sin(2*PI*300*t),0)':s=48000:d=4", '-c:a', 'aac', f]);
+    expect((await measureLoudness(f)).integratedLufs).toBeGreaterThan(-30);
+    expect((await measureLoudness(f, { maxSec: 1.5 })).integratedLufs).toBeLessThan(-60);
+  });
 });
 
 describe('extractWav', () => {

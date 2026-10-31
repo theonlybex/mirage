@@ -399,4 +399,15 @@ describe('ingestClips against the source clock (real ffmpeg)', () => {
     expect(r.added[0].kind).toBe('talking');
     expect(r.warnings).toEqual(['screen.mov: its first audio track is silent, so its sound is taken from track 2']);
   });
+
+  it('measures the audio tracks over their first two minutes only, and the others only when the first is silent', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-tracks-'));
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=2', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+      '-map', '0:v', '-map', '1:a', '-map', '2:a', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', '2', join(dir, 'mic-first.mov')]);
+    const calls: object[] = [];
+    const measureLoudness: MediaTools['measureLoudness'] = async (f, opts) => { calls.push(opts ?? {}); return real.measureLoudness(f, opts); };
+    const r = await ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: dir, tools: { ...real, measureLoudness } });
+    expect(r.added[0].probe.audioStream).toBeUndefined();
+    expect(calls).toEqual([{ audioStream: 0, maxSec: 120 }]);
+  });
 });

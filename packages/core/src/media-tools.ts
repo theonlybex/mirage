@@ -19,7 +19,7 @@ export interface MediaTools {
   runFfmpeg(args: string[], opts?: FfmpegRunOptions): Promise<void>;
   pickEncoder(): Promise<Encoder>;
   makeProxy(src: string, out: string, opts?: { height?: number; onProgress?: (f: number) => void }): Promise<void>;
-  measureLoudness(file: string, opts?: { audioStream?: number }): Promise<{ integratedLufs: number; truePeakDb: number }>;
+  measureLoudness(file: string, opts?: { audioStream?: number; maxSec?: number }): Promise<{ integratedLufs: number; truePeakDb: number }>;
   extractWav(src: string, out: string, opts?: { timeoutMs?: number; audioStream?: number }): Promise<void>;
   transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number }): Promise<Transcript>;
 }

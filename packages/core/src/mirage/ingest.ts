@@ -74,17 +74,21 @@ async function transcribeClip(o: { tools: MediaTools; path: string; name: string
   }
 }
 
+/** Seconds of each audio track measured to find the clip's sound: enough to tell a silent track, without decoding hours. */
+const TRACK_SAMPLE_SEC = 120;
+
 /**
  * The audio stream with the clip's sound when it is not the first: the loudest, when the first is (near) silent and
- * another is clearly louder (a screen recording's silent system-audio track before the microphone's).
+ * another is clearly louder (a screen recording's silent system-audio track before the microphone's). Each track is
+ * measured over its first two minutes, and the others only when the first is silent.
  */
 async function soundStream(tools: MediaTools, path: string, streams: number): Promise<number | undefined> {
-  const levels: number[] = [];
-  for (let i = 0; i < streams; i++) {
-    levels.push(await tools.measureLoudness(path, { audioStream: i }).then((l) => l.integratedLufs, () => -Infinity));
-  }
+  const level = (i: number) => tools.measureLoudness(path, { audioStream: i, maxSec: TRACK_SAMPLE_SEC }).then((l) => l.integratedLufs, () => -Infinity);
+  const levels = [await level(0)];
+  if (levels[0] > -60) return undefined;
+  for (let i = 1; i < streams; i++) levels.push(await level(i));
   const loudest = levels.indexOf(Math.max(...levels));
-  return loudest > 0 && levels[0] <= -60 && levels[loudest] > levels[0] + 20 ? loudest : undefined;
+  return loudest > 0 && levels[loudest] > levels[0] + 20 ? loudest : undefined;
 }
 
 /**
