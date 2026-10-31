@@ -240,6 +240,54 @@ describe('ingestClips resilience', () => {
     expect(cat.clips[0]).toMatchObject({ notes: 'Phone test card.', kind: 'camera', moments: [{ t: 1, label: 'beep' }] });
   });
 
+  it('keeps notes, moments and kind written while it retried the transcript of a clip that moved', async () => {
+    const from = await mkdtemp(join(tmpdir(), 'we-from-'));
+    const to = await mkdtemp(join(tmpdir(), 'we-to-'));
+    await copyFile(join(good, 'phone.mov'), join(from, 'clip.mov'));
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    await ingestClips({ project, clipsDir: from, tools: { ...real, transcribe: async () => { throw new Error('no speech model'); } } });
+    await rename(join(from, 'clip.mov'), join(to, 'renamed.mov'));
+    const tools: MediaTools = {
+      ...real,
+      transcribe: async () => {
+        // While the retry transcribes, Claude describes the clip.
+        const cat = JSON.parse(await readFile(join(project, 'catalog.json'), 'utf8'));
+        Object.assign(cat.clips[0], { notes: 'Phone test card.', kind: 'camera', moments: [{ t: 1, label: 'beep' }] });
+        await writeFile(join(project, 'catalog.json'), JSON.stringify(cat));
+        return words(10, 3);
+      },
+    };
+    await ingestClips({ project, clipsDir: to, tools });
+    const [clip] = (await loadCatalog(project)).clips;
+    expect(clip).toMatchObject({ id: 'c001', path: join(to, 'renamed.mov'), notes: 'Phone test card.', kind: 'camera', moments: [{ t: 1, label: 'beep' }] });
+    expect(clip.transcript?.words).toHaveLength(10);
+  });
+
+  it('stops at once, naming the key, when catalog.json is edited into an invalid file while it works', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-two-'));
+    await copyFile(join(good, 'phone.mov'), join(dir, 'a.mov'));
+    await copyFile(join(good, 'phone.mov'), join(dir, 'b.mov'));
+    await writeFile(join(dir, 'b.mov'), Buffer.from('x'), { flag: 'a' }); // another file, so not "already in the catalog"
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    await writeFile(join(project, 'catalog.json'), JSON.stringify({ version: 1, clips: [] }));
+    let calls = 0;
+    const tools: MediaTools = {
+      ...real,
+      transcribe: async () => {
+        // While a.mov is transcribed, a misspelled key lands in catalog.json.
+        if (++calls === 1) await writeFile(join(project, 'catalog.json'), JSON.stringify({ version: 1, clips: [], note: 'x' }));
+        return words(10, 3);
+      },
+    };
+    await expect(ingestClips({ project, clipsDir: dir, tools })).rejects.toMatchObject({
+      message: expect.stringMatching(/^catalog\.json: unknown key "note"/),
+      hint: expect.stringContaining('run ingest again'),
+    });
+    expect(calls).toBe(1);
+    expect(existsSync(join(project, 'frames', 'c001'))).toBe(false);
+    expect(existsSync(join(project, LOCK_FILE))).toBe(false);
+  });
+
   it('extracts frames into a project whose path contains %', async () => {
     const project = await mkdtemp(join(tmpdir(), 'we 100%d %04d-'));
     const r = await ingestClips({ project, clipsDir: good, tools: { ...real, transcribe: async () => words(10, 3) } });

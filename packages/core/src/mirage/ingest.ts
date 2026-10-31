@@ -4,7 +4,7 @@ import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { CatalogSchema, type Catalog, type Clip, type ClipKind, type ProbeInfo, type Transcript } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
-import { readJsonFile, writeJsonFile } from '../project-store.js';
+import { JsonFileError, readJsonFile, writeJsonFile } from '../project-store.js';
 import { errorReason, MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
 
@@ -95,6 +95,20 @@ async function updateCatalog(project: string, change: (catalog: Catalog) => void
   return catalog;
 }
 
+/** A catalog.json that can't be read stops the ingest: the hint says the clips catalogued so far are kept. */
+function stopIngest(e: JsonFileError): JsonFileError {
+  e.hint = `${e.hint} Then run ingest again: the clips catalogued so far are kept.`;
+  return e;
+}
+
+async function loadCatalogOrStop(project: string): Promise<Catalog> {
+  try {
+    return await loadCatalog(project);
+  } catch (e) {
+    throw e instanceof JsonFileError ? stopIngest(e) : e;
+  }
+}
+
 const NOT_A_VIDEO = `not a video Mirage reads (${[...VIDEO_EXTENSIONS].join(', ')})`;
 
 async function clipFiles(dir: string, result: IngestResult): Promise<string[]> {
@@ -126,10 +140,12 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
   const result: IngestResult = { added: [], skipped: [], warnings: [] };
   const dir = resolve(o.clipsDir);
   const files = await clipFiles(dir, result);
-  let catalog = await loadCatalog(project);
+  let catalog: Catalog;
 
   for (const name of files) {
     const path = join(dir, name);
+    // Read before each clip's slow work: catalog.json edited into an invalid file stops the run here, not after it.
+    catalog = await loadCatalogOrStop(project);
     let id = nextClipId(catalog);
     let framesDir = join(project, 'frames', id);
     try {
@@ -225,6 +241,8 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
     } catch (e) {
       // the catalog was not saved with this clip: its frames must not stay behind
       if (!catalog.clips.some((c) => c.id === id)) await rm(framesDir, { recursive: true, force: true }).catch(() => {});
+      // A broken catalog.json would fail every remaining clip after all its work: stop instead.
+      if (e instanceof JsonFileError) throw stopIngest(e);
       result.skipped.push({ file: name, reason: `failed: ${errorReason(e)}` });
     }
   }
