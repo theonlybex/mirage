@@ -10,7 +10,8 @@ export function computeSlots(ep: Episode, catalog: Catalog, o: { minLen?: number
   const wpm = o.wpm ?? 170;
   const D = timelineDuration(ep);
   const busy: [number, number][] = [];
-  for (const w of speechWords(ep, catalog, null)) busy.push([Math.max(0, w.start - pad), Math.min(D, w.end + pad)]);
+  const clamp = (n: number) => Math.min(D, Math.max(0, n));
+  for (const w of speechWords(ep, catalog, null)) busy.push([clamp(w.start - pad), clamp(w.end + pad)]);
   for (const l of layoutTimeline(ep)) if (l.item.quiet) busy.push([l.start, l.end]);
   busy.sort((a, b) => a[0] - b[0]);
 
@@ -23,25 +24,35 @@ export function computeSlots(ep: Episode, catalog: Catalog, o: { minLen?: number
   if (D > cursor) free.push([cursor, D]);
 
   return free
+    .map(([a, b]) => [r3(a), r3(b)] as const)
     .filter(([a, b]) => b - a >= minLen - 1e-9)
-    .map(([a, b], i) => ({ id: `n${i + 1}`, start: r3(a), end: r3(b), maxWords: Math.max(0, Math.floor(((b - a - 0.4) * wpm) / 60)), line: '' }));
+    .map(([a, b], i) => ({ id: `n${i + 1}`, start: a, end: b, maxWords: Math.max(0, Math.floor(((b - a - 0.4) * wpm) / 60 + 1e-9)), line: '' }));
 }
 
+/** Minimum overlap, as a fraction of the shorter slot, for a written line to follow a re-cut slot. */
+const MIN_OVERLAP_FRACTION = 0.25;
+
 export function mergeSlots(prev: Slot[], next: Slot[]): Slot[] {
-  const used = new Set<number>();
-  return next.map((slot) => {
-    let best = -1;
-    let bestOverlap = 0;
-    prev.forEach((p, i) => {
-      if (used.has(i) || !p.line.trim()) return;
+  const pairs: { p: number; n: number; overlap: number }[] = [];
+  prev.forEach((p, pi) => {
+    if (!p.line.trim()) return;
+    next.forEach((slot, ni) => {
       const overlap = Math.min(p.end, slot.end) - Math.max(p.start, slot.start);
-      if (overlap > bestOverlap) {
-        bestOverlap = overlap;
-        best = i;
-      }
+      const shorter = Math.min(p.end - p.start, slot.end - slot.start);
+      if (overlap > 0 && overlap >= MIN_OVERLAP_FRACTION * shorter - 1e-9) pairs.push({ p: pi, n: ni, overlap });
     });
-    if (best < 0) return slot;
-    used.add(best);
-    return { ...slot, line: prev[best].line };
+  });
+  pairs.sort((x, y) => y.overlap - x.overlap || next[x.n].start - next[y.n].start || x.p - y.p);
+
+  const usedPrev = new Set<number>();
+  const assigned = new Map<number, number>();
+  for (const { p, n } of pairs) {
+    if (usedPrev.has(p) || assigned.has(n)) continue;
+    usedPrev.add(p);
+    assigned.set(n, p);
+  }
+  return next.map((slot, ni) => {
+    const p = assigned.get(ni);
+    return p === undefined ? slot : { ...slot, line: prev[p].line };
   });
 }
