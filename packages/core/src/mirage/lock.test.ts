@@ -49,9 +49,10 @@ describe('acquireLock', () => {
     const dir = await mkdtemp(join(tmpdir(), 'we-lock-'));
     const started = new Date(Date.now() - 3600_000);
     await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: process.pid, command: 'render', startedAt: started.toISOString(), token: 'x' }));
-    const e = await acquireLock(dir, 'cut', 'episode 1').catch((x: unknown) => x as { message: string; hint: string });
-    expect(e.message).toBe(`episode 1 is busy: render (pid ${process.pid}) has been running since ${started.toLocaleString()}`);
-    expect(e.hint).toContain(`If no Mirage command is running, delete ${join(dir, LOCK_FILE)}`);
+    await expect(acquireLock(dir, 'cut', 'episode 1')).rejects.toMatchObject({
+      message: `episode 1 is busy: render (pid ${process.pid}) has been running since ${started.toLocaleString()}`,
+      hint: expect.stringContaining(`If no Mirage command is running, delete ${join(dir, LOCK_FILE)}`),
+    });
   });
 
   it('lets exactly one of several commands starting at once take a free or abandoned lock', async () => {
