@@ -167,12 +167,16 @@ describe('episodeFinalArgs', () => {
     expect(args.filter((a) => a === '-i')).toHaveLength(1);
     expect(args[args.indexOf('-filter_complex') + 1]).toContain('[0:a]anull[speechraw]');
   });
-  it('does not loudnorm a silent speech bus or an episode under 3 s (loudnorm returns NaN on short silence)', () => {
+  it('does not loudnorm a silent speech bus; measures an episode under 3 s over 3.1 s (loudnorm returns NaN on short silence)', () => {
     const graph = (o: object) => { const a = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -14, assFile: 'o.ass', ...o }); return a[a.indexOf('-filter_complex') + 1]; };
     expect(graph({ liveAudio: false })).toContain('[speechraw]highpass=f=90,aresample=48000');
+    expect(graph({ liveAudio: false })).not.toContain('loudnorm');
     expect(graph({ liveAudio: false, voiceRaw: 'vo.f32' })).toContain('loudnorm=I=-14');
-    expect(graph({ durationSec: 2.5 })).not.toContain('loudnorm');
-    expect(graph({})).toContain('loudnorm=I=-14');
+    expect(graph({ durationSec: 2.5 })).toContain('[speechraw]highpass=f=90,apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,');
+    expect(graph({ durationSec: 2.5 })).toMatch(/asetpts=N\/SR\/TB,atrim=end=2\.5\[aout\]/);
+    expect(graph({ durationSec: 2.5, liveAudio: false })).not.toContain('loudnorm');
+    expect(graph({})).toContain('[speechraw]highpass=f=90,loudnorm=I=-14');
+    expect(graph({})).not.toContain('apad=whole_dur');
   });
   it('clamps the speech loudnorm target', () => {
     const lo = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -90, assFile: 'o.ass' });
@@ -296,6 +300,28 @@ describe('renderEpisode (real ffmpeg)', () => {
         expect(Math.abs((await tools.probe(r.outputPath)).durationSec - r.durationSec)).toBeLessThanOrEqual(0.1);
       }
     }
+  }, 120_000);
+
+  it('brings the speech of an episode under 3 s to the loudness target, and renders one whose kept sound is silent', async () => {
+    const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+    const dir = await mkdtemp(join(tmpdir(), 'we-hush-'));
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=3', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', '3', join(dir, 'hush.mp4')]);
+    const [hush] = (await ingestClips({ project, clipsDir: dir, tools })).added;
+    const lufsOf = async (file: string) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', file, '-map', '0:a:0', '-af', 'ebur128', '-f', 'null', '-']);
+      return Number(/I:\s+(-?[\d.]+)\s+LUFS/.exec(stderr.split('Summary:').at(-1)!)![1]);
+    };
+    // c001's live sound is a steady tone at about -21 LUFS.
+    await saveEpisode(project, ep([{ id: 'k', beat: 'problem', clip: 'c001', src: { in: 0, out: 2 }, audio: 'keep' }], { number: 12 }));
+    const r = await renderEpisode({ project, episode: 12, mode: 'rough', tools });
+    const lufs = await lufsOf(r.outputPath);
+    expect(lufs).toBeGreaterThan(-16);
+    expect(lufs).toBeLessThan(-12);
+    expect(Math.abs((await tools.probe(r.outputPath)).durationSec - 2)).toBeLessThanOrEqual(0.1);
+
+    await saveEpisode(project, ep([{ id: 'h', beat: 'problem', clip: hush.id, src: { in: 0, out: 2 }, audio: 'keep' }], { number: 12 }));
+    const silent = await renderEpisode({ project, episode: 12, mode: 'rough', tools });
+    expect(Math.abs((await tools.probe(silent.outputPath)).durationSec - 2)).toBeLessThanOrEqual(0.1);
   }, 120_000);
 
   it('stops before rendering anything when a music cue is not in the library or its file is gone', async () => {

@@ -218,11 +218,14 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   } else {
     chains.push('[0:a]anull[speechraw]');
   }
-  // A speech bus with no live sound and no voice-over is silence, which needs no normalising; and loudnorm turns
-  // digital silence shorter than 3 s into NaN, so an episode that short plays its sound as recorded.
-  const normalise = (o.liveAudio !== false || o.voiceRaw !== undefined) && o.durationSec >= LOUDNORM_MIN_SEC;
+  // A speech bus with no live sound and no voice-over is silence, which needs no normalising. loudnorm turns digital
+  // silence shorter than 3 s into NaN, so an episode that short is measured over 3.1 s (silence after its end), then
+  // cut back to length.
+  const normalise = o.liveAudio !== false || o.voiceRaw !== undefined;
+  const short = normalise && o.durationSec < LOUDNORM_MIN_SEC;
   chains.push(
-    `[speechraw]highpass=f=90,${normalise ? `loudnorm=I=${lufs(o.loudnessLufs)}:TP=-1:LRA=11,` : ''}aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${o.musicWav ? '[speech]' : '[aout]'}`,
+    `[speechraw]highpass=f=90,${normalise ? `${short ? `apad=whole_dur=${LOUDNORM_MIN_SEC},` : ''}loudnorm=I=${lufs(o.loudnessLufs)}:TP=-1:LRA=11,` : ''}` +
+      `aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${short ? `,atrim=end=${D}` : ''}${o.musicWav ? '[speech]' : '[aout]'}`,
   );
   if (o.musicWav) {
     chains.push(
