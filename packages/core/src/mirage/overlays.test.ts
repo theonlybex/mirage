@@ -38,6 +38,10 @@ describe('keptSegments', () => {
       { in: 11, out: 12, offset: 0.5 },
     ]);
   });
+  it('clamps cuts to the line so a cut past the end cannot extend a segment', () => {
+    expect(keptSegments({ slot: 'n1', at: 0, src: { in: 10, out: 12 }, cuts: [[13, 14]] })).toEqual([{ in: 10, out: 12, offset: 0 }]);
+    expect(keptSegments({ slot: 'n1', at: 0, src: { in: 10, out: 12 }, cuts: [[9, 10.5]] })).toEqual([{ in: 10.5, out: 12, offset: 0 }]);
+  });
 });
 
 describe('groupCaptions and toSrt', () => {
@@ -47,6 +51,17 @@ describe('groupCaptions and toSrt', () => {
     expect(cues[0].start).toBeCloseTo(0.35);
     expect(cues[1].start).toBeGreaterThanOrEqual(cues[0].end);
     expect(toSrt(cues.slice(0, 1))).toBe('1\n00:00:00,350 --> 00:00:01,200\nHello there.\n');
+  });
+  it('never emits a cue that ends before it starts, and keeps starts monotonic, for overlapping words', () => {
+    const cues = groupCaptions([w('one', 1.0, 1.4), w('two.', 1.2, 3.0), w('three four.', 1.5, 2.2), w('five', 2.3, 2.6)], { durationSec: 10 });
+    expect(cues.length).toBeGreaterThan(0);
+    for (const [i, c] of cues.entries()) {
+      expect(c.end).toBeGreaterThan(c.start);
+      if (i > 0) {
+        expect(c.start).toBeGreaterThanOrEqual(cues[i - 1].start);
+        expect(c.start).toBeGreaterThanOrEqual(cues[i - 1].end);
+      }
+    }
   });
 });
 

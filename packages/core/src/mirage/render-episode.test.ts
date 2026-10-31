@@ -6,7 +6,7 @@ import { run } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips } from './ingest.js';
-import { analyzeLibrary } from './music.js';
+import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildVoiceTrack, episodeFinalArgs, itemChunkArgs, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 
@@ -43,10 +43,15 @@ describe('itemChunkArgs', () => {
     expect(graph).toContain('[1:v]setpts=(PTS-STARTPTS)/20,');
   });
   it('keeps live audio only at real-time speed; sped-up items get silence', () => {
-    expect(graph).toContain('[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
+    expect(graph).toContain('[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
     expect(graph).toContain('anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=3,aformat=sample_fmts=fltp:channel_layouts=stereo[a1]');
     expect(graph).toContain('[v0][a0][v1][a1]concat=n=2:v=1:a=1[vcat][acat]');
     expect(args.at(-1)).toBe('/w/chunk-000.mov');
+  });
+  it('cuts live audio at the end of the source before padding silence under a hold', () => {
+    const h = ep([{ id: 'h', beat: 'problem', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep', hold: 0.5 }]);
+    const g = itemChunkArgs(layoutTimeline(h), { width: 960, height: 540, fps: 30 }, sourcesFor(h, cat), '/w/c.mov');
+    expect(g[g.indexOf('-filter_complex') + 1]).toContain('aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2.5,asetpts=PTS-STARTPTS[a0]');
   });
 });
 
@@ -56,12 +61,16 @@ describe('musicTrackArgs', () => {
     const args = musicTrackArgs([{ track: 'a.mp3', start: 2, end: 12, gainDb: -18, fadeIn: 0, fadeOut: 1, offset: 0.5 }], lib, '/m', 15, -14, '/w/music.wav');
     expect(args.slice(0, 6)).toEqual(['-stream_loop', '-1', '-ss', '0.5', '-i', '/m/a.mp3']);
     const graph = args[args.indexOf('-filter_complex') + 1];
-    expect(graph).toContain('atrim=duration=10');
+    expect(graph).toContain('[0:a]asetpts=N/SR/TB,atrim=duration=10,');
     expect(graph).toContain('loudnorm=I=-32:TP=-2:LRA=11');
     expect(graph).not.toContain('afade=t=in');
     expect(graph).toContain('afade=t=out:st=9:d=1');
     expect(graph).toContain('adelay=delays=2000:all=1');
     expect(graph).toContain('amix=inputs=1:duration=longest:normalize=0,apad,atrim=end=15[out]');
+  });
+  it('clamps the loudnorm target to the range ffmpeg accepts', () => {
+    const args = musicTrackArgs([{ track: 'a.mp3', start: 0, end: 4, gainDb: -60, fadeIn: 0, fadeOut: 0, offset: 0 }], lib, '/m', 4, -14, '/w/m.wav');
+    expect(args[args.indexOf('-filter_complex') + 1]).toContain('loudnorm=I=-70:TP=-2:LRA=11');
   });
   it('throws NO_MUSIC_TRACK for a cue whose track is not in the library', () => {
     expect(() => musicTrackArgs([{ track: 'zz.mp3', start: 0, end: 1, gainDb: -18, fadeIn: 0, fadeOut: 0, offset: 0 }], lib, '/m', 2, -14, '/w/m.wav')).toThrow(expect.objectContaining({ code: 'NO_MUSIC_TRACK' }));
@@ -95,6 +104,12 @@ describe('episodeFinalArgs', () => {
     const args = episodeFinalArgs({ chunkList: 'chunks.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -14, assFile: 'overlays.ass' });
     expect(args.filter((a) => a === '-i')).toHaveLength(1);
     expect(args[args.indexOf('-filter_complex') + 1]).toContain('[0:a]anull[speechraw]');
+  });
+  it('clamps the speech loudnorm target', () => {
+    const lo = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -90, assFile: 'o.ass' });
+    expect(lo[lo.indexOf('-filter_complex') + 1]).toContain('loudnorm=I=-70:TP=-1');
+    const hi = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: 0, assFile: 'o.ass' });
+    expect(hi[hi.indexOf('-filter_complex') + 1]).toContain('loudnorm=I=-5:TP=-1');
   });
 });
 
@@ -136,4 +151,25 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(r.outputPath.endsWith(join('episodes', '1', 'rough.mp4'))).toBe(true);
     expect((await readdir(join(project, 'episodes', '1'))).filter((f) => f.startsWith('.work-') || f.includes('.partial-'))).toEqual([]);
   }, 300_000);
+
+  it('ends a looping cue with an offset on time: it fades out and is silent after its end', async () => {
+    const out = join(project, 'loop-offset.wav');
+    const musicDir = join(project, 'music');
+    const cue = { track: 'loop.wav', start: 2, end: 22, gainDb: -18, fadeIn: 0.5, fadeOut: 1, offset: 3 };
+    await tools.runFfmpeg(['-y', ...musicTrackArgs([cue], await loadLibrary(musicDir), musicDir, 25, -14, out)], { expectedDurationSec: 25 });
+    const maxVolume = async (ss: number, t: number) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-ss', String(ss), '-t', String(t), '-i', out, '-af', 'volumedetect', '-f', 'null', '-']);
+      const m = /max_volume: (-?[\d.]+|-inf) dB/.exec(stderr);
+      return m && m[1] !== '-inf' ? Number(m[1]) : -Infinity;
+    };
+    expect(await maxVolume(9.5, 1)).toBeGreaterThan(-40);
+    expect(await maxVolume(22.2, 2.8)).toBeLessThan(-60);
+    expect((await tools.probe(out)).durationSec).toBeCloseTo(25, 1);
+  }, 120_000);
+
+  it('stops with NO_EPISODE before rendering when a final cut has a voice-over but no voice-over transcript', async () => {
+    await saveEpisode(project, ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }], { number: 2, voiceover: { recording: 'vo.m4a', lines: [] } }));
+    await expect(renderEpisode({ project, episode: 2, mode: 'final', tools })).rejects.toMatchObject({ code: 'NO_EPISODE', message: expect.stringContaining('voiceover.transcript.json') });
+    expect((await readdir(join(project, 'episodes', '2'))).filter((f) => f.startsWith('.work-') || f.includes('.partial-'))).toEqual([]);
+  }, 60_000);
 });

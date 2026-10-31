@@ -12,7 +12,12 @@ export interface Cue {
 }
 
 export function keptSegments(line: VoiceLine): { in: number; out: number; offset: number }[] {
-  const cuts = [...line.cuts].sort((a, b) => a[0] - b[0]);
+  // Clamp each cut to the line so a cut outside it can never extend a kept segment.
+  const clamp = (t: number) => Math.min(line.src.out, Math.max(line.src.in, t));
+  const cuts = line.cuts
+    .map(([a, b]) => [clamp(Math.min(a, b)), clamp(Math.max(a, b))] as const)
+    .filter(([a, b]) => b > a)
+    .sort((a, b) => a[0] - b[0]);
   const out: { in: number; out: number; offset: number }[] = [];
   let cursor = line.src.in;
   let offset = 0;
@@ -79,11 +84,16 @@ export function groupCaptions(words: Word[], o: { durationSec: number; maxChars?
   }
   if (cur.length) groups.push(cur);
 
-  const cues = groups.map((g) => ({ start: r3(Math.max(0, g[0].start - lead)), end: g[g.length - 1].end, text: tidy(g.map((x) => x.text).join(' ')) }));
-  for (let i = 0; i < cues.length; i++) {
-    if (i > 0) cues[i].start = Math.max(cues[i].start, cues[i - 1].end);
-    const limit = i + 1 < cues.length ? cues[i + 1].start : o.durationSec;
-    cues[i].end = r3(Math.max(cues[i].end, Math.min(cues[i].start + minDur, limit)));
+  const raw = groups.map((g) => ({ start: r3(Math.max(0, g[0].start - lead)), end: g[g.length - 1].end, text: tidy(g.map((x) => x.text).join(' ')) }));
+  const cues: Cue[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const prev = cues[cues.length - 1];
+    const start = prev ? Math.max(raw[i].start, prev.end) : raw[i].start;
+    const limit = i + 1 < raw.length ? raw[i + 1].start : o.durationSec;
+    const end = r3(Math.max(raw[i].end, Math.min(start + minDur, limit)));
+    // Overlapping words can push a cue's start past its end: drop it rather than emit an inverted cue.
+    if (end <= start + EPS) continue;
+    cues.push({ start, end, text: raw[i].text });
   }
   return cues;
 }

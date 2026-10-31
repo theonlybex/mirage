@@ -41,6 +41,8 @@ export function chunkItems(laid: LaidItem[]): LaidItem[][] {
 }
 
 const FLTP_STEREO = 'aformat=sample_fmts=fltp:channel_layouts=stereo';
+/** loudnorm rejects targets outside [-70, -5] LUFS. */
+const lufs = (n: number) => ffNum(Math.min(-5, Math.max(-70, n)));
 
 export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: number; fps: number }, sources: Map<string, ClipSource>, output: string): string[] {
   const inputs: string[] = [];
@@ -59,7 +61,8 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     );
     const dur = ffNum(l.frames / o.fps);
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
-      chains.push(`[${k}:a]asetpts=PTS-STARTPTS,aresample=48000,${FLTP_STEREO},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
+      // Cut at the end of the source first so the extra input frame never leaks into a hold.
+      chains.push(`[${k}:a]asetpts=PTS-STARTPTS,aresample=48000,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
     } else {
       chains.push(`anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`);
     }
@@ -91,10 +94,12 @@ export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: st
     ].filter(Boolean);
     chains.push(
       [
-        `[${i}:a]atrim=duration=${ffNum(dur)}`,
+        // With -stream_loop and -ss, loop seams overlap timestamps by the offset; renumbering by sample count
+        // keeps atrim and afade (both timestamp-based) on the cue's real length.
+        `[${i}:a]asetpts=N/SR/TB,atrim=duration=${ffNum(dur)}`,
         'asetpts=PTS-STARTPTS',
         `aresample=48000,${FLTP_STEREO}`,
-        `loudnorm=I=${ffNum(loudnessLufs + c.gainDb)}:TP=-2:LRA=11`,
+        `loudnorm=I=${lufs(loudnessLufs + c.gainDb)}:TP=-2:LRA=11`,
         `aresample=48000,${FLTP_STEREO}`,
         ...fades,
         `adelay=delays=${Math.round(c.start * 1000)}:all=1[m${i}]`,
@@ -156,7 +161,7 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
     chains.push('[0:a]anull[speechraw]');
   }
   chains.push(
-    `[speechraw]highpass=f=90,loudnorm=I=${ffNum(o.loudnessLufs)}:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${o.musicWav ? '[speech]' : '[aout]'}`,
+    `[speechraw]highpass=f=90,loudnorm=I=${lufs(o.loudnessLufs)}:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${o.musicWav ? '[speech]' : '[aout]'}`,
   );
   if (o.musicWav) {
     chains.push(
@@ -190,6 +195,17 @@ export async function saveEpisode(project: string, ep: Episode): Promise<void> {
 
 export type EpisodeMode = 'rough' | 'guide' | 'final';
 
+async function loadVoiceoverTranscript(dir: string, n: number): Promise<Transcript> {
+  try {
+    return await readJsonFile(join(dir, 'voiceover.transcript.json'), TranscriptSchema);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new MirageError('NO_EPISODE', `episodes/${n}/voiceover.transcript.json is missing`, `Run: pnpm mirage vo <project> ${n} <recording>`);
+    }
+    throw e;
+  }
+}
+
 export async function renderEpisode(o: { project: string; episode: number; mode: EpisodeMode; tools: MediaTools; musicDir?: string; onProgress?: (f: number) => void }): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
   const project = resolve(o.project);
   const ep = await loadEpisode(project, o.episode);
@@ -202,6 +218,8 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
   const final = o.mode === 'final';
   const [W, H] = final ? [ep.output.width, ep.output.height] : [960, 540];
   const dir = episodeDir(project, o.episode);
+  // Checked before any rendering so a missing transcript fails fast.
+  const voTranscript: Transcript | null = final && ep.voiceover ? await loadVoiceoverTranscript(dir, o.episode) : null;
   const musicDir = resolve(o.musicDir ?? join(project, 'music'));
   const outputPath = join(dir, `${o.mode}.mp4`);
   const id = randomUUID();
@@ -235,13 +253,11 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
     report(0.7);
 
     let voiceRaw: string | undefined;
-    let voTranscript: Transcript | null = null;
     if (final && ep.voiceover) {
       const pcm = await decodeMono(resolve(project, ep.voiceover.recording), join(work, 'rec.f32'), o.tools, { sampleRate: 48000 });
       const track = buildVoiceTrack({ recording: pcm, sampleRate: 48000, lines: ep.voiceover.lines, durationSec: D });
       await writeFile(join(work, 'vo.f32'), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
       voiceRaw = 'vo.f32';
-      voTranscript = await readJsonFile(join(dir, 'voiceover.transcript.json'), TranscriptSchema);
     }
 
     const cues = o.mode === 'guide' ? [] : groupCaptions(speechWords(ep, catalog, voTranscript), { durationSec: D });
