@@ -80,7 +80,7 @@ function checkHold(item: Episode['items'][number]): typeof item {
 export interface FitLine {
   slot: string;
   /** kept: re-recording was asked for (--add --slots) but the new recording lacks it, so the earlier take stays. */
-  status: 'placed' | 'missing' | 'kept';
+  status: 'placed' | 'missing' | 'kept' | 'too long';
   takes: number;
   overrunSec: number;
 }
@@ -250,6 +250,9 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   if (written.length === 0) {
     throw new MirageError('NOTHING_MATCHED', 'None of those slots has a written line', 'List slots that have a line (see pnpm mirage slots).');
   }
+  if (!words.some((w) => !isFiller(w))) {
+    throw new MirageError('NOTHING_MATCHED', `No speech was heard in ${o.recording}`, 'Check that the microphone was on and that this is the right file.');
+  }
 
   // Placed lines live in ep.voiceover while fitting, so a later hold shifts every line after it (kept ones included).
   const recording = prev ? prev.recording : o.recording;
@@ -313,22 +316,34 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     const draft: VoiceLine = { slot: written[k].id, at: 0, src: { in: r3(srcIn), out: r3(srcOut) }, cuts: mergeCuts(cuts), ...lineRecording, text: written[k].line };
     const duration = keptSegments(draft).reduce((s, g) => s + g.out - g.in, 0);
 
-    ep = { ...ep, voiceover: { ...ep.voiceover!, lines: ep.voiceover!.lines.filter((l) => l.slot !== written[k].id) } };
     const slot = ep.slots.find((s) => s.id === written[k].id)!;
     const at = r3(slot.start + 0.15);
-    let overrun = at + duration - (slot.end + 0.2);
+    // A line may run a little past its slot, but never past the end of the episode.
+    let overrun = at + duration - Math.min(slot.end + 0.2, timelineDuration(ep));
+    let opened: ReturnType<typeof openAt> | null = null;
     if (overrun > 1e-3) {
       overrun = Math.ceil(overrun * fps - 1e-9) / fps;
-      if (overrun > MAX_HOLD + 1e-9) throw new MirageError('BAD_ITEM', `Line ${slot.id} runs ${r3(overrun)}s past its slot (more than ${MAX_HOLD} s)`, HOLD_HINT);
+      try {
+        opened = openAt(ep, o.catalog, slot.end, overrun);
+      } catch (e) {
+        // More frozen frame than an item can hold: report this line and place the others.
+        if (!(e instanceof MirageError)) throw e;
+        report.lines.push({ slot: slot.id, status: 'too long', takes, overrunSec: r3(overrun) });
+        continue;
+      }
+    }
+    // The slot's earlier take (--add --slots) gives way to the new one.
+    const withoutOld = (e: Episode): Episode => ({ ...e, voiceover: { ...e.voiceover!, lines: e.voiceover!.lines.filter((l) => l.slot !== slot.id) } });
+    if (opened) {
       const before = timelineDuration(ep);
-      const opened = openAt(ep, o.catalog, slot.end, overrun);
-      const held = opened.episode;
+      const held = withoutOld(opened.episode);
       const grown = timelineDuration(held) - before;
       // The narration stretch really grew; keep the slot in step so a re-fit finds no overrun left.
       const holds = [...(held.voiceover!.holds ?? []), { at: r6(opened.at), sec: r6(opened.shift) }];
       ep = { ...held, slots: held.slots.map((x) => (x.id === slot.id ? { ...x, end: r6(slot.end + grown) } : x)), voiceover: { ...held.voiceover!, holds } };
       report.extendedSec = r6(report.extendedSec + grown);
     } else {
+      ep = withoutOld(ep);
       overrun = 0;
     }
     ep = { ...ep, voiceover: { ...ep.voiceover!, lines: [...ep.voiceover!.lines, { ...draft, at }] } };
@@ -336,6 +351,8 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   }
 
   if (!report.lines.some((l) => l.status === 'placed')) {
+    const long = report.lines.find((l) => l.status === 'too long');
+    if (long) throw new MirageError('BAD_ITEM', `Line ${long.slot} runs ${long.overrunSec}s past its slot (more than ${MAX_HOLD} s)`, HOLD_HINT);
     throw new MirageError('NOTHING_MATCHED', 'None of the script lines were found in the recording', 'Check that you read the current lines; re-run slots and guide if the cut changed.');
   }
   const vo = ep.voiceover!;

@@ -150,8 +150,11 @@ async function main() {
       const slots = values.slots?.split(',').map((s) => s.trim()).filter(Boolean);
       const { report } = await fitRecording({ project, episode: n, recording: resolveUserPath(fourth), tools, add: values.add, slots, onStep: (m) => console.log(`• ${m}`) });
       for (const l of report.lines) {
-        const status = l.status === 'kept' ? 'kept the earlier take (not found in this recording)' : l.status;
-        console.log(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec ? `  held picture +${l.overrunSec}s` : ''}`);
+        const status =
+          l.status === 'kept' ? 'kept the earlier take (not found in this recording)'
+          : l.status === 'too long' ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold — shorten it or give it a longer slot, then vo --add`
+          : l.status;
+        console.log(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec && l.status === 'placed' ? `  held picture +${l.overrunSec}s` : ''}`);
       }
       const missing = report.lines.filter((l) => l.status === 'missing').map((l) => l.slot);
       console.log(`✓ voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ''}`);

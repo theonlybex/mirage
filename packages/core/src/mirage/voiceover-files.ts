@@ -77,7 +77,12 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
     await mkdir(dir, { recursive: true });
     const wav = join(dir, `.vo-${randomUUID()}.wav`);
     try {
-      await o.tools.extractWav(rec, wav);
+      await o.tools.extractWav(rec, wav).catch(async (e: unknown) => {
+        // ffmpeg's own words for a video without sound ("does not contain any stream") help nobody.
+        const probe = await o.tools.probe(rec).catch(() => null);
+        if (probe && !probe.hasAudio) throw new MirageError('BAD_INPUT', `${rec} has no audio track`, 'Pass the recording of your voice-over: a sound file, or a video with sound.');
+        throw e;
+      });
       transcript = await refineTranscript(await o.tools.transcribe(wav), wav);
     } finally {
       await rm(wav, { force: true });

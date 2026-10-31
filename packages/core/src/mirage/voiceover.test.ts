@@ -397,3 +397,42 @@ describe('lines edited after vo', () => {
     expect(lineChanges({ ...ep, slots: ep.slots.map((s) => ({ ...s, line: ` ${s.line}  ` })) })).toEqual([]);
   });
 });
+
+describe('fitVoiceover at the edges', () => {
+  it('never lets the last line run past the end of the episode: it holds the picture instead', () => {
+    const slots = [{ id: 'n1', start: 17, end: 20, maxWords: 8, line: 'And here is the second one.' }];
+    const rec = tx(said('And here is the second one.', 0, 0.52)); // 2.95 s from 0.15 into the 3 s slot: ends 0.1 s past it
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    const line = ep.voiceover!.lines[0];
+    const end = line.at + line.src.out - line.src.in;
+    expect(report.lines[0].overrunSec).toBeGreaterThan(0);
+    expect(end).toBeLessThanOrEqual(timelineDuration(ep) + 1e-6);
+  });
+
+  it('skips a line too long for its slot, reporting it, and places the rest', () => {
+    const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty.';
+    const rec = tx([...said(long, 0, 0.7), ...said('And here is the second one.', 15)]);
+    const slots = [{ id: 'n1', start: 1, end: 3, maxWords: 4, line: long }, { id: 'n2', start: 10, end: 13, maxWords: 8, line: 'And here is the second one.' }];
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(report.lines.map((l) => [l.slot, l.status])).toEqual([['n1', 'too long'], ['n2', 'placed']]);
+    expect(report.lines[0].overrunSec).toBeGreaterThan(10);
+    expect(ep.voiceover!.lines.map((l) => l.slot)).toEqual(['n2']);
+    expect(timelineDuration(ep)).toBe(20);
+  });
+
+  it('counts the clip\'s unused footage before calling a line too long', () => {
+    const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty.';
+    const slots = [{ id: 'n1', start: 18, end: 20, maxWords: 4, line: long }];
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(30), recording: 'vo.m4a', transcript: tx(said(long, 0, 0.7)) });
+    expect(report.lines[0]).toMatchObject({ status: 'placed' });
+    expect(report.lines[0].overrunSec).toBeGreaterThan(10);
+    expect(ep.items[0].src.out).toBe(30);
+    expect(ep.items[0].hold).toBeLessThan(10);
+  });
+
+  it('says no speech was heard in a silent recording', () => {
+    expect(() => fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo/silent.m4a', transcript: tx([{ w: 'Um.', start: 1, end: 1.3, conf: 1 }]) })).toThrow(
+      expect.objectContaining({ code: 'NOTHING_MATCHED', message: 'No speech was heard in vo/silent.m4a' }),
+    );
+  });
+});

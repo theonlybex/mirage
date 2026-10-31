@@ -161,6 +161,22 @@ describe('fitRecording and recordings saved over', () => {
   });
 });
 
+describe('fitRecording with a recording that has no sound', () => {
+  it('says a video with no audio track has none, instead of the ffmpeg error', async () => {
+    const { project, tools, calls } = await setup({});
+    await writeFile(join(project, 'screen.mov'), 'x');
+    const silentVideo = {
+      ...tools,
+      extractWav: async () => {
+        throw new Error('Output file #0 does not contain any stream');
+      },
+      probe: async () => ({ hasAudio: false }),
+    } as unknown as MediaTools;
+    await expect(fitRecording({ project, episode: 1, recording: join(project, 'screen.mov'), tools: silentVideo })).rejects.toMatchObject({ code: 'BAD_INPUT', message: `${join(project, 'screen.mov')} has no audio track` });
+    expect(calls).toEqual([]);
+  });
+});
+
 describe('fitRecording and the slots', () => {
   it('refuses before transcribing when the cut changed since slots were written', async () => {
     const { project, tools, calls } = await setup({ 'vo.m4a': tx(said('Open settings.', 0)) });
