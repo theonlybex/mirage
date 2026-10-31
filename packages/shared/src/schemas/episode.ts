@@ -86,7 +86,7 @@ export const EpisodeSchema = strictObject({
   /** The cut the slots were computed for (written by `slots`, kept in step by `vo`): its fingerprint and where each item sat. */
   slotsCut: strictObject({
     fingerprint: z.string(),
-    items: z.array(strictObject({ id: z.string(), start: z.number(), end: z.number(), in: z.number(), speed: z.number() })),
+    items: z.array(strictObject({ id: z.string(), start: z.number(), end: z.number(), in: z.number(), speed: z.number(), clip: z.string().optional(), out: z.number().optional() })),
   }).optional(),
   voiceover: strictObject({
     recording: z.string().min(1),

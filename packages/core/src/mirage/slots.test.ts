@@ -109,6 +109,30 @@ describe('slots after a re-cut (carrySlots)', () => {
     expect(r.dropped).toEqual([]);
   });
 
+  it('follows a line onto the second half of an item the user split, under its new id', () => {
+    // b-roll goes into the middle of s1: s1 keeps src 10–12, the rest (12–16) comes back as s1-2 after a 2 s insert.
+    const items = written.items.flatMap((i) =>
+      i.id === 's1' ? [{ ...i, src: { in: 10, out: 12 } }, { ...i, id: 'broll', src: { in: 24, out: 26 }, quiet: true }, { ...i, id: 's1-2', src: { in: 12, out: 16 } }] : [i],
+    );
+    const recut = { ...written, items };
+    const next = computeSlots(recut, catalog, { minLen: 1.5 });
+    const r = carrySlots(recut, next);
+    expect(r.dropped).toEqual([]);
+    const screen = r.slots.find((s) => s.line === 'Screen line.')!;
+    // The longer piece of its picture (src 12–16, now at 11–15) decides where it goes.
+    expect([screen.start, screen.end]).toEqual([11, 15]);
+  });
+
+  it('places a line by the longest piece of its picture, not the hull, when items are reordered apart', () => {
+    // The screen line sat on talk's tail (6.8–7) and s1 (7–13); s1 (trimmed to 3 s) now comes last, far from talk, with
+    // the outro and the reveal in between. The hull 6.8–18 would overlap the outro's slot most and steal it.
+    const order = ['intro', 'talk', 'outro', 'reveal', 's1'];
+    const items = order.map((id) => written.items.find((i) => i.id === id)!).map((i) => (i.id === 's1' ? { ...i, src: { in: 10, out: 13 } } : i));
+    const recut = { ...written, items };
+    const r = carrySlots(recut, computeSlots(recut, catalog));
+    expect(r.slots.map((s) => [s.start, s.end, s.line])).toEqual([[0, 4.2, 'Intro line.'], [6.8, 12, 'Outro line.'], [15, 18, 'Screen line.']]);
+  });
+
   it('matches by absolute time for slots written before slotsCut existed', () => {
     const old = { ...written, slotsCut: undefined };
     expect(carrySlots(old, computeSlots(old, catalog)).slots.map((s) => s.line)).toEqual(['Intro line.', 'Screen line.', 'Outro line.']);

@@ -72,7 +72,7 @@ export type SlotsCut = NonNullable<Episode['slotsCut']>;
 export function cutOf(ep: Episode): SlotsCut {
   return {
     fingerprint: itemsFingerprint(ep.items),
-    items: layoutTimeline(ep).map((l) => ({ id: l.item.id, start: r3(l.start), end: r3(l.end), in: l.item.src.in, speed: l.item.speed })),
+    items: layoutTimeline(ep).map((l) => ({ id: l.item.id, start: r3(l.start), end: r3(l.end), in: l.item.src.in, speed: l.item.speed, clip: l.item.clip, out: l.item.src.out })),
   };
 }
 
@@ -91,28 +91,51 @@ export function slotsStaleError(n: number): MirageError {
 }
 
 /**
- * Where a span of the cut `was` sits in `ep`: each part of it follows the source of the item it was on (by item id), so
- * re-ordering, removing or trimming items moves a slot with its picture. Null when none of its items are left.
+ * Where a span of the cut `was` sits in `ep`. Each part of it follows the source it showed: in the item with the same id,
+ * and for source that item no longer shows, in the item on the same clip showing most of it (a split whose second half
+ * got a new id). Re-ordering, removing, trimming and splitting items move a slot with its picture. Of the pieces found,
+ * the longest run decides (not their hull, which could span unrelated items between them). Null when none is left.
  */
 function follow(span: Span, was: SlotsCut, ep: Episode): Span | null {
-  const now = new Map(layoutTimeline(ep).map((l) => [l.item.id, l]));
-  let start = Infinity;
-  let end = -Infinity;
+  const laid = layoutTimeline(ep);
+  const pieces: [number, number][] = [];
+  const place = (l: (typeof laid)[number], a: number, b: number) => {
+    const x = Math.max(a, l.item.src.in);
+    const y = Math.min(b, l.item.src.out);
+    if (y - x > 1e-6) pieces.push([l.start + (x - l.item.src.in) / l.item.speed, l.start + (y - l.item.src.in) / l.item.speed]);
+  };
   for (const o of was.items) {
     const a = Math.max(span.start, o.start);
     const b = Math.min(span.end, o.end);
-    const l = now.get(o.id);
-    if (b <= a || !l) continue;
-    const at = (t: number) => {
-      const src = o.in + (t - o.start) * o.speed;
-      return Math.min(l.end, Math.max(l.start, l.start + (src - l.item.src.in) / l.item.speed));
-    };
-    const [x, y] = [at(a), at(b)];
-    if (y - x < 1e-6) continue;
-    start = Math.min(start, x);
-    end = Math.max(end, y);
+    if (b <= a) continue;
+    // Source shown over [a, b]; a frozen tail shows the item's last frame.
+    const srcAt = (t: number) => Math.min(o.out ?? Infinity, o.in + (t - o.start) * o.speed);
+    const [sa, sb] = [srcAt(a), srcAt(b)];
+    const same = laid.find((l) => l.item.id === o.id);
+    let rest: [number, number][] = [[sa, sb]];
+    if (same && (o.clip === undefined || same.item.clip === o.clip)) {
+      place(same, sa, sb);
+      rest = [[sa, Math.min(sb, same.item.src.in)], [Math.max(sa, same.item.src.out), sb]].filter(([x, y]) => y - x > 1e-6) as [number, number][];
+    }
+    if (o.clip === undefined) continue;
+    for (const [x, y] of rest) {
+      const overlap = (l: (typeof laid)[number]) => Math.min(y, l.item.src.out) - Math.max(x, l.item.src.in);
+      const best = laid
+        .filter((l) => l.item.clip === o.clip && l.item.id !== o.id && overlap(l) > 1e-6)
+        .sort((p, q) => overlap(q) - overlap(p) || Math.abs(p.start - o.start) - Math.abs(q.start - o.start))[0];
+      if (best) place(best, x, y);
+    }
   }
-  return end > start ? { start: r3(start), end: r3(end) } : null;
+  if (!pieces.length) return null;
+  pieces.sort((p, q) => p[0] - q[0]);
+  const runs: [number, number][] = [];
+  for (const [x, y] of pieces) {
+    const last = runs[runs.length - 1];
+    if (last && x <= last[1] + 0.05) last[1] = Math.max(last[1], y);
+    else runs.push([x, y]);
+  }
+  const [x, y] = runs.reduce((m, r) => (r[1] - r[0] > m[1] - m[0] ? r : m));
+  return { start: r3(x), end: r3(y) };
 }
 
 /**
