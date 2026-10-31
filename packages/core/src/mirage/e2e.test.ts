@@ -1,25 +1,29 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EpisodeSchema, TranscriptSchema } from '@wordedits/shared';
+import { EpisodeSchema } from '@wordedits/shared';
 import { run } from '@wordedits/sidecars';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
-import { writeJsonFile } from '../project-store.js';
 import { ingestClips, loadCatalog } from './ingest.js';
 import { analyzeLibrary, loadLibrary, snapToBeats } from './music.js';
-import { loadEpisode, renderEpisode, saveEpisode } from './render-episode.js';
+import { renderEpisode, saveEpisode } from './render-episode.js';
 import { computeSlots } from './slots.js';
 import { timelineDuration } from './timeline.js';
-import { fitVoiceover } from './voiceover.js';
+import { fitRecording } from './voiceover-files.js';
 
 const LINE = 'Every request took ten seconds, so I rewrote the backend.';
 
 describe.skipIf(process.platform !== 'darwin')('a Mirage episode end to end (macOS)', () => {
   let tools: MediaTools;
   let project: string;
+  let passed = false;
+  // Keep the project for inspection when the test failed.
+  afterAll(async () => {
+    if (passed && project) await rm(project, { recursive: true, force: true });
+  });
   beforeAll(async () => {
     tools = await realMediaTools();
     const s = await import('@wordedits/sidecars');
@@ -68,13 +72,9 @@ describe.skipIf(process.platform !== 'darwin')('a Mirage episode end to end (mac
 
     const vo = join(project, 'vo.aiff');
     execFileSync('say', ['-v', 'Samantha', '-o', vo, `${LINE} [[slnc 600]] ${LINE}`]);
-    const wav = join(project, 'vo.wav');
-    await tools.extractWav(vo, wav);
-    const transcript = await tools.transcribe(wav);
-    await writeJsonFile(join(project, 'episodes', '1', 'voiceover.transcript.json'), TranscriptSchema, transcript);
-    const fitted = fitVoiceover({ episode: await loadEpisode(project, 1), catalog, recording: 'vo.aiff', transcript });
+    const fitted = await fitRecording({ project, episode: 1, recording: vo, tools });
     expect(fitted.report.lines[0]).toMatchObject({ status: 'placed', takes: 2 });
-    await saveEpisode(project, fitted.episode);
+    expect(fitted.episode.voiceover!.recording).toBe('vo.aiff');
 
     const final = await renderEpisode({ project, episode: 1, mode: 'final', tools });
     const p = await tools.probe(final.outputPath);
@@ -85,7 +85,9 @@ describe.skipIf(process.platform !== 'darwin')('a Mirage episode end to end (mac
     expect(loud.integratedLufs).toBeLessThan(-12);
     const srt = (await readFile(final.srtPath!, 'utf8')).toLowerCase();
     expect(srt).toContain('weather');
-    // Captions are the transcribed words, and the transcriber may write "back end".
-    expect(srt).toMatch(/back ?end/);
+    // Voice-over captions use the written line's spelling, whatever the transcriber heard ("back end", "10").
+    expect(srt).toContain('backend');
+    expect(srt).toContain('ten seconds,');
+    passed = true;
   }, 600_000);
 });
