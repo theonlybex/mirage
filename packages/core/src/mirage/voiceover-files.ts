@@ -10,6 +10,7 @@ import { loadCatalog, sha256File } from './ingest.js';
 import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';
 import { slotsStale, slotsStaleError } from './slots.js';
 import { cutChanged, cutChangedError, fitVoiceover, fittedRecordingSha, missingSlots, type FitReport } from './voiceover.js';
+import { refineTranscript } from './word-timing.js';
 
 /** A recording's transcript file in the episode folder, named by the recording's content so a re-fit can reuse it. */
 export const voTranscriptFile = (sha256: string) => `voiceover.${sha256.slice(0, 16)}.transcript.json`;
@@ -77,7 +78,7 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
     const wav = join(dir, `.vo-${randomUUID()}.wav`);
     try {
       await o.tools.extractWav(rec, wav);
-      transcript = await o.tools.transcribe(wav);
+      transcript = await refineTranscript(await o.tools.transcribe(wav), wav);
     } finally {
       await rm(wav, { force: true });
     }

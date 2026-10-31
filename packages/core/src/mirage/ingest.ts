@@ -7,6 +7,7 @@ import type { MediaTools } from '../media-tools.js';
 import { JsonFileError, readJsonFile, writeJsonFile } from '../project-store.js';
 import { errorReason, MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
+import { refineTranscript } from './word-timing.js';
 
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm']);
 const HDR_TRANSFERS = new Set(['arib-std-b67', 'smpte2084']);
@@ -61,7 +62,9 @@ export interface IngestResult {
 async function transcribeClip(o: { tools: MediaTools; path: string; name: string; wav: string; durationSec: number; audioStream?: number; locale?: string; result: IngestResult; onStep?: (m: string) => void }): Promise<Transcript | null> {
   try {
     await o.tools.extractWav(o.path, o.wav, { timeoutMs: Math.max(10 * 60_000, o.durationSec * 500), audioStream: o.audioStream });
-    return await o.tools.transcribe(o.wav, { locale: o.locale, timeoutMs: Math.max(30 * 60_000, o.durationSec * 2000) });
+    const transcript = await o.tools.transcribe(o.wav, { locale: o.locale, timeoutMs: Math.max(30 * 60_000, o.durationSec * 2000) });
+    // The transcriber's word times are checked against the sound, so slots and captions see when words really start and end.
+    return await refineTranscript(transcript, o.wav);
   } catch (e) {
     o.onStep?.(`${o.name}: transcription failed, kept as silent footage`);
     o.result.warnings.push(`${o.name}: transcription failed (${errorReason(e)}); its speech is invisible to slots and captions — run ingest again to retry`);
