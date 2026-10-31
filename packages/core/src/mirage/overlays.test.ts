@@ -164,6 +164,22 @@ describe('buildAss text the fonts can draw', () => {
     expect(undrawable('漢字 עברית')).toBe(false);
   });
 
+  it('keeps symbols the fonts draw (©, ®, ™, ⚠, ▶, ✔, ↔), leaving out only colour emoji', () => {
+    expect(dialogue(one('Mirage™ © 2026 ▶ ⚠ ✔ ↔ ®', { cjkFont: null }))).toMatch(/\}Mirage™ © 2026 ▶ ⚠ ✔ ↔ ®$/);
+    expect(undrawable('Mirage™ © 2026 ▶ ⚠ ✔ ↔ ®')).toBe(false);
+    // An emoji-style variation selector is dropped and the symbol kept; ZWJ sequences, flags and skin tones go whole.
+    expect(dialogue(one('Careful ⚠️ 1️⃣ dev 👩🏽‍💻 🇫🇷 ❤️‍🔥 done ✅ ⌚', { cjkFont: null }))).toMatch(/\}Careful ⚠ 1 dev done$/);
+    expect(undrawable('Careful ⚠️')).toBe(false);
+    expect(undrawable('👩🏽‍💻')).toBe(true);
+    expect(undrawable('❤️‍🔥')).toBe(true);
+    expect(undrawable('🕶')).toBe(true);
+  });
+
+  it('keeps drawable symbols in captions too', () => {
+    const cues = groupCaptions([{ w: 'Mirage™', start: 0, end: 0.4, conf: 1 }, { w: '▶', start: 0.5, end: 0.6, conf: 1 }, { w: '🚀', start: 0.7, end: 0.8, conf: 1 }], { durationSec: 2 });
+    expect(cues.map((c) => c.text)).toEqual(['Mirage™ ▶']);
+  });
+
   it.runIf(process.platform === 'darwin')('draws Han characters on macOS instead of empty boxes (real frame)', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we-ass-'));
     const frame = async (name: string, ass: string) => {

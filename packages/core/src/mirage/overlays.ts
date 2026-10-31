@@ -119,9 +119,15 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
 }
 
 const SENTENCE_END = /[.?!]["'”’)\]]*$/;
-const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
+/**
+ * Colour emoji: characters shown as emoji by default (🚀 ✅ ⌚, flags, skin tones), pictographs from U+1F000 on, and
+ * every part of a ZWJ sequence (👩‍💻 ❤️‍🔥). Symbols that are text by default (© ® ™ ⚠ ▶ ✔ ↔) are not: the fonts draw them.
+ */
+const PICTO = String.raw`[\p{Emoji_Presentation}]|(?=\p{Extended_Pictographic})[\u{1F000}-\u{1FAFF}]|\p{Extended_Pictographic}(?=\u{FE0F}?\u{200D})|(?<=\u{200D})\p{Extended_Pictographic}`;
+/** Emoji plus the invisible parts of emoji sequences: variation selector 16, ZWJ, the keycap mark and tag characters. */
+const EMOJI = new RegExp(`${PICTO}|[\\u{FE0F}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E007F}]`, 'gu');
 /** libass draws no emoji (colour glyphs): they come out as empty boxes, so captions and overlays leave them out. */
-export const undrawable = (text: string) => new RegExp(EMOJI.source, 'u').test(text);
+export const undrawable = (text: string) => new RegExp(PICTO, 'u').test(text);
 /** Runs of Chinese/Japanese text. macOS's fallback for Han is a font libass can't open, so they get an explicit one. */
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]+/gu;
 const tidy = (t: string) => t.replace(EMOJI, '').replace(/\s+([.,!?;:])/g, '$1').trim();
