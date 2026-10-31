@@ -3,3 +3,5 @@ export * from './timeline.js';
 export * from './ingest.js';
 export * from './tempo.js';
 export * from './music.js';
+export * from './overlays.js';
+export * from './render-episode.js';
