@@ -47,7 +47,7 @@ WordEdits is "Claude Code for video editing." A person with a video idea and no 
 3. **Nothing irreversible without a yes.** Upload, overwriting a final render, deleting a project.
 4. **The UI never touches video.** The renderer shows a `<video>` of a 540p proxy and sends typed commands; all media work runs in the main process and sidecar binaries.
 5. **Deterministic.** The same `edl.json` always produces the same video. Every AI decision is written to a file the user can inspect.
-6. **Apple-style.** System font (SF Pro on macOS, Segoe UI on Windows), native title bar with vibrancy on macOS, at most three primary controls per screen, 120–160 ms transitions only when state changes, inline cards instead of modals wherever possible, light and dark mode. Feels fast: no spinner longer than 300 ms without a progress message in chat.
+6. **Google's design language** (superseded the Apple-style direction on 2026-10-30; see §15). Material Design 3 with M3 Expressive at moments of selection, action and progress; calm baseline Material on dense editing surfaces; one primary action per screen; light and dark. Feels fast: no spinner longer than 300 ms without a progress message in chat.
 7. **Light.** No Python, no bundled browser for rendering, no database. Target install ≤ 300 MB (Electron ~200 MB + sidecars ~80 MB + one whisper model downloaded on first run). Idle RAM comparable to a text editor.
 
 ## 4. Architecture
@@ -207,7 +207,7 @@ One window. Left: stage workspace. Right: chat (resizable, min 320 px). Top: pro
 | Publish | Title, description, chapters, visibility (private default), thumbnail from a frame; Upload button; progress and final URL |
 | Settings | API key (stored in OS keychain via `keytar`/`safeStorage`), model, YouTube account connect/disconnect, sidecar status, token usage per project |
 
-Visual style: system font, 8 px spacing grid, neutral greys with one accent, native macOS vibrancy sidebar, no drop shadows heavier than 8 px blur, transitions 120–160 ms ease-out. Frontend implementation must follow the UI/UX Pro Max skill per the user's global instructions.
+Visual style: see §15 (Google Material 3 / M3 Expressive). Frontend implementation also runs through the UI/UX Pro Max skill per the user's global instructions; where its suggestions differ from §15, §15 wins.
 
 ## 9. Error handling
 
@@ -341,3 +341,56 @@ Edit grammar: talking/explaining shots 3–6 s; montage 0.7–2 s on the beat; r
 - `output`: `{ width, height, fps }`
 
 Rendering reuses §13's chunked approach: items render in chunks of ≤30 to intermediates (speed via setpts/atempo, muted audio as silence); the final pass adds overlays and captions (ASS), voice-over and music tracks, the mix and the encode.
+
+## 15. Design language: Google Material 3 / M3 Expressive (2026-10-30)
+
+The user wants Mirage to look and behave as if Google's designers built it, and asked that Google's design language be understood and followed. Source research (Oct 2026): material-components-android docs, developer.android.com (window size classes, canonical layouts), design.google's M3 Expressive research, Material Symbols docs; colour scheme computed with `@material/material-color-utilities`. Values marked † were recalled from the M3 baseline and must be re-checked against m3.material.io when the UI is built.
+
+**Stance.** Baseline Material on dense work surfaces (script text, scene list, timeline); Expressive (bolder shape, emphasized type, springy motion, wavy progress) at selection, primary actions, progress and the chat pane — Google's own guidance places consumer media apps in Expressive's sweet spot and warns against over-reach (removing labels, scattered layouts).
+
+**Colour.** Static TonalSpot scheme from seed `#3B6EA8`, standard contrast; dark theme default (video work), light available. Tertiary is reserved for Claude/agent accents. Panels are separated by surface-container tone, not shadows; shadows only on floating toolbars and menus.
+
+| Role | Light | Dark |
+|---|---|---|
+| primary / on-primary | #39608F / #FFFFFF | #A3C9FE / #00315B |
+| primary-container / on | #D3E4FF / #1E4875 | #1E4875 / #D3E4FF |
+| secondary / on | #545F70 / #FFFFFF | #BBC7DB / #263141 |
+| secondary-container / on | #D7E3F8 / #3C4758 | #3C4758 / #D7E3F8 |
+| tertiary / on | #6C5677 / #FFFFFF | #D8BDE3 / #3C2947 |
+| tertiary-container / on | #F5D9FF / #533F5E | #533F5E / #F5D9FF |
+| error / on | #BA1A1A / #FFFFFF | #FFB4AB / #690005 |
+| error-container / on | #FFDAD6 / #93000A | #93000A / #FFDAD6 |
+| surface | #F8F9FF | #111418 |
+| surface-container lowest / low / default / high / highest | #FFFFFF / #F2F3FA / #ECEDF4 / #E7E8EE / #E1E2E8 | #0C0E13 / #191C20 / #1D2024 / #272A2F / #32353A |
+| on-surface / on-surface-variant | #191C20 / #43474E | #E1E2E8 / #C3C6CF |
+| outline / outline-variant | #73777F / #C3C6CF | #8D9199 / #43474E |
+| inverse-surface / inverse-on-surface / inverse-primary | #2E3035 / #EFF0F7 / #A3C9FE | #E1E2E8 / #2E3035 / #39608F |
+
+Layering: workspace on `surface`; navigation rail and chat pane on `surface-container-low`; scene list on `surface-container`; cards and script blocks on `surface-container-high`; inset editing wells on `surface-container-lowest`.
+
+**Type.** Google Sans Flex (SIL OFL; bundle with its licence — confirm the licence on fonts.google.com before shipping), fallback Roboto Flex, then system-ui. Material type scale (sizes verified; line heights †): headline-small 24/32 for screen titles; title-medium 16/24 weight 500 for panel and scene titles; body-large 16/24 for script text; body-medium 14/20 for chat; label-large 14/20 weight 500 for buttons, chips and rail labels; label-small 11/16 weight 500 for timecodes and captions (tabular numerals). Selected states use the emphasized weight (one step heavier).
+
+**Shape.** Corner scale: none 0, extra-small 4, small 8, medium 12, large 16, large-increased 20, extra-large 28, extra-large-increased 32, extra-extra-large 48, full. Script blocks and cards 12; chat bubbles 16 with 4 on the speaker side; preview frame 16; dialogs and sheets 28; buttons and chips full; text fields 4 on the top corners. Expressive toggles morph round → square when selected; pressed buttons morph slightly.
+
+**Motion.** Spatial springs (position, size): default stiffness 380 / damping 0.8, fast 800 / 0.6 (button morphs) † — check against Compose `MotionScheme.expressive()`. Effects springs (colour, opacity; no overshoot): default 1600 / 1.0, fast 3800 / 1.0. Without springs: `cubic-bezier(0.2, 0, 0, 1)` 300 ms (200 ms small controls); emphasized decelerate `cubic-bezier(0.05, 0.7, 0.1, 1)` for entering. `prefers-reduced-motion` swaps spatial springs for effects springs.
+
+**Icons.** Material Symbols Rounded (Apache 2.0), weight 400, optical size 24, grade 0; outlined when unselected, filled when selected; font subset to the icons used.
+
+**Layout.** Window size classes: compact < 600, medium 600–839, expanded 840–1199, large 1200–1599, extra-large ≥ 1600. Mirage uses the **supporting-pane** canonical layout: workspace ~70 %, chat pane ~30 % (360–420 px), always visible at ≥ 1200 px; at medium widths 50/50; at compact widths the chat becomes a bottom sheet. 8 px spacing grid; 24 px margins from medium up. Minimum 48 px targets.
+
+**Components.**
+
+| Need | Material component |
+|---|---|
+| Stage navigation (Clips · Story · Voice-over · Publish) | Collapsed navigation rail (96 px Expressive), 56×32 pill indicator, labels always visible, small check badge on finished stages |
+| Chat pane | Supporting pane on `surface-container-low`; filled text field; round send icon button (tonal when empty, filled when there is text) |
+| Multiple-choice answers in chat | Connected button group, or a vertical stack of outlined buttons for long labels; the chosen answer is a selected toggle in `secondary-container`; chips only for short suggestions |
+| Script and narration blocks | Filled cards on `surface-container-high`, radius 12; selected block gets a 2 px primary outline |
+| Scene / item list | List in a `surface-container` pane: thumbnail, title-medium, label-small duration; selection is a `secondary-container` pill |
+| Preview player controls | Floating toolbar over the bottom of the preview (`surface-container-high`, shadow): large round play toggle, extra-small slider with stop indicator, timecode |
+| Primary action per stage | One filled button (medium size, leading icon); secondary actions tonal or outlined; destructive actions as text buttons in `error`; no FAB on desktop |
+| Render and import progress | Linear wavy progress (8 px thick track, 4 px stop indicator) in a card with a title-medium status line and a Cancel text button; determinate when frame progress is known |
+
+**Implementation.** Material Web is in maintenance mode with no Expressive features planned, and MUI's M3 support is unconfirmed, so Mirage defines CSS custom-property tokens (`--md-sys-color-*`, `--md-sys-typescale-*`, `--md-sys-shape-*`, `--md-sys-motion-*`) generated with `material-color-utilities`, builds its own React components for the Expressive pieces (wavy progress, morphing toggles, floating toolbar), uses headless primitives (Radix or Base UI) for behaviour, and a JS spring library for motion.
+
+**Video overlays (rendered into episodes).** Captions, callouts, badges and labels use the same type family and shape language: Google Sans Flex bold for callouts and captions, full-radius pill boxes for badges and labels, badge tones mapped to error (FAILED), a green success tone (PASSED) and primary (LIVE). Applied when the overlay renderer gains font bundling (Phase B); Phase A keeps the system font.
