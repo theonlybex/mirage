@@ -139,6 +139,8 @@ describe('renderEdl', () => {
       pickEncoder: async () => ({ name: 'libx264', extraArgs: [] }),
       makeProxy: async () => {},
       measureLoudness: async () => ({ integratedLufs: -14, truePeakDb: -3 }),
+      extractWav: async () => { throw new Error('not used'); },
+      transcribe: async () => { throw new Error('not used'); },
     };
 
     const expectedOutputPath = join(dir, `preview-${edlHash(edl)}.mp4`);
@@ -218,5 +220,7 @@ function probeStub(outputDurations: number[], runFfmpeg?: MediaTools['runFfmpeg'
     pickEncoder: async () => ({ name: 'libx264', extraArgs: [] }),
     makeProxy: async () => {},
     measureLoudness: async () => ({ integratedLufs: -14, truePeakDb: -3 }),
+    extractWav: async () => { throw new Error('not used'); },
+    transcribe: async () => { throw new Error('not used'); },
   };
 }

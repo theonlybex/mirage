@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { _resetLocateCache } from './locate.js';
-import { run, createLineSplitter } from './run.js';
+import { run, runPath, createLineSplitter } from './run.js';
 
 describe('run', () => {
   it('runs ffmpeg -version and returns stdout', async () => {
@@ -90,5 +90,20 @@ describe('createLineSplitter', () => {
     expect(lines).toEqual(['a', 'b']);
     splitter.flush();
     expect(lines).toEqual(['a', 'b']);
+  });
+});
+
+describe('run with cwd', () => {
+  it('resolves relative paths against cwd', async () => {
+    const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', 'tone-6s.mp4', '-f', 'null', '-'], { cwd: 'fixtures' });
+    expect(stderr).not.toContain('No such file');
+  });
+});
+
+describe('runPath', () => {
+  it('reports a missing binary as NOT_FOUND with the given hint', async () => {
+    await expect(runPath('thing', '/definitely/not/here/thing', [], { notFoundHint: 'build it first' })).rejects.toMatchObject({
+      name: 'SidecarError', tool: 'thing', code: 'NOT_FOUND', hint: 'build it first',
+    });
   });
 });

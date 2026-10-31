@@ -5,6 +5,10 @@ import { installHint, locate, type Tool } from './locate.js';
 export interface RunOptions {
   timeoutMs?: number;
   onStdoutLine?: (line: string) => void;
+  /** Working directory for the child process. */
+  cwd?: string;
+  /** Hint used when the binary cannot be started at all. */
+  notFoundHint?: string;
 }
 
 export interface RunResult {
@@ -44,9 +48,13 @@ export function createLineSplitter(onLine: (line: string) => void): LineSplitter
 }
 
 export async function run(tool: Tool, args: string[], opts: RunOptions = {}): Promise<RunResult> {
-  const bin = await locate(tool);
+  return runPath(tool, await locate(tool), args, { notFoundHint: installHint(tool), ...opts });
+}
+
+/** Runs a binary at a known path. `name` is used in errors. */
+export async function runPath(name: string, bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   const timeout = opts.timeoutMs ?? 10 * 60_000;
-  const child = execa(bin, args, { timeout, reject: false, all: false, stripFinalNewline: false });
+  const child = execa(bin, args, { timeout, reject: false, all: false, stripFinalNewline: false, cwd: opts.cwd });
 
   let splitter: LineSplitter | undefined;
   if (opts.onStdoutLine && child.stdout) {
@@ -60,23 +68,17 @@ export async function run(tool: Tool, args: string[], opts: RunOptions = {}): Pr
   splitter?.flush();
   const stderr = String(res.stderr ?? '');
   if (res.timedOut) {
-    throw new SidecarError(tool, 'TIMEOUT', `${tool} exceeded ${timeout} ms`, 'The file may be very long or the machine is busy. Try again.', stderr);
+    throw new SidecarError(name, 'TIMEOUT', `${name} exceeded ${timeout} ms`, 'The file may be very long or the machine is busy. Try again.', stderr);
   }
   if (res.exitCode === undefined && res.signal) {
-    throw new SidecarError(tool, 'EXIT', `${tool} was stopped by ${res.signal}`, lastMeaningfulLine(stderr), stderr);
+    throw new SidecarError(name, 'EXIT', `${name} was stopped by ${res.signal}`, lastMeaningfulLine(stderr), stderr);
   }
   if (res.exitCode === undefined) {
     // The process never ran (ENOENT, EACCES, ENOEXEC: missing, not executable, or not a binary).
-    // stderr is '' here, so fall through to execa's spawn message.
-    throw new SidecarError(tool, 'NOT_FOUND', `${tool} could not be started`, installHint(tool), String(res.stderr || res.originalMessage || ''));
+    throw new SidecarError(name, 'NOT_FOUND', `${name} could not be started`, opts.notFoundHint ?? 'The program could not be started.', String(res.stderr || res.originalMessage || ''));
   }
   if (res.exitCode !== 0) {
-    throw new SidecarError(
-      tool, 'EXIT',
-      `${tool} exited with code ${res.exitCode}`,
-      lastMeaningfulLine(stderr),
-      stderr,
-    );
+    throw new SidecarError(name, 'EXIT', `${name} exited with code ${res.exitCode}`, lastMeaningfulLine(stderr), stderr);
   }
   return { stdout: String(res.stdout ?? ''), stderr };
 }

@@ -10,7 +10,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b packages/shared packages/sidecars packages/core",
     "fixtures": "tsx scripts/make-fixtures.ts",
-    "render": "tsx scripts/render.ts"
+    "render": "tsx scripts/render.ts",
+    "build:native": "tsx scripts/build-native.ts",
+    "fixtures:speech": "tsx scripts/make-speech-fixture.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
