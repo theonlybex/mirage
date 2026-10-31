@@ -6,3 +6,6 @@ export * from './schemas/project.js';
 export * from './schemas/transcript.js';
 export * from './schemas/takes.js';
 export * from './schemas/probe.js';
+export * from './schemas/catalog.js';
+export * from './schemas/episode.js';
+export * from './schemas/library.js';

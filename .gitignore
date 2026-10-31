@@ -7,3 +7,4 @@ out/
 packages/*/dist/
 *.tsbuildinfo
 fixtures/tmp/
+packages/sidecars/bin/

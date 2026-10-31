@@ -18,6 +18,7 @@ interface RawStream {
   height?: number;
   r_frame_rate?: string;
   avg_frame_rate?: string;
+  color_transfer?: string;
 }
 interface RawProbe {
   format?: { duration?: string };
@@ -47,6 +48,7 @@ export async function probe(file: string): Promise<ProbeInfo> {
     hasAudio: Boolean(a),
     videoCodec: v?.codec_name ?? null,
     audioCodec: a?.codec_name ?? null,
+    colorTransfer: v?.color_transfer ?? null,
   };
   return ProbeInfoSchema.parse(info);
 }

@@ -6,6 +6,7 @@ export interface FfmpegOptions {
   expectedDurationSec?: number;
   timeoutMs?: number;
   onProgress?: (fraction: number) => void;
+  cwd?: string;
 }
 
 /** Runs ffmpeg with progress reporting. Callers pass everything except -progress/-nostats/-y. */
@@ -13,6 +14,7 @@ export async function runFfmpeg(args: string[], opts: FfmpegOptions = {}): Promi
   const expected = opts.expectedDurationSec ?? 0;
   await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats', '-y', ...args], {
     timeoutMs: opts.timeoutMs,
+    cwd: opts.cwd,
     onStdoutLine: (line) => {
       if (!opts.onProgress) return;
       if (line.startsWith('out_time_us=')) {
@@ -25,6 +27,14 @@ export async function runFfmpeg(args: string[], opts: FfmpegOptions = {}): Promi
       }
     },
   });
+}
+
+/** 16 kHz mono 16-bit WAV, the input the transcriber expects. */
+export async function extractWav(src: string, out: string, opts: { timeoutMs?: number } = {}): Promise<void> {
+  await run('ffmpeg', [
+    '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
+    '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', out,
+  ], { timeoutMs: opts.timeoutMs ?? 10 * 60_000 });
 }
 
 export type EncoderName = 'h264_videotoolbox' | 'h264_nvenc' | 'libx264';
