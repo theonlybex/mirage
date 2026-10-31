@@ -23,7 +23,7 @@ pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/voiceover.m4a
 pnpm mirage render ~/Mirage/weather-app 1
 ```
 
-If some lines were missing, record just those and add them with `pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/missing.m4a --add`. `episodes/1/final.mp4` and `final.srt` are ready to upload. The workflow Claude follows is in `.claude/skills/mirage-episode/SKILL.md`.
+If some lines were missing, record just those (under a new file name, not over the first recording) and add them with `pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/missing.m4a --add`. `episodes/1/final.mp4` and `final.srt` are ready to upload. The workflow Claude follows is in `.claude/skills/mirage-episode/SKILL.md`.
 
 Design spec: `docs/superpowers/specs/2026-09-28-wordedits-design.md`. Plans: `docs/superpowers/plans/`.
 
