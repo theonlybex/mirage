@@ -6,6 +6,7 @@ import { EpisodeSchema, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import type { MediaTools } from '../media-tools.js';
 import { sha256File } from './ingest.js';
+import { acquireLock } from './lock.js';
 import { loadEpisode, loadVoiceoverTranscripts, saveEpisode } from './render-episode.js';
 import { fitRecording, voTranscriptFile } from './voiceover-files.js';
 
@@ -78,6 +79,19 @@ describe('fitRecording', () => {
     expect(transcripts.get('n2.m4a')!.words[0].w).toBe('Then');
 
     await expect(fitRecording({ project, episode: 1, recording: join(project, 'n2.m4a'), tools, add: true })).rejects.toMatchObject({ code: 'NOTHING_MATCHED', message: 'Every written line already has a voice-over' });
+  });
+});
+
+describe('fitRecording and other commands', () => {
+  it('refuses while a render of the episode is running, before transcribing anything', async () => {
+    const { project, tools, calls } = await setup({ 'vo.m4a': tx(said('Open settings.', 0)) });
+    const lock = await acquireLock(join(project, 'episodes', '1'), 'render', 'episode 1');
+    try {
+      await expect(fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools })).rejects.toMatchObject({ code: 'BUSY', message: expect.stringContaining('episode 1 is busy: render') });
+      expect(calls).toEqual([]);
+    } finally {
+      await lock.release();
+    }
   });
 });
 

@@ -7,6 +7,7 @@ import { run } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { frameInterval, guessKind, ingestClips, loadCatalog } from './ingest.js';
+import { acquireLock, LOCK_FILE } from './lock.js';
 
 const probe = (o: Partial<ProbeInfo>): ProbeInfo => ({ durationSec: 10, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac', colorTransfer: null, ...o });
 const words = (n: number, dur: number): Transcript => ({
@@ -198,5 +199,20 @@ describe('ingestClips resilience', () => {
     expect(r.skipped).toEqual([{ file: 'b.mp4', reason: 'failed: ffmpeg blew up' }]);
     expect(existsSync(join(project, 'frames', 'c001'))).toBe(true);
     expect(existsSync(join(project, 'frames', 'c002'))).toBe(false);
+  });
+
+  it('clears WAVs left by a killed ingest, and refuses while another ingest holds the project', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    await writeFile(join(project, '.tmp-c001.wav'), 'x');
+    await writeFile(join(project, LOCK_FILE), JSON.stringify({ pid: 4_194_305, command: 'ingest', startedAt: new Date().toISOString(), token: 'dead' }));
+    await ingestClips({ project, clipsDir: good, tools: { ...real, transcribe: async () => words(10, 3) } });
+    expect(existsSync(join(project, '.tmp-c001.wav'))).toBe(false);
+    expect(existsSync(join(project, LOCK_FILE))).toBe(false);
+    const lock = await acquireLock(project, 'ingest', 'the project');
+    try {
+      await expect(ingestClips({ project, clipsDir: good, tools: real })).rejects.toMatchObject({ code: 'BUSY', message: expect.stringContaining('the project is busy: ingest') });
+    } finally {
+      await lock.release();
+    }
   });
 });

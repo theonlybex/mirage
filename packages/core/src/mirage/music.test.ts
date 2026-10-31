@@ -1,10 +1,11 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
 import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
 import { realMediaTools } from '../media-tools.js';
+import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, snapToBeats } from './music.js';
 import { layoutTimeline } from './timeline.js';
 
@@ -122,5 +123,20 @@ describe('analyzeLibrary', () => {
     const out = await analyzeLibrary(dir, await realMediaTools());
     expect(out.tracks[0]).toMatchObject({ file: 'quiet.wav', bpm: null, beatOffset: null });
     expect(out.tracks[0].durationSec).toBeCloseTo(5, 0);
+  });
+
+  it('clears decode files left by a killed run, and refuses while another music run holds the folder', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, 'quiet.wav')]);
+    await writeFile(join(dir, '.tmp-0f8fad5b-d9cb-469f-a165-70867728950e.f32'), 'x');
+    await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: 4_194_305, command: 'music', startedAt: new Date().toISOString(), token: 'dead' }));
+    await analyzeLibrary(dir, await realMediaTools());
+    expect((await readdir(dir)).sort()).toEqual(['library.json', 'quiet.wav']);
+    const lock = await acquireLock(dir, 'music', 'the music folder');
+    try {
+      await expect(analyzeLibrary(dir, await realMediaTools())).rejects.toMatchObject({ code: 'BUSY' });
+    } finally {
+      await lock.release();
+    }
   });
 });

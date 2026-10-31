@@ -7,7 +7,7 @@ import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
-import { episodeDir, loadEpisode, saveEpisode } from './render-episode.js';
+import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';
 import { cutChanged, cutChangedError, fitVoiceover, missingSlots, type FitReport } from './voiceover.js';
 
 /** A recording's transcript file in the episode folder, named by the recording's content so a re-fit can reuse it. */
@@ -30,6 +30,16 @@ export async function fitRecording(o: {
   const n = o.episode;
   const rec = resolve(o.recording);
   if (!existsSync(rec)) throw new MirageError('BAD_ITEM', `${rec} does not exist`, 'Pass the path of your voice-over recording.');
+  const lock = await lockEpisode(project, n, 'vo');
+  try {
+    return await fitLocked(o, project, rec);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string, rec: string): Promise<{ episode: Episode; report: FitReport; reused: boolean }> {
+  const n = o.episode;
   const ep = await loadEpisode(project, n);
   // Fail before the (slow) transcription when the fit would refuse anyway.
   if (!ep.slots.some((s) => s.line.trim())) {

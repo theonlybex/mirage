@@ -5,6 +5,7 @@ import { MusicLibrarySchema, type Catalog, type Episode, type MusicLibrary } fro
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { MirageError } from './errors.js';
+import { acquireLock, clearLeftovers } from './lock.js';
 import { decodeMono, detectTempo } from './tempo.js';
 import { itemFrames, shiftAfter } from './timeline.js';
 
@@ -23,6 +24,16 @@ export async function loadLibrary(dir: string): Promise<MusicLibrary> {
 
 export async function analyzeLibrary(dir: string, tools: MediaTools): Promise<MusicLibrary> {
   const root = resolve(dir);
+  const lock = await acquireLock(root, 'music', 'the music folder');
+  try {
+    await clearLeftovers(root, lock, (f) => /^\.tmp-.*\.f32$/.test(f));
+    return await analyzeLocked(root, tools);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function analyzeLocked(root: string, tools: MediaTools): Promise<MusicLibrary> {
   const lib = await loadLibrary(root);
   const files = (await readdir(root)).filter((f) => !f.startsWith('.') && AUDIO_EXTENSIONS.has(extname(f).toLowerCase())).sort();
   for (const file of files) {

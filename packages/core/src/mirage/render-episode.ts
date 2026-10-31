@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { encodeArgs, ffNum } from '../edl-compiler.js';
@@ -8,6 +8,7 @@ import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { MirageError } from './errors.js';
 import { loadCatalog } from './ingest.js';
+import { acquireLock, clearLeftovers, type Lock } from './lock.js';
 import { loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
@@ -201,6 +202,7 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
 
 export const episodeDir = (project: string, n: number) => join(resolve(project), 'episodes', String(n));
 
+const noEpisode = (n: number) => new MirageError('NO_EPISODE', `episodes/${n}/episode.json does not exist`, 'Ask Claude to write the episode timeline first.');
 const wrongNumber = (n: number, found: number) =>
   new MirageError('NO_EPISODE', `episodes/${n}/episode.json says it is episode ${found}`, `Set "number" to ${n} in episodes/${n}/episode.json.`);
 
@@ -211,7 +213,7 @@ export async function loadEpisode(project: string, n: number): Promise<Episode> 
     ep = await readJsonFile(join(episodeDir(project, n), 'episode.json'), EpisodeSchema, `episodes/${n}/episode.json`);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new MirageError('NO_EPISODE', `episodes/${n}/episode.json does not exist`, 'Ask Claude to write the episode timeline first.');
+      throw noEpisode(n);
     }
     throw e;
   }
@@ -255,13 +257,33 @@ export async function loadVoiceoverTranscripts(project: string, ep: Episode): Pr
   return out;
 }
 
-/** Best-effort removal of work folders and partial outputs left behind by a render that was killed. */
-async function clearStaleWork(dir: string): Promise<void> {
-  const names = await readdir(dir).catch(() => [] as string[]);
-  await Promise.all(names.filter((f) => f.startsWith('.work-') || f.includes('.partial-')).map((f) => rm(join(dir, f), { recursive: true, force: true }).catch(() => {})));
+/**
+ * Takes episode `n`'s lock for `command` (render modes and vo work in its folder), then clears what killed commands left
+ * there: work folders, partial outputs, extracted voice-over WAVs and old temp files of atomic writes.
+ */
+export async function lockEpisode(project: string, n: number, command: string): Promise<Lock> {
+  const dir = episodeDir(project, n);
+  if (!existsSync(dir)) throw noEpisode(n);
+  const lock = await acquireLock(dir, command, `episode ${n}`);
+  await clearLeftovers(dir, lock, (f) => f.startsWith('.work-') || f.includes('.partial-') || /^\.vo-.*\.wav$/.test(f));
+  return lock;
 }
 
-export async function renderEpisode(o: { project: string; episode: number; mode: EpisodeMode; tools: MediaTools; musicDir?: string; onProgress?: (f: number) => void }): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
+const COMMAND: Record<EpisodeMode, string> = { rough: 'cut', guide: 'guide', final: 'render' };
+
+type RenderOptions = { project: string; episode: number; mode: EpisodeMode; tools: MediaTools; musicDir?: string; onProgress?: (f: number) => void };
+
+/** Renders episode `episode` in `mode`, holding the episode's lock so a second render of it refuses instead of deleting this one's work. */
+export async function renderEpisode(o: RenderOptions): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
+  const lock = await lockEpisode(resolve(o.project), o.episode, COMMAND[o.mode]);
+  try {
+    return await renderLocked(o);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
   const project = resolve(o.project);
   const ep = await loadEpisode(project, o.episode);
   const catalog = await loadCatalog(project);
@@ -275,7 +297,6 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
   const final = o.mode === 'final';
   const [W, H] = final ? [ep.output.width, ep.output.height] : [960, 540];
   const dir = episodeDir(project, o.episode);
-  await clearStaleWork(dir);
   // Everything below is checked before any rendering, so a missing file fails fast.
   const musicDir = resolve(o.musicDir ?? join(project, 'music'));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;

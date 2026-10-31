@@ -5,6 +5,7 @@ import { extname, join, resolve } from 'node:path';
 import { CatalogSchema, type Catalog, type Clip, type ClipKind, type ProbeInfo, type Transcript } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
+import { acquireLock, clearLeftovers } from './lock.js';
 
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm']);
 const HDR_TRANSFERS = new Set(['arib-std-b67', 'smpte2084']);
@@ -69,8 +70,18 @@ async function transcribeClip(o: { tools: MediaTools; path: string; name: string
 
 export async function ingestClips(o: { project: string; clipsDir: string; tools: MediaTools; locale?: string; onStep?: (m: string) => void }): Promise<IngestResult> {
   const project = resolve(o.project);
-  const dir = resolve(o.clipsDir);
   await mkdir(project, { recursive: true });
+  const lock = await acquireLock(project, 'ingest', 'the project');
+  try {
+    await clearLeftovers(project, lock, (f) => /^\.tmp-c\d+\.wav$/.test(f));
+    return await ingestLocked(o, project);
+  } finally {
+    await lock.release();
+  }
+}
+
+async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: string): Promise<IngestResult> {
+  const dir = resolve(o.clipsDir);
   const catalog = await loadCatalog(project);
   const known = new Map(catalog.clips.map((c) => [c.sha256, c]));
   const files = (await readdir(dir)).filter((f) => !f.startsWith('.') && VIDEO_EXTENSIONS.has(extname(f).toLowerCase())).sort();

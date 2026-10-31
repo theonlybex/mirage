@@ -1,5 +1,5 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
@@ -7,6 +7,7 @@ import { run } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog } from './ingest.js';
+import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildVoiceTrack, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
@@ -308,14 +309,36 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(await peakHz(3.5, 700)).toBeGreaterThan((await peakHz(3.5, 500)) + 10);
   }, 120_000);
 
-  it('clears work folders and partial files left by a render that was killed', async () => {
+  it('clears work folders, partial files and temp files left by a command that was killed, taking over its lock', async () => {
     const dir = join(project, 'episodes', '6');
     await saveEpisode(project, ep(one, { number: 6, music: [{ track: 'nope.wav', start: 0, end: 1 }] }));
     await mkdir(join(dir, '.work-dead'), { recursive: true });
     await writeFile(join(dir, '.work-dead', 'chunk-000.mov'), 'x');
     await writeFile(join(dir, 'rough.mp4.partial-dead.mp4'), 'x');
-    await renderEpisode({ project, episode: 6, mode: 'rough', tools }).catch(() => {});
-    expect((await readdir(dir)).sort()).toEqual(['episode.json']);
+    await writeFile(join(dir, '.vo-0f8fad5b-d9cb-469f-a165-70867728950e.wav'), 'x');
+    const tmp = (name: string) => `${name}.tmp-0f8fad5b-d9cb-469f-a165-70867728950e`;
+    await writeFile(join(dir, tmp('old.transcript.json')), 'x');
+    const old = new Date(Date.now() - 10 * 60_000);
+    await utimes(join(dir, tmp('old.transcript.json')), old, old);
+    // A check saving right now (it takes no lock) must not lose its temp file.
+    await writeFile(join(dir, tmp('episode.json')), 'x');
+    await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: 4_194_305, command: 'render', startedAt: new Date().toISOString(), token: 'dead' }));
+    await expect(renderEpisode({ project, episode: 6, mode: 'rough', tools })).rejects.toMatchObject({ code: 'NO_MUSIC_TRACK' });
+    expect((await readdir(dir)).sort()).toEqual(['episode.json', tmp('episode.json')]);
+  }, 60_000);
+
+  it("refuses to render an episode another live render is working on, and leaves that render's work alone", async () => {
+    const dir = join(project, 'episodes', '7');
+    await saveEpisode(project, ep(one, { number: 7 }));
+    await mkdir(join(dir, '.work-live'), { recursive: true });
+    await writeFile(join(dir, 'final.mp4.partial-live.mp4'), 'x');
+    const lock = await acquireLock(dir, 'render', 'episode 7');
+    try {
+      await expect(renderEpisode({ project, episode: 7, mode: 'rough', tools })).rejects.toMatchObject({ code: 'BUSY', message: expect.stringMatching(/^episode 7 is busy: render \(pid \d+\)/) });
+      expect((await readdir(dir)).sort()).toEqual(['.mirage.lock', '.work-live', 'episode.json', 'final.mp4.partial-live.mp4']);
+    } finally {
+      await lock.release();
+    }
   }, 60_000);
 
   it('stops with NO_EPISODE before rendering when a final cut has a voice-over but no voice-over transcript', async () => {
