@@ -20,6 +20,17 @@ const ep = EpisodeSchema.parse({
 });
 
 describe('speechWords', () => {
+  it('keeps a voice-over word whose start falls just inside a cut (filler padding) but whose body is kept', () => {
+    // The line cuts [10.5, 11]; "cached" starts 20 ms before the cut ends.
+    const vo = tx([w('Narration', 10.1, 10.4), w('cached', 10.98, 11.4), w('here.', 11.5, 11.8)]);
+    const words = speechWords(ep, catalog, vo).filter((x) => x.start >= 2.5);
+    expect(words.map((x) => [x.w, x.start, x.end])).toEqual([
+      ['Narration', 2.6, 2.9],
+      ['cached', 3, 3.4],
+      ['here.', 3.5, 3.8],
+    ]);
+  });
+
   it('maps kept live words and voice-over words to output time, dropping fillers and muted items', () => {
     const vo = tx([w('Narration', 10.1, 10.4), w('uh', 10.6, 10.9), w('here.', 11.2, 11.8)]);
     expect(speechWords(ep, catalog, vo).map((x) => [x.w, x.start, x.end])).toEqual([
