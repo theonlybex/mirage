@@ -298,12 +298,22 @@ export async function lockEpisode(project: string, n: number, command: string): 
 
 const COMMAND: Record<EpisodeMode, string> = { rough: 'cut', guide: 'guide', final: 'render' };
 
-type RenderOptions = { project: string; episode: number; mode: EpisodeMode; tools: MediaTools; musicDir?: string; onProgress?: (f: number) => void };
+type RenderOptions = {
+  project: string;
+  episode: number;
+  mode: EpisodeMode;
+  tools: MediaTools;
+  musicDir?: string;
+  onProgress?: (f: number) => void;
+  /** Runs once the lock is held, before rendering (cut's check, which may save episode.json). */
+  beforeRender?: () => Promise<unknown>;
+};
 
 /** Renders episode `episode` in `mode`, holding the episode's lock so a second render of it refuses instead of deleting this one's work. */
 export async function renderEpisode(o: RenderOptions): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
   const lock = await lockEpisode(resolve(o.project), o.episode, COMMAND[o.mode]);
   try {
+    await o.beforeRender?.();
     return await renderLocked(o);
   } finally {
     await lock.release();

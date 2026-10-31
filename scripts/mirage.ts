@@ -139,9 +139,9 @@ async function main() {
     case 'cut':
     case 'guide':
     case 'render': {
-      if (cmd === 'cut') await check(project, n);
       const mode: EpisodeMode = cmd === 'cut' ? 'rough' : cmd === 'guide' ? 'guide' : 'final';
-      const r = await renderEpisode({ project, episode: n, mode, tools, onProgress: progress });
+      // cut checks under the episode's lock: during a vo it says busy without touching episode.json.
+      const r = await renderEpisode({ project, episode: n, mode, tools, onProgress: progress, beforeRender: cmd === 'cut' ? () => check(project, n) : undefined });
       console.log(`\n✓ ${r.outputPath} (${formatTime(r.durationSec)})${r.srtPath ? `\n  captions: ${r.srtPath}` : ''}`);
       break;
     }

@@ -124,4 +124,21 @@ describe('pnpm mirage errors', () => {
       await chmod(cat, 0o644);
     }
   });
+
+  it('says a cut is busy while a vo of the episode runs, before check touches episode.json', async () => {
+    const dir = await project();
+    const epDir = join(dir, 'episodes', '1');
+    await mkdir(epDir, { recursive: true });
+    // No defaults written yet: a check would save the file.
+    const text = JSON.stringify({ version: 2, number: 1, title: 't', output: { width: 640, height: 360, fps: 30 }, items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }] });
+    await writeFile(join(epDir, 'episode.json'), text);
+    await writeFile(join(epDir, '.mirage.lock'), JSON.stringify({ pid: process.pid, command: 'vo', startedAt: new Date().toISOString(), token: 'x' }));
+    for (const cmd of ['cut', 'guide', 'render']) {
+      const r = await mirage([cmd, dir, '1']);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`✖ episode 1 is busy: vo (pid ${process.pid})`);
+      expect(r.out).toBe('');
+    }
+    expect(await readFile(join(epDir, 'episode.json'), 'utf8')).toBe(text);
+  });
 });
