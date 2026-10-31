@@ -498,3 +498,14 @@ describe('hyphenated words', () => {
     }
   });
 });
+
+describe('slots from before slotsCut', () => {
+  it('warns once that it cannot tell whether they are current', () => {
+    const first = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(first.report.warnings).toEqual([
+      "The slots were written before Mirage recorded which cut they belong to, so vo can't tell whether they are current — if the cut changed since slots ran, run: pnpm mirage slots <project> 1, check the lines, then vo again",
+    ]);
+    expect(fitVoiceover({ episode: first.episode, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).report.warnings).toEqual([]);
+    expect(fitVoiceover({ episode: { ...episode(SLOTS), slotsCut: cutOf(episode(SLOTS)) }, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).report.warnings).toEqual([]);
+  });
+});

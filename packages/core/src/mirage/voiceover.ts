@@ -265,6 +265,12 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   // Slots of another cut would put the lines over the wrong picture (or past the end).
   if (slotsStale(o.episode)) throw slotsStaleError(o.episode.number);
   const report: FitReport = { lines: [], extendedSec: 0, warnings: [] };
+  // Nothing to compare the cut with (slots from before slotsCut, no voice-over yet): say so once; the fit records the cut.
+  if (!o.episode.slotsCut && !o.episode.voiceover?.fittedItemsFingerprint) {
+    report.warnings.push(
+      `The slots were written before Mirage recorded which cut they belong to, so vo can't tell whether they are current — if the cut changed since slots ran, run: pnpm mirage slots <project> ${o.episode.number}, check the lines, then vo again`,
+    );
+  }
   // A full fit starts from the cut before the voice-over, so holds never pile up across re-fits. After a re-cut (its
   // slots were computed for the cut as it is now) it undoes what earlier fits did to the items still there.
   let start = o.episode;
