@@ -6,3 +6,4 @@ export * from './music.js';
 export * from './overlays.js';
 export * from './render-episode.js';
 export * from './slots.js';
+export * from './voiceover.js';

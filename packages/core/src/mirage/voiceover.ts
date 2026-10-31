@@ -1,0 +1,140 @@
+import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
+import { isFiller, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
+import { MirageError } from './errors.js';
+import { keptSegments } from './overlays.js';
+import { itemFrames, layoutTimeline, shiftAfter } from './timeline.js';
+
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
+const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
+export interface FitLine {
+  slot: string;
+  status: 'placed' | 'missing';
+  takes: number;
+  overrunSec: number;
+}
+
+export interface FitReport {
+  lines: FitLine[];
+  extendedSec: number;
+}
+
+/**
+ * Opens `delta` seconds at output time `t`. At an item boundary the item ending there grows (unused source first,
+ * then frozen frames); inside an item, the item splits at `t` and its frame there is held. Everything after `t` shifts.
+ */
+export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number): Episode {
+  const fps = ep.output.fps;
+  const laid = layoutTimeline(ep);
+  const l = laid.find((x) => t > x.start + 1e-9 && t <= x.end + 1e-9) ?? laid[laid.length - 1];
+  const item = l.item;
+  const items = [...ep.items];
+  const atEnd = Math.abs(l.end - t) < 0.5 / fps || t >= l.start + l.srcFrames / fps;
+
+  if (atEnd) {
+    const clipDur = catalog.clips.find((c) => c.id === item.clip)?.probe.durationSec ?? item.src.out;
+    const available = Math.max(0, (clipDur - item.src.out) / item.speed);
+    const useSource = Math.min(delta, available);
+    const next = { ...item, src: { in: item.src.in, out: r6(item.src.out + useSource * item.speed) }, hold: r6(item.hold + (delta - useSource)) };
+    items[l.index] = next;
+    const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
+    return { ...shiftAfter(ep, l.end, grown), items };
+  }
+
+  const splitFrames = Math.max(1, Math.round((t - l.start) * fps));
+  const splitSrc = r6(item.src.in + (splitFrames / fps) * item.speed);
+  const ids = new Set(ep.items.map((x) => x.id));
+  let suffix = 'b';
+  while (ids.has(`${item.id}-${suffix}`)) suffix = String.fromCharCode(suffix.charCodeAt(0) + 1);
+  const first = { ...item, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) };
+  const second = { ...item, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
+  items.splice(l.index, 1, first, second);
+  return { ...shiftAfter(ep, l.start + splitFrames / fps, delta), items };
+}
+
+function mergeCuts(cuts: [number, number][]): [number, number][] {
+  const sorted = [...cuts].sort((a, b) => a[0] - b[0]);
+  const out: [number, number][] = [];
+  for (const c of sorted) {
+    const last = out[out.length - 1];
+    if (last && c[0] <= last[1]) last[1] = Math.max(last[1], c[1]);
+    else out.push([c[0], c[1]]);
+  }
+  return out;
+}
+
+export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording: string; transcript: Transcript }): { episode: Episode; report: FitReport } {
+  const words = o.transcript.words;
+  const sentences = splitSentences(words);
+  const sTokens = sentences.map((s) => sentenceTokens(s, words));
+  const written = o.episode.slots.filter((s) => s.line.trim()).sort((a, b) => a.start - b.start);
+  const fps = o.episode.output.fps;
+
+  type Cand = { from: number; to: number; score: number };
+  const cands: Cand[][] = written.map((slot) => {
+    const lineTokens = textTokens(slot.line);
+    const out: Cand[] = [];
+    for (let i = 0; i < sentences.length; i++) {
+      let tokens: string[] = [];
+      for (let j = i; j < Math.min(sentences.length, i + 4); j++) {
+        tokens = tokens.concat(sTokens[j]);
+        const score = similarity(tokens, lineTokens);
+        if (score >= 0.6) out.push({ from: i, to: j, score });
+      }
+    }
+    return out;
+  });
+
+  let ep = o.episode;
+  const lines: VoiceLine[] = [];
+  const report: FitReport = { lines: [], extendedSec: 0 };
+  let prevEnd = -1;
+
+  for (let k = 0; k < written.length; k++) {
+    const after = cands[k].filter((c) => c.from > prevEnd);
+    const nextFirst = k + 1 < written.length ? Math.min(Infinity, ...cands[k + 1].filter((c) => c.from > prevEnd).map((c) => c.from)) : Infinity;
+    let pool = after.filter((c) => c.to < nextFirst);
+    if (pool.length === 0) pool = after;
+    if (pool.length === 0) {
+      report.lines.push({ slot: written[k].id, status: 'missing', takes: 0, overrunSec: 0 });
+      continue;
+    }
+    const best = Math.max(...pool.map((c) => c.score));
+    const good = pool.filter((c) => c.score >= best - 0.15);
+    const chosen = good.reduce((a, b) => (b.from > a.from ? b : a));
+    const takes = new Set(good.map((c) => c.from)).size;
+    prevEnd = chosen.to;
+
+    const span = words.slice(sentences[chosen.from].from, sentences[chosen.to].to + 1);
+    const spoken = span.filter((w) => !isFiller(w));
+    const srcIn = Math.max(0, spoken[0].start - 0.05);
+    const srcOut = spoken[spoken.length - 1].end + 0.1;
+    const cuts: [number, number][] = [];
+    for (const w of span) if (isFiller(w) && w.start > srcIn && w.end < srcOut) cuts.push([r3(w.start - 0.02), r3(w.end + 0.02)]);
+    for (let i = 1; i < spoken.length; i++) {
+      const a = spoken[i - 1].end;
+      const b = spoken[i].start;
+      if (b - a > 0.6) cuts.push([r3(a + 0.15), r3(b - 0.15)]);
+    }
+    const draft: VoiceLine = { slot: written[k].id, at: 0, src: { in: r3(srcIn), out: r3(srcOut) }, cuts: mergeCuts(cuts) };
+    const duration = keptSegments(draft).reduce((s, g) => s + g.out - g.in, 0);
+
+    const slot = ep.slots.find((s) => s.id === written[k].id)!;
+    const at = r3(slot.start + 0.15);
+    let overrun = at + duration - (slot.end + 0.2);
+    if (overrun > 1e-3) {
+      overrun = Math.ceil(overrun * fps - 1e-9) / fps;
+      ep = holdAt(ep, o.catalog, slot.end, overrun);
+      report.extendedSec = r6(report.extendedSec + overrun);
+    } else {
+      overrun = 0;
+    }
+    lines.push({ ...draft, at });
+    report.lines.push({ slot: slot.id, status: 'placed', takes, overrunSec: r3(overrun) });
+  }
+
+  if (!report.lines.some((l) => l.status === 'placed')) {
+    throw new MirageError('NOTHING_MATCHED', 'None of the script lines were found in the recording', 'Check that you read the current lines; re-run slots and guide if the cut changed.');
+  }
+  return { episode: EpisodeSchema.parse({ ...ep, voiceover: { recording: o.recording, lines } }), report };
+}
