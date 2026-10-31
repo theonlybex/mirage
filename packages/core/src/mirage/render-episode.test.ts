@@ -96,7 +96,7 @@ describe('episodeFinalArgs', () => {
     expect(graph).toContain('[0:v]ass=overlays.ass:fontsdir=/System/Library/Fonts[vout]');
     expect(graph).toContain('[live][vo]amix=inputs=2:duration=first:normalize=0[speechraw]');
     expect(graph).toContain('[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11');
-    expect(graph).toContain('[mus][skey]sidechaincompress=threshold=0.03:ratio=8:attack=150:release=900[duck]');
+    expect(graph).toContain('[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck]');
     expect(args).toEqual(expect.arrayContaining(['-b:v', '8M', '-t', '20']));
     expect(args.at(-1)).toBe('/o/final.mp4.partial');
   });
@@ -165,6 +165,34 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(await maxVolume(9.5, 1)).toBeGreaterThan(-40);
     expect(await maxVolume(22.2, 2.8)).toBeLessThan(-60);
     expect((await tools.probe(out)).durationSec).toBeCloseTo(25, 1);
+  }, 120_000);
+
+  it('plays music on its own around -19 LUFS and ducks it at least 12 dB under live speech', async () => {
+    // Music is high (2.5/3.3 kHz) and the live "speech" is a 300 Hz tone, so a high-pass isolates the music under speech.
+    // Speech comes first so the speech bus's single-pass loudnorm is already at -14 LUFS while it keys the ducking.
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', "aevalsrc='0.25*sin(2*PI*2500*t)+0.25*sin(2*PI*3300*t)':s=44100:d=8", join(project, 'music', 'pad.wav')]);
+    await analyzeLibrary(join(project, 'music'), tools);
+    const e = ep(
+      [
+        { id: 'talk', beat: 'problem', clip: 'c001', src: { in: 0, out: 5 }, audio: 'keep' },
+        { id: 'quiet', beat: 'problem', clip: 'c002', src: { in: 0, out: 4 } },
+      ],
+      { number: 3, music: [{ track: 'pad.wav', start: 0, end: 9, fadeIn: 0, fadeOut: 0 }] },
+    );
+    expect(e.music[0].gainDb).toBe(-5);
+    await saveEpisode(project, e);
+    const r = await renderEpisode({ project, episode: 3, mode: 'rough', tools });
+    const segment = async (ss: number, t: number, af: string) =>
+      (await run('ffmpeg', ['-hide_banner', '-nostats', '-ss', String(ss), '-t', String(t), '-i', r.outputPath, '-map', '0:a:0', '-af', af, '-f', 'null', '-'])).stderr;
+    const lufs = Number(/I:\s+(-?[\d.]+)\s+LUFS/.exec((await segment(6.5, 2.5, 'ebur128')).split('Summary:').at(-1)!)![1]);
+    const HIGH = 'highpass=f=1500:poles=2,highpass=f=1500:poles=2,highpass=f=1500:poles=2,astats=metadata=0';
+    const rms = async (ss: number, t: number) => Number(/Overall[\s\S]*?RMS level dB:\s+(-?[\d.]+)/.exec(await segment(ss, t, HIGH))![1]);
+    const under = await rms(1, 3.5);
+    const alone = await rms(6.5, 2.5);
+    console.log(`music alone ${lufs} LUFS (high band ${alone} dB), under speech ${under} dB: ducked ${(alone - under).toFixed(1)} dB`);
+    expect(lufs).toBeGreaterThanOrEqual(-22);
+    expect(lufs).toBeLessThanOrEqual(-16);
+    expect(alone - under).toBeGreaterThanOrEqual(12);
   }, 120_000);
 
   it('stops with NO_EPISODE before rendering when a final cut has a voice-over but no voice-over transcript', async () => {

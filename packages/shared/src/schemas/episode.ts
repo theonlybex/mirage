@@ -46,7 +46,7 @@ export type Overlay = z.infer<typeof OverlaySchema>;
 export const MusicCueSchema = range(
   {
     track: z.string().min(1),
-    gainDb: z.number().max(0).default(-18),
+    gainDb: z.number().max(0).default(-5),
     fadeIn: z.number().min(0).default(0.5),
     fadeOut: z.number().min(0).default(1),
     /** Where in the track this cue starts playing. */
