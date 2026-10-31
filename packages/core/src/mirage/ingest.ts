@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { CatalogSchema, type Catalog, type Clip, type ClipKind, type ProbeInfo, type Transcript } from '@wordedits/shared';
@@ -56,7 +56,7 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
   const dir = resolve(o.clipsDir);
   await mkdir(project, { recursive: true });
   const catalog = await loadCatalog(project);
-  const known = new Set(catalog.clips.map((c) => c.sha256));
+  const known = new Map(catalog.clips.map((c) => [c.sha256, c]));
   const files = (await readdir(dir)).filter((f) => !f.startsWith('.') && VIDEO_EXTENSIONS.has(extname(f).toLowerCase())).sort();
   const result: IngestResult = { added: [], skipped: [] };
 
@@ -67,8 +67,15 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
     let sha256 = '';
     try {
       sha256 = await sha256File(path);
-      if (known.has(sha256)) {
-        result.skipped.push({ file: name, reason: 'already in the catalog' });
+      const prev = known.get(sha256);
+      if (prev) {
+        if (prev.path !== path && !existsSync(prev.path)) {
+          prev.path = path;
+          await saveCatalog(project, catalog);
+          o.onStep?.(`${name}: moved, path updated`);
+        } else {
+          result.skipped.push({ file: name, reason: 'already in the catalog' });
+        }
         continue;
       }
       const probe = await o.tools.probe(path);
@@ -107,7 +114,7 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
 
       const clip: Clip = { id, path, sha256, probe, kind: guessKind(probe, transcript), transcript, frames, notes: '', moments: [] };
       catalog.clips.push(clip);
-      known.add(sha256);
+      known.set(sha256, clip);
       result.added.push(clip);
       await saveCatalog(project, catalog);
     } catch (e) {

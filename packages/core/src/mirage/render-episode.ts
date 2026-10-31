@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { encodeArgs, ffNum } from '../edl-compiler.js';
@@ -28,6 +29,9 @@ export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSourc
     if (!clip) throw new MirageError('BAD_ITEM', `item ${item.id}: clip ${item.clip} is not in the catalog`, 'Run ingest, or fix the clip id in episode.json.');
     if (item.src.out > clip.probe.durationSec + 0.05) {
       throw new MirageError('BAD_ITEM', `item ${item.id}: src.out ${item.src.out}s is past the end of ${item.clip} (${clip.probe.durationSec}s)`, 'Shorten the item.');
+    }
+    if (!existsSync(clip.path)) {
+      throw new MirageError('BAD_ITEM', `item ${item.id}: clip file ${clip.path} is missing`, 'Reconnect the drive or re-ingest the folder it moved to');
     }
     map.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec });
   }
@@ -90,13 +94,17 @@ export function chunkTimeoutMs(chunk: LaidItem[], fps: number): number {
   return Math.round(Math.max(120, srcSec * 3 + outSec * 30) * 1000);
 }
 
+function checkCueInLibrary(c: MusicCue, i: number, lib: MusicLibrary): void {
+  if (!lib.tracks.some((t) => t.file === c.track)) {
+    throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is not in music/library.json`, 'Run: pnpm mirage music <project>, or fix the track name.');
+  }
+}
+
 export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: string, durationSec: number, loudnessLufs: number, output: string): string[] {
   const inputs: string[] = [];
   const chains: string[] = [];
   cues.forEach((c, i) => {
-    if (!lib.tracks.some((t) => t.file === c.track)) {
-      throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is not in music/library.json`, 'Run: pnpm mirage music <project>, or fix the track name.');
-    }
+    checkCueInLibrary(c, i, lib);
     inputs.push('-stream_loop', '-1', '-ss', ffNum(c.offset), '-i', join(musicDir, c.track));
     const dur = c.end - c.start;
     const fades = [
@@ -219,6 +227,12 @@ async function loadVoiceoverTranscript(dir: string, n: number): Promise<Transcri
   }
 }
 
+/** Best-effort removal of work folders and partial outputs left behind by a render that was killed. */
+async function clearStaleWork(dir: string): Promise<void> {
+  const names = await readdir(dir).catch(() => [] as string[]);
+  await Promise.all(names.filter((f) => f.startsWith('.work-') || f.includes('.partial-')).map((f) => rm(join(dir, f), { recursive: true, force: true }).catch(() => {})));
+}
+
 export async function renderEpisode(o: { project: string; episode: number; mode: EpisodeMode; tools: MediaTools; musicDir?: string; onProgress?: (f: number) => void }): Promise<{ outputPath: string; srtPath: string | null; durationSec: number }> {
   const project = resolve(o.project);
   const ep = await loadEpisode(project, o.episode);
@@ -231,9 +245,21 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
   const final = o.mode === 'final';
   const [W, H] = final ? [ep.output.width, ep.output.height] : [960, 540];
   const dir = episodeDir(project, o.episode);
-  // Checked before any rendering so a missing transcript fails fast.
-  const voTranscript: Transcript | null = final && ep.voiceover ? await loadVoiceoverTranscript(dir, o.episode) : null;
+  await clearStaleWork(dir);
+  // Everything below is checked before any rendering, so a missing file fails fast.
   const musicDir = resolve(o.musicDir ?? join(project, 'music'));
+  const lib = ep.music.length ? await loadLibrary(musicDir) : null;
+  ep.music.forEach((c, i) => {
+    checkCueInLibrary(c, i, lib!);
+    if (!existsSync(join(musicDir, c.track))) {
+      throw new MirageError('NO_MUSIC_TRACK', `music cue ${i + 1}: ${c.track} is missing from music/`, `Put ${c.track} back in ${musicDir}, or remove the cue.`);
+    }
+  });
+  const voTranscript: Transcript | null = final && ep.voiceover ? await loadVoiceoverTranscript(dir, o.episode) : null;
+  if (final && ep.voiceover) {
+    const rec = resolve(project, ep.voiceover.recording);
+    if (!existsSync(rec)) throw new MirageError('BAD_ITEM', `voice-over recording ${rec} is missing`, 'Reconnect the drive or put the recording back, then render again.');
+  }
   const outputPath = join(dir, `${o.mode}.mp4`);
   const id = randomUUID();
   const work = join(dir, `.work-${id}`);
@@ -257,7 +283,7 @@ export async function renderEpisode(o: { project: string; episode: number; mode:
 
     let musicWav: string | undefined;
     if (ep.music.length) {
-      await o.tools.runFfmpeg(musicTrackArgs(ep.music, await loadLibrary(musicDir), musicDir, D, ep.loudnessLufs, join(work, 'music.wav')), {
+      await o.tools.runFfmpeg(musicTrackArgs(ep.music, lib!, musicDir, D, ep.loudnessLufs, join(work, 'music.wav')), {
         expectedDurationSec: D,
         timeoutMs: Math.max(120_000, D * 10 * 1000),
       });

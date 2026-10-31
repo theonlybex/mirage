@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
@@ -11,8 +12,11 @@ import { buildVoiceTrack, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadE
 import { layoutTimeline, timelineDuration } from './timeline.js';
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
+// Clip files must exist: sourcesFor refuses a catalogued clip whose file is gone.
+const CLIPS = mkdtempSync(join(tmpdir(), 'we-unit-clips-'));
+for (const id of ['c001', 'c002']) writeFileSync(join(CLIPS, `${id}.mp4`), '');
 const clipOf = (id: string, dur: number, hasAudio: boolean) => ({
-  id, path: `/clips/${id}.mp4`, sha256: 'a'.repeat(64),
+  id, path: join(CLIPS, `${id}.mp4`), sha256: 'a'.repeat(64),
   probe: { durationSec: dur, width: 1920, height: 1080, fps: 30, hasVideo: true, hasAudio, videoCodec: 'h264', audioCodec: hasAudio ? 'aac' : null },
   kind: 'screen' as const, transcript: null, frames: [], notes: '', moments: [],
 });
@@ -25,6 +29,12 @@ describe('sourcesFor', () => {
     expect(() => sourcesFor(ep([{ id: 'x', beat: 'problem', clip: 'c999', src: { in: 0, out: 1 } }]), cat)).toThrow(expect.objectContaining({ code: 'BAD_ITEM', message: expect.stringContaining('x') }));
     expect(() => sourcesFor(ep([{ id: 'y', beat: 'problem', clip: 'c001', src: { in: 5, out: 12 } }]), cat)).toThrow(expect.objectContaining({ code: 'BAD_ITEM' }));
   });
+  it('stops with BAD_ITEM when the clip file is gone', () => {
+    const gone: Catalog = { version: 1, clips: [{ ...clipOf('c001', 10, true), path: join(CLIPS, 'moved.mp4') }] };
+    expect(() => sourcesFor(ep([{ id: 'z', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }]), gone)).toThrow(
+      expect.objectContaining({ code: 'BAD_ITEM', message: `item z: clip file ${join(CLIPS, 'moved.mp4')} is missing`, hint: 'Reconnect the drive or re-ingest the folder it moved to' }),
+    );
+  });
 });
 
 describe('itemChunkArgs', () => {
@@ -35,9 +45,9 @@ describe('itemChunkArgs', () => {
   const args = itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30 }, sourcesFor(e, cat), '/w/chunk-000.mov');
   const graph = args[args.indexOf('-filter_complex') + 1];
   it('seeks each item and reads only the source it needs at its speed', () => {
-    expect(args.slice(0, 8)).toEqual(['-threads', '1', '-ss', '1', '-t', '2.033333', '-i', '/clips/c001.mp4']);
+    expect(args.slice(0, 8)).toEqual(['-threads', '1', '-ss', '1', '-t', '2.033333', '-i', join(CLIPS, 'c001.mp4')]);
     // Sped-up items decode with all threads: they read far more source than they output.
-    expect(args.slice(8, 14)).toEqual(['-ss', '0', '-t', '60.666667', '-i', '/clips/c002.mp4']);
+    expect(args.slice(8, 14)).toEqual(['-ss', '0', '-t', '60.666667', '-i', join(CLIPS, 'c002.mp4')]);
   });
   it('speeds up, punches in, letterboxes and cuts to exact frames', () => {
     expect(graph).toContain('[0:v]setpts=(PTS-STARTPTS)/1,fps=30,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
@@ -208,6 +218,45 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(lufs).toBeLessThanOrEqual(-16);
     expect(alone - under).toBeGreaterThanOrEqual(12);
   }, 120_000);
+
+  const counting = () => {
+    const calls: string[][] = [];
+    return { calls, tools: { ...tools, runFfmpeg: async (args: string[], opts?: object) => { calls.push(args); return tools.runFfmpeg(args, opts); } } };
+  };
+  const one = [{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }];
+
+  it('stops before rendering anything when a music cue is not in the library or its file is gone', async () => {
+    await saveEpisode(project, ep(one, { number: 4, music: [{ track: 'nope.wav', start: 0, end: 1 }] }));
+    const a = counting();
+    await expect(renderEpisode({ project, episode: 4, mode: 'rough', tools: a.tools })).rejects.toMatchObject({ code: 'NO_MUSIC_TRACK', message: expect.stringContaining('nope.wav is not in music/library.json') });
+    expect(a.calls).toEqual([]);
+
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=d=2', join(project, 'music', 'gone.wav')]);
+    await analyzeLibrary(join(project, 'music'), tools);
+    await rm(join(project, 'music', 'gone.wav'));
+    await saveEpisode(project, ep(one, { number: 4, music: [{ track: 'gone.wav', start: 0, end: 1 }] }));
+    const b = counting();
+    await expect(renderEpisode({ project, episode: 4, mode: 'rough', tools: b.tools })).rejects.toMatchObject({ code: 'NO_MUSIC_TRACK', message: 'music cue 1: gone.wav is missing from music/' });
+    expect(b.calls).toEqual([]);
+  }, 60_000);
+
+  it('stops before rendering a final cut whose voice-over recording is gone', async () => {
+    await saveEpisode(project, ep(one, { number: 5, voiceover: { recording: 'gone.m4a', lines: [] } }));
+    await writeFile(join(project, 'episodes', '5', 'voiceover.transcript.json'), JSON.stringify({ words: [], segments: [], speech: [] }));
+    const a = counting();
+    await expect(renderEpisode({ project, episode: 5, mode: 'final', tools: a.tools })).rejects.toMatchObject({ code: 'BAD_ITEM', message: `voice-over recording ${join(project, 'gone.m4a')} is missing` });
+    expect(a.calls).toEqual([]);
+  }, 60_000);
+
+  it('clears work folders and partial files left by a render that was killed', async () => {
+    const dir = join(project, 'episodes', '6');
+    await saveEpisode(project, ep(one, { number: 6, music: [{ track: 'nope.wav', start: 0, end: 1 }] }));
+    await mkdir(join(dir, '.work-dead'), { recursive: true });
+    await writeFile(join(dir, '.work-dead', 'chunk-000.mov'), 'x');
+    await writeFile(join(dir, 'rough.mp4.partial-dead.mp4'), 'x');
+    await renderEpisode({ project, episode: 6, mode: 'rough', tools }).catch(() => {});
+    expect((await readdir(dir)).sort()).toEqual(['episode.json']);
+  }, 60_000);
 
   it('stops with NO_EPISODE before rendering when a final cut has a voice-over but no voice-over transcript', async () => {
     await saveEpisode(project, ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }], { number: 2, voiceover: { recording: 'vo.m4a', lines: [] } }));

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeInfo, Transcript } from '@wordedits/shared';
@@ -100,6 +100,22 @@ describe('ingestClips resilience', () => {
     expect(r.added).toHaveLength(1);
     expect(r.added[0].transcript).toBeNull();
     expect(steps.some((m) => m.includes('transcription failed, kept as silent footage'))).toBe(true);
+  });
+
+  it('updates the path of a catalogued clip whose file moved, instead of skipping it', async () => {
+    const from = await mkdtemp(join(tmpdir(), 'we-from-'));
+    const to = await mkdtemp(join(tmpdir(), 'we-to-'));
+    await copyFile(join(good, 'phone.mov'), join(from, 'clip.mov'));
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const tools: MediaTools = { ...real, transcribe: async () => words(10, 3) };
+    await ingestClips({ project, clipsDir: from, tools });
+    await rename(join(from, 'clip.mov'), join(to, 'renamed.mov'));
+    const steps: string[] = [];
+    const r = await ingestClips({ project, clipsDir: to, tools, onStep: (m) => steps.push(m) });
+    expect(r.added).toEqual([]);
+    expect(steps).toContain('renamed.mov: moved, path updated');
+    const cat = await loadCatalog(project);
+    expect(cat.clips.map((c) => [c.id, c.path])).toEqual([['c001', join(to, 'renamed.mov')]]);
   });
 
   it('reports an unreadable entry (a directory named like a clip) as failed and continues', async () => {
