@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { mkdir, readdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { CatalogSchema, type Catalog, type Clip, type ClipKind, type ProbeInfo, type Transcript } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
+import { MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
 
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm']);
@@ -54,6 +55,13 @@ export interface IngestResult {
   warnings: string[];
 }
 
+/** An error's message plus the tool's own reason (a SidecarError's hint: ffmpeg's last stderr line). */
+export function errorReason(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+  const hint = (e as { hint?: unknown }).hint;
+  return typeof hint === 'string' && hint && !e.message.includes(hint) ? `${e.message} — ${hint}` : e.message;
+}
+
 /** Transcribes a clip's audio. Returns null (and warns) when transcription fails; a clip with no speech gets an empty transcript. */
 async function transcribeClip(o: { tools: MediaTools; path: string; name: string; wav: string; durationSec: number; locale?: string; result: IngestResult; onStep?: (m: string) => void }): Promise<Transcript | null> {
   try {
@@ -61,11 +69,37 @@ async function transcribeClip(o: { tools: MediaTools; path: string; name: string
     return await o.tools.transcribe(o.wav, { locale: o.locale, timeoutMs: Math.max(30 * 60_000, o.durationSec * 2000) });
   } catch (e) {
     o.onStep?.(`${o.name}: transcription failed, kept as silent footage`);
-    o.result.warnings.push(`${o.name}: transcription failed (${e instanceof Error ? e.message : String(e)}); its speech is invisible to slots and captions — run ingest again to retry`);
+    o.result.warnings.push(`${o.name}: transcription failed (${errorReason(e)}); its speech is invisible to slots and captions — run ingest again to retry`);
     return null;
   } finally {
     await rm(o.wav, { force: true }).catch(() => {});
   }
+}
+
+/**
+ * Re-reads the catalog, applies `change` and saves it: ingest runs for minutes, and edits made meanwhile (Claude writing
+ * notes, moments, kind) must survive its saves.
+ */
+async function updateCatalog(project: string, change: (catalog: Catalog) => void): Promise<Catalog> {
+  const catalog = await loadCatalog(project);
+  change(catalog);
+  await saveCatalog(project, catalog);
+  return catalog;
+}
+
+const NOT_A_VIDEO = `not a video Mirage reads (${[...VIDEO_EXTENSIONS].join(', ')})`;
+
+async function clipFiles(dir: string, result: IngestResult): Promise<string[]> {
+  const st = await stat(dir).catch(() => null);
+  if (!st) throw new MirageError('BAD_INPUT', `${dir} does not exist`, 'Pass the folder your clips are in.');
+  if (!st.isDirectory()) throw new MirageError('BAD_INPUT', `${dir} is a file, not a folder`, 'Pass the folder your clips are in.');
+  const files: string[] = [];
+  for (const e of (await readdir(dir, { withFileTypes: true })).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (e.name.startsWith('.')) continue;
+    if (VIDEO_EXTENSIONS.has(extname(e.name).toLowerCase())) files.push(e.name);
+    else if (!e.isDirectory()) result.skipped.push({ file: e.name, reason: NOT_A_VIDEO });
+  }
+  return files;
 }
 
 export async function ingestClips(o: { project: string; clipsDir: string; tools: MediaTools; locale?: string; onStep?: (m: string) => void }): Promise<IngestResult> {
@@ -81,43 +115,47 @@ export async function ingestClips(o: { project: string; clipsDir: string; tools:
 }
 
 async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: string): Promise<IngestResult> {
-  const dir = resolve(o.clipsDir);
-  const catalog = await loadCatalog(project);
-  const known = new Map(catalog.clips.map((c) => [c.sha256, c]));
-  const files = (await readdir(dir)).filter((f) => !f.startsWith('.') && VIDEO_EXTENSIONS.has(extname(f).toLowerCase())).sort();
   const result: IngestResult = { added: [], skipped: [], warnings: [] };
+  const dir = resolve(o.clipsDir);
+  const files = await clipFiles(dir, result);
+  let catalog = await loadCatalog(project);
 
   for (const name of files) {
     const path = join(dir, name);
-    const id = nextClipId(catalog);
-    const framesDir = join(project, 'frames', id);
-    let sha256 = '';
+    let id = nextClipId(catalog);
+    let framesDir = join(project, 'frames', id);
     try {
-      sha256 = await sha256File(path);
-      const prev = known.get(sha256);
+      const sha256 = await sha256File(path);
+      const prev = catalog.clips.find((c) => c.sha256 === sha256);
       if (prev) {
-        let changed = false;
+        let moved = false;
+        let transcript: Transcript | null = null;
         if (prev.path !== path && !existsSync(prev.path)) {
-          prev.path = path;
-          changed = true;
+          moved = true;
           o.onStep?.(`${name}: moved, path updated`);
         }
-        if (prev.path === path && prev.probe.hasAudio && prev.transcript === null) {
+        if ((moved || prev.path === path) && prev.probe.hasAudio && prev.transcript === null) {
           // A transcription that failed last time: try again, keeping everything else about the clip.
-          const transcript = await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, locale: o.locale, result, onStep: o.onStep });
-          if (transcript) {
-            prev.transcript = transcript;
-            changed = true;
-            o.onStep?.(`${name}: transcribed`);
-          }
+          transcript = await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, locale: o.locale, result, onStep: o.onStep });
+          if (transcript) o.onStep?.(`${name}: transcribed`);
         }
-        if (changed) await saveCatalog(project, catalog);
-        else result.skipped.push({ file: name, reason: 'already in the catalog' });
+        if (moved || transcript) {
+          catalog = await updateCatalog(project, (cat) => {
+            const clip = cat.clips.find((c) => c.id === prev.id);
+            if (!clip) return;
+            if (moved) clip.path = path;
+            if (transcript) clip.transcript = transcript;
+          });
+        } else result.skipped.push({ file: name, reason: 'already in the catalog' });
         continue;
       }
       const probe = await o.tools.probe(path);
       if (!probe.hasVideo) {
         result.skipped.push({ file: name, reason: 'no video stream' });
+        continue;
+      }
+      if (!(probe.durationSec > 0)) {
+        result.skipped.push({ file: name, reason: "its duration can't be read (a damaged or streamed recording) — re-export it, e.g. QuickTime → File → Export As" });
         continue;
       }
       o.onStep?.(`${name} → ${id}`);
@@ -128,34 +166,39 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
       await rm(framesDir, { recursive: true, force: true });
       await mkdir(framesDir, { recursive: true });
       const interval = frameInterval(probe.durationSec);
-      await o.tools.runFfmpeg(['-i', path, '-vf', `fps=1/${interval},scale=640:-2`, '-q:v', '5', join(framesDir, 'f%04d.jpg')], {
+      // Run inside the frames folder with a bare pattern: a % in the project path would be read as part of it.
+      await o.tools.runFfmpeg(['-i', path, '-vf', `fps=1/${interval},scale=640:-2`, '-q:v', '5', 'f%04d.jpg'], {
+        cwd: framesDir,
         expectedDurationSec: probe.durationSec,
         timeoutMs: Math.max(120_000, probe.durationSec * 5000),
       });
-      const frames = (await readdir(framesDir))
-        .filter((f) => f.endsWith('.jpg'))
-        .sort()
-        .map((f, i) => ({ t: i * interval, file: `frames/${id}/${f}` }));
+      const frameFiles = (await readdir(framesDir)).filter((f) => f.endsWith('.jpg')).sort();
 
       // null = no audio, or transcription failed (retried on the next ingest); no words = transcribed, nothing said.
       const transcript = probe.hasAudio
         ? await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${id}.wav`), durationSec: probe.durationSec, locale: o.locale, result, onStep: o.onStep })
         : null;
 
-      const clip: Clip = { id, path, sha256, probe, kind: guessKind(probe, transcript), transcript, frames, notes: '', moments: [] };
-      catalog.clips.push(clip);
-      known.set(sha256, clip);
-      result.added.push(clip);
-      await saveCatalog(project, catalog);
-    } catch (e) {
-      // a failed catalog save must not leave a half-registered clip behind
-      if (catalog.clips.at(-1)?.id === id) {
-        catalog.clips.pop();
-        result.added.pop();
-        if (sha256) known.delete(sha256);
+      let clip!: Clip;
+      catalog = await updateCatalog(project, (cat) => {
+        if (cat.clips.some((c) => c.id === id)) {
+          // Someone else catalogued a clip meanwhile: take the next free id (its frames folder moves below).
+          id = nextClipId(cat);
+        }
+        const frames = frameFiles.map((f, i) => ({ t: i * interval, file: `frames/${id}/${f}` }));
+        clip = { id, path, sha256, probe, kind: guessKind(probe, transcript), transcript, frames, notes: '', moments: [] };
+        cat.clips.push(clip);
+      });
+      const finalDir = join(project, 'frames', id);
+      if (finalDir !== framesDir) {
+        await rename(framesDir, finalDir);
+        framesDir = finalDir;
       }
-      await rm(framesDir, { recursive: true, force: true }).catch(() => {});
-      result.skipped.push({ file: name, reason: `failed: ${e instanceof Error ? e.message : String(e)}` });
+      result.added.push(clip);
+    } catch (e) {
+      // the catalog was not saved with this clip: its frames must not stay behind
+      if (!catalog.clips.some((c) => c.id === id)) await rm(framesDir, { recursive: true, force: true }).catch(() => {});
+      result.skipped.push({ file: name, reason: `failed: ${errorReason(e)}` });
     }
   }
   return result;

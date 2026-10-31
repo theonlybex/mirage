@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, rename, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeInfo, Transcript } from '@wordedits/shared';
@@ -60,7 +60,7 @@ describe('ingestClips', () => {
 
     const again = await ingestClips({ project, clipsDir: clips, tools });
     expect(again.added).toEqual([]);
-    expect(again.skipped.map((s) => s.reason)).toEqual(['already in the catalog', 'already in the catalog']);
+    expect(again.skipped.map((s) => [s.file, s.reason])).toEqual([['notes.txt', 'not a video Mirage reads (.mp4, .mov, .m4v, .mkv, .webm)'], ['phone.mov', 'already in the catalog'], ['screen.mp4', 'already in the catalog']]);
   });
 });
 
@@ -214,5 +214,66 @@ describe('ingestClips resilience', () => {
     } finally {
       await lock.release();
     }
+  });
+
+  it('keeps edits made to the catalog while it was transcribing (notes, moments, kind of other clips)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-two-'));
+    await copyFile(join(good, 'phone.mov'), join(dir, 'a.mov'));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=500:sample_rate=48000:duration=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', join(dir, 'b.mov')]);
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    let calls = 0;
+    const tools: MediaTools = {
+      ...real,
+      transcribe: async () => {
+        // While b.mov is transcribed, Claude describes a.mov (already saved as c001).
+        if (++calls === 2) {
+          const cat = JSON.parse(await readFile(join(project, 'catalog.json'), 'utf8'));
+          Object.assign(cat.clips[0], { notes: 'Phone test card.', kind: 'camera', moments: [{ t: 1, label: 'beep' }] });
+          await writeFile(join(project, 'catalog.json'), JSON.stringify(cat));
+        }
+        return words(10, 3);
+      },
+    };
+    await ingestClips({ project, clipsDir: dir, tools });
+    const cat = await loadCatalog(project);
+    expect(cat.clips.map((c) => c.id)).toEqual(['c001', 'c002']);
+    expect(cat.clips[0]).toMatchObject({ notes: 'Phone test card.', kind: 'camera', moments: [{ t: 1, label: 'beep' }] });
+  });
+
+  it('extracts frames into a project whose path contains %', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we 100%d %04d-'));
+    const r = await ingestClips({ project, clipsDir: good, tools: { ...real, transcribe: async () => words(10, 3) } });
+    expect(r.skipped).toEqual([]);
+    expect(r.added[0].frames.length).toBeGreaterThanOrEqual(1);
+    expect(r.added[0].frames.every((f) => existsSync(join(project, f.file)))).toBe(true);
+  });
+
+  it('says which files in the folder are not videos, ignoring dotfiles and subfolders', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-mixed-'));
+    await copyFile(join(good, 'phone.mov'), join(dir, 'clip.mov'));
+    for (const f of ['shot.png', 'old.avi', '.DS_Store']) await writeFile(join(dir, f), 'x');
+    await mkdir(join(dir, 'exports'));
+    const r = await ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: dir, tools: { ...real, transcribe: async () => words(10, 3) } });
+    expect(r.added).toHaveLength(1);
+    expect(r.skipped).toEqual([{ file: 'old.avi', reason: 'not a video Mirage reads (.mp4, .mov, .m4v, .mkv, .webm)' }, { file: 'shot.png', reason: 'not a video Mirage reads (.mp4, .mov, .m4v, .mkv, .webm)' }]);
+  });
+
+  it('skips a clip whose duration cannot be read instead of cataloguing 0 seconds', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const tools: MediaTools = { ...real, probe: async (f) => ({ ...(await real.probe(f)), durationSec: 0 }), transcribe: async () => words(10, 3) };
+    const r = await ingestClips({ project, clipsDir: good, tools });
+    expect(r.added).toEqual([]);
+    expect(r.skipped).toEqual([{ file: 'phone.mov', reason: "its duration can't be read (a damaged or streamed recording) — re-export it, e.g. QuickTime → File → Export As" }]);
+    expect((await loadCatalog(project)).clips).toEqual([]);
+  });
+
+  it("gives the tool's reason when a file can't be read, and names a clips folder that does not exist", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-bad-'));
+    await writeFile(join(dir, 'bad.mp4'), Buffer.alloc(2048, 7));
+    const r = await ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: dir, tools: real });
+    expect(r.skipped[0].reason).toMatch(/^failed: ffprobe exited with code 1 — .*Invalid data found/);
+    const missing = join(dir, 'nope');
+    await expect(ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: missing, tools: real })).rejects.toMatchObject({ code: 'BAD_INPUT', message: `${missing} does not exist` });
+    await expect(ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: join(dir, 'bad.mp4'), tools: real })).rejects.toMatchObject({ code: 'BAD_INPUT', message: `${join(dir, 'bad.mp4')} is a file, not a folder` });
   });
 });

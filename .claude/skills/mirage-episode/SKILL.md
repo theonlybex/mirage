@@ -11,7 +11,8 @@ Every `⚠` line a command prints is for the user: pass each one on in plain wor
 
 ## 1. Catalog the batch
 `pnpm mirage ingest <project> <clips folder>`. Tell the user about every `⚠` line:
-- `⚠ skipped <file>` — unreadable or no video: ask them to re-export it.
+- `⚠ skipped <file>: failed …` / `no video stream` / `its duration can't be read` — unreadable: ask them to re-export it (the reason after `—` is the tool's).
+- `⚠ skipped <file>: not a video Mirage reads` — photos and other formats are not used; if it belongs in the episode, ask for an .mp4 or .mov export.
 - `⚠ <file> is HDR …` — colours will look washed out: ask for an SDR export (Photos → Export → "Most Compatible").
 - `⚠ <file>: transcription failed …` — its speech is invisible to slots and captions; running `ingest` again on the same folder retries just those clips.
 - `• <file>: moved, path updated` needs nothing: a clip found in a new folder keeps its id.
