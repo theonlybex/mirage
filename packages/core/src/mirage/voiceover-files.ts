@@ -9,7 +9,7 @@ import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';
 import { slotsStale, slotsStaleError } from './slots.js';
-import { cutChanged, cutChangedError, fitVoiceover, fittedRecordingSha, hasWords, missingSlots, type FitReport } from './voiceover.js';
+import { cutChanged, cutChangedError, englishOnlyError, fitVoiceover, fittedRecordingSha, hasWords, missingSlots, notEnglish, type FitReport } from './voiceover.js';
 import { refineTranscript } from './word-timing.js';
 
 /** A recording's transcript file in the episode folder, named by the recording's content so a re-fit can reuse it. */
@@ -46,6 +46,8 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
   const ep = await loadEpisode(project, n);
   // Fail before the (slow) transcription when the fit would refuse anyway.
   if (!ep.slots.some((s) => hasWords(s.line))) {
+    const foreign = ep.slots.filter((s) => notEnglish(s.line)).map((s) => s.id);
+    if (foreign.length) throw englishOnlyError(foreign);
     throw new MirageError('NOTHING_MATCHED', 'No narration lines are written yet', `Run pnpm mirage slots <project> ${n} and write the lines first.`);
   }
   let only: string[] | undefined;

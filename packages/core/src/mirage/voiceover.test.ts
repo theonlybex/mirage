@@ -1,7 +1,7 @@
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { cutOf } from './slots.js';
-import { cutChanged, fitVoiceover, hasWords, holdAt, lineChanges, lineChangeWarnings, missingSlots } from './voiceover.js';
+import { cutChanged, fitVoiceover, hasWords, holdAt, lineChanges, lineChangeWarnings, missingSlots, notEnglish } from './voiceover.js';
 import { itemsFingerprint, layoutTimeline, timelineDuration } from './timeline.js';
 
 function said(text: string, t0: number, per = 0.3): Word[] {
@@ -469,6 +469,22 @@ describe('fitVoiceover at the edges', () => {
   it('says no speech was heard in a silent recording', () => {
     expect(() => fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo/silent.m4a', transcript: tx([{ w: 'Um.', start: 1, end: 1.3, conf: 1 }]) })).toThrow(
       expect.objectContaining({ code: 'NOTHING_MATCHED', message: 'No speech was heard in vo/silent.m4a' }),
+    );
+  });
+});
+
+describe('lines not in English', () => {
+  it('says plainly that voice-over matching supports English only, instead of calling the line empty', () => {
+    expect(notEnglish('Привет, мир.')).toBe(true);
+    expect(notEnglish('🚀🚀 …')).toBe(false);
+    expect(notEnglish('Café time.')).toBe(false);
+    expect(notEnglish('Um.')).toBe(false);
+    expect(notEnglish('東京へ行く')).toBe(true);
+    const ru = { id: 'n2', start: 10, end: 12, maxWords: 4, line: 'Привет, мир.' };
+    const { report } = fitVoiceover({ episode: episode([SLOTS[0], ru]), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(report.warnings).toContain("n2's line isn't in English — voice-over matching supports English only for now, so it was left out");
+    expect(() => fitVoiceover({ episode: episode([ru]), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).toThrow(
+      expect.objectContaining({ code: 'NOTHING_MATCHED', message: 'Voice-over matching supports English only for now' }),
     );
   });
 });

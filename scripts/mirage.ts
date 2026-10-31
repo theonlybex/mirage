@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
-  analyzeLibrary, carrySlots, checkEpisode, computeSlots, cutOf, describeError, fitRecording, formatTime, hasWords, ingestClips, initProject, layoutTimeline, loadCatalog,
+  analyzeLibrary, carrySlots, checkEpisode, computeSlots, cutOf, describeError, fitRecording, formatTime, hasWords, ingestClips, notEnglish, initProject, layoutTimeline, loadCatalog,
   loadEpisode, MirageError, realMediaTools, renderEpisode, requireProject, resolveUserPath, saveEpisode, timelineDuration, type EpisodeMode,
 } from '@wordedits/core';
 
@@ -141,7 +141,10 @@ async function main() {
       }
       for (const m of moved) console.log(`⚠ moved line (was ${m.from.id} ${range(m.from)}, now ${m.to.id} ${range(m.to)}): "${m.line}" — it followed its picture; check it still fits`);
       for (const s of dropped) console.log(`⚠ dropped line (was ${s.id} ${range(s)}): "${s.line}"`);
-      for (const s of slots) if (s.line.trim() && !hasWords(s.line)) console.log(`⚠ ${s.id}'s line has no words to read ("${s.line}") — write words, or leave it empty`);
+      for (const s of slots) {
+        if (notEnglish(s.line)) console.log(`⚠ ${s.id}'s line isn't in English — voice-over matching supports English only for now`);
+        else if (s.line.trim() && !hasWords(s.line)) console.log(`⚠ ${s.id}'s line has no words to read ("${s.line}") — write words, or leave it empty`);
+      }
       const written = slots.filter((s) => hasWords(s.line)).length;
       console.log(`✓ ${slots.length} slot${slots.length === 1 ? '' : 's'}, ${written} with lines${dropped.length ? `, ${dropped.length} dropped` : ''}`);
       break;

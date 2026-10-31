@@ -33,6 +33,14 @@ export function fittedRecordingSha(vo: NonNullable<Episode['voiceover']>, record
 /** True when a line has words to read: a line of only punctuation, emoji or "um" counts as not written. */
 export const hasWords = (line: string): boolean => textTokens(line).length > 0;
 
+/** True when a line has letters but none that matching reads (Cyrillic, CJK, …): only English lines can be matched for now. */
+export const notEnglish = (line: string): boolean => !hasWords(line) && /(?=\p{L})\P{Script=Latin}/u.test(line);
+
+/** The error vo gives when every written line is in a language matching can't read. */
+export function englishOnlyError(slots: string[]): MirageError {
+  return new MirageError('NOTHING_MATCHED', 'Voice-over matching supports English only for now', `${slots.join(', ')} ${slots.length === 1 ? 'is' : 'are'} not in English: write the lines in English to fit a voice-over to them.`);
+}
+
 /** Slots with a written line but no fitted voice-over line. */
 export function missingSlots(ep: Episode): string[] {
   const placed = new Set(ep.voiceover?.lines.map((l) => l.slot) ?? []);
@@ -289,9 +297,12 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     return out;
   });
 
+  const foreign = start.slots.filter((s) => notEnglish(s.line)).map((s) => s.id);
   if (allWritten.length === 0) {
+    if (foreign.length) throw englishOnlyError(foreign);
     throw new MirageError('NOTHING_MATCHED', 'No narration lines are written yet', 'Run slots and write a line for each slot first.');
   }
+  for (const id of foreign) if (!targets || targets.has(id)) report.warnings.push(`${id}'s line isn't in English — voice-over matching supports English only for now, so it was left out`);
   if (written.length === 0) {
     throw new MirageError('NOTHING_MATCHED', 'None of those slots has a written line', 'List slots that have a line (see pnpm mirage slots).');
   }
