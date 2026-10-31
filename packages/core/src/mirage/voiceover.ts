@@ -2,7 +2,7 @@ import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceL
 import { isFiller, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
 import { MirageError } from './errors.js';
 import { keptSegments } from './overlays.js';
-import { itemFrames, layoutTimeline, shiftAfter } from './timeline.js';
+import { itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
@@ -29,9 +29,12 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
   const l = laid.find((x) => t > x.start + 1e-9 && t <= x.end + 1e-9) ?? laid[laid.length - 1];
   const item = l.item;
   const items = [...ep.items];
-  const atEnd = Math.abs(l.end - t) < 0.5 / fps || t >= l.start + l.srcFrames / fps;
+  const half = 0.5 / fps;
+  const srcEnd = l.start + l.srcFrames / fps;
+  const atBoundary = Math.abs(l.end - t) < half || t > l.end;
+  const splitFrames = Math.max(1, Math.round((t - l.start) * fps));
 
-  if (atEnd) {
+  if (atBoundary) {
     const clipDur = catalog.clips.find((c) => c.id === item.clip)?.probe.durationSec ?? item.src.out;
     const available = Math.max(0, (clipDur - item.src.out) / item.speed);
     const useSource = Math.min(delta, available);
@@ -41,7 +44,14 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
     return { ...shiftAfter(ep, l.end, grown), items };
   }
 
-  const splitFrames = Math.max(1, Math.round((t - l.start) * fps));
+  if (t >= srcEnd - 1e-9 || splitFrames >= l.srcFrames) {
+    // Inside the item's frozen tail: it is already a held frame, so just hold longer.
+    const next = { ...item, hold: r6(item.hold + delta) };
+    items[l.index] = next;
+    const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
+    return { ...shiftAfter(ep, t, grown), items };
+  }
+
   const splitSrc = r6(item.src.in + (splitFrames / fps) * item.speed);
   const ids = new Set(ep.items.map((x) => x.id));
   let suffix = 'b';
@@ -73,17 +83,26 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   type Cand = { from: number; to: number; score: number };
   const cands: Cand[][] = written.map((slot) => {
     const lineTokens = textTokens(slot.line);
+    const lineSet = new Set(lineTokens);
+    // A span must start and end on sentences that belong to the line, so retakes of a neighbour or "Um." never edge a span.
+    const belongs = sTokens.map((t) => t.some((x) => lineSet.has(x)));
     const out: Cand[] = [];
     for (let i = 0; i < sentences.length; i++) {
+      if (!belongs[i]) continue;
       let tokens: string[] = [];
       for (let j = i; j < Math.min(sentences.length, i + 4); j++) {
         tokens = tokens.concat(sTokens[j]);
+        if (!belongs[j]) continue;
         const score = similarity(tokens, lineTokens);
         if (score >= 0.6) out.push({ from: i, to: j, score });
       }
     }
     return out;
   });
+
+  if (written.length === 0) {
+    throw new MirageError('NOTHING_MATCHED', 'No narration lines are written yet', 'Run slots and write a line for each slot first.');
+  }
 
   let ep = o.episode;
   const lines: VoiceLine[] = [];
@@ -92,7 +111,9 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
 
   for (let k = 0; k < written.length; k++) {
     const after = cands[k].filter((c) => c.from > prevEnd);
-    const nextFirst = k + 1 < written.length ? Math.min(Infinity, ...cands[k + 1].filter((c) => c.from > prevEnd).map((c) => c.from)) : Infinity;
+    // The earliest first match of any later line caps this line, so a skipped line cannot let a retake land after a later one.
+    let nextFirst = Infinity;
+    for (let m = k + 1; m < written.length; m++) for (const c of cands[m]) if (c.from > prevEnd && c.from < nextFirst) nextFirst = c.from;
     let pool = after.filter((c) => c.to < nextFirst);
     if (pool.length === 0) pool = after;
     if (pool.length === 0) {
@@ -124,8 +145,12 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     let overrun = at + duration - (slot.end + 0.2);
     if (overrun > 1e-3) {
       overrun = Math.ceil(overrun * fps - 1e-9) / fps;
-      ep = holdAt(ep, o.catalog, slot.end, overrun);
-      report.extendedSec = r6(report.extendedSec + overrun);
+      const before = timelineDuration(ep);
+      const held = holdAt(ep, o.catalog, slot.end, overrun);
+      const grown = timelineDuration(held) - before;
+      // The narration stretch really grew; keep the slot in step so a re-fit finds no overrun left.
+      ep = { ...held, slots: held.slots.map((x) => (x.id === slot.id ? { ...x, end: r6(slot.end + grown) } : x)) };
+      report.extendedSec = r6(report.extendedSec + grown);
     } else {
       overrun = 0;
     }

@@ -85,3 +85,73 @@ describe('holdAt', () => {
     expect(held.overlays[0].start).toBeCloseTo(7);
   });
 });
+
+describe('fitVoiceover fixes', () => {
+  const slotsOf = (...s: [string, number, number, string][]) => s.map(([id, start, end, line]) => ({ id, start, end, maxWords: 8, line }));
+
+  it('keeps the last take of a short line that is re-read before a longer line', () => {
+    const rec = tx([...said('Open settings.', 0), ...said('Open settings.', 2), ...said('Then toggle dark mode on.', 4)]);
+    const slots = slotsOf(['n1', 0, 3, 'Open settings.'], ['n2', 6, 9, 'Then toggle dark mode on.']);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    const n1 = ep.voiceover!.lines.find((l) => l.slot === 'n1')!;
+    expect(n1.src.in).toBeCloseTo(1.95);
+    expect(report.lines[0]).toMatchObject({ slot: 'n1', status: 'placed', takes: 2 });
+    expect(report.lines[1]).toMatchObject({ slot: 'n2', status: 'placed', takes: 1 });
+  });
+
+  it('does not count a filler-only sentence as an extra take', () => {
+    const rec = tx([{ w: 'Um.', start: 0, end: 0.3, conf: 1 }, ...said('This is the first line.', 1)]);
+    const slots = slotsOf(['n1', 0, 5, 'This is the first line.']);
+    const { report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(report.lines[0]).toMatchObject({ status: 'placed', takes: 1 });
+  });
+
+  it('is stable when the result is fitted again with the same transcript', () => {
+    const first = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(first.report.extendedSec).toBeGreaterThan(0);
+    const second = fitVoiceover({ episode: first.episode, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(second.report.extendedSec).toBe(0);
+    expect(second.report.lines.map((l) => l.overrunSec)).toEqual([0, 0]);
+    expect(timelineDuration(second.episode)).toBeCloseTo(timelineDuration(first.episode), 6);
+    expect(second.episode.voiceover!.lines).toEqual(first.episode.voiceover!.lines);
+  });
+
+  it('reports the growth holdAt actually applied', () => {
+    const { episode: ep, report } = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(report.extendedSec).toBeCloseTo(timelineDuration(ep) - 20, 6);
+  });
+
+  it('caps a line by the earliest match of any later line, even when the next line is missing', () => {
+    // n2 is never spoken; n3's first read comes after n1's retake, so n1's retake before it wins, not one after it.
+    const rec = tx([...said('Open settings.', 0), ...said('Open settings.', 2), ...said('Then toggle dark mode on.', 4), ...said('Open settings.', 7)]);
+    const slots = slotsOf(['n1', 0, 3, 'Open settings.'], ['n2', 4, 5, 'Nothing like anything here at all.'], ['n3', 6, 9, 'Then toggle dark mode on.']);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(report.lines.map((l) => l.status)).toEqual(['placed', 'missing', 'placed']);
+    expect(ep.voiceover!.lines.find((l) => l.slot === 'n1')!.src.in).toBeCloseTo(1.95);
+  });
+
+  it('throws a distinct NOTHING_MATCHED when no narration lines are written', () => {
+    const slots = slotsOf(['n1', 0, 3, '']);
+    expect(() => fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).toThrow(expect.objectContaining({ code: 'NOTHING_MATCHED', message: expect.stringContaining('No narration lines') }));
+  });
+});
+
+describe('holdAt in the frozen tail', () => {
+  const held = (extra: object) => EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, overlays: [{ kind: 'label', text: 'x', start: 6.5, end: 7 }], ...extra });
+  it('adds hold only when the point is inside an existing hold', () => {
+    const ep = held({ items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 5 }, hold: 2 }] });
+    const out = holdAt(ep, catalog(20), 6, 1);
+    expect(out.items.map((i) => [i.id, i.src.in, i.src.out, i.hold])).toEqual([['a', 0, 5, 3]]);
+    expect(timelineDuration(out)).toBeCloseTo(8);
+    expect(out.overlays[0].start).toBeCloseTo(7.5);
+  });
+  it('never splits into an empty or inverted source range', () => {
+    const ep = held({ items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 4.99 }, hold: 1 }] });
+    const out = holdAt(ep, catalog(20), 4.99, 1);
+    expect(out.items.map((i) => [i.id, i.src.in, i.src.out, i.hold])).toEqual([['a', 0, 4.99, 2]]);
+    expect(timelineDuration(out)).toBeCloseTo(layoutDur(ep) + 1);
+  });
+});
+function layoutDur(ep: ReturnType<typeof EpisodeSchema.parse>) {
+  return timelineDuration(ep);
+}
