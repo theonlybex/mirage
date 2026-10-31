@@ -20,6 +20,7 @@ A `✖` line stops the command; its next line says what to do. `✖ episode <n> 
 - `⚠ <file> looks cut short …` — the copy or recording is incomplete (only the seconds it names are there): ask whether a full copy exists.
 - `⚠ <file>: its picture stops at … but its sound runs to …` — items can only use the seconds with picture (`probe.videoDurationSec`).
 - `⚠ <file>: its first audio track is silent, so its sound is taken from track …` — nothing to do; worth a mention if the user expected the other track.
+- `⚠ <file>: Mirage couldn't read through the whole file, so its length is what its header says …` — the file is huge or on a slow drive; it is catalogued, but if a render of it fails or stops early, ask for a fresh copy or export.
 - `• <file>: moved, path updated` needs nothing: a clip found in a new folder keeps its id.
 - `✖ catalog.json: …` while it runs — an edit made to catalog.json meanwhile broke it (the line names the key): fix that, then run `ingest` again; clips already catalogued are kept.
 
@@ -52,7 +53,7 @@ The schema is `packages/shared/src/schemas/episode.ts`. A minimal file:
 ```
 - `output`: 1920×1080 unless the user says otherwise; `fps` 30 or 60.
 - `items[].clip` is a catalog id (`c001`…); `src` is in that clip's own seconds, and must end by the clip's `probe.videoDurationSec` when it has one (its sound can run on after the picture): otherwise `check` stops with `item …: c019 has video only until 3.0 s`. Item `id`s are yours (short, unique).
-- Overlay text can be in any script, but emoji are left out (they can't be drawn; `check` warns).
+- Overlay text can be in any script, and symbols such as © ® ™ ▶ ⚠ ✔ ↔ draw; colour emoji (🚀 ✅ 👩‍💻, flags) are left out (they can't be drawn; `check` warns).
 - `overlays` and `music` are in output-timeline seconds; `track` is a file name in `music/`.
 - `number` must be the episode's folder number: when you start an episode from a copy of another's `episode.json`, set `number` to the new folder's number and remove `voiceover` (its transcripts stay in the old folder) — every command refuses a mismatch.
 
