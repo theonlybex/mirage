@@ -87,6 +87,28 @@ describe('fitRecording', () => {
     expect(calls).toEqual(['vo.m4a']);
   });
 
+  it('saves when episode.json was only rewritten meanwhile (reformatted, defaults left out), not changed', async () => {
+    const full = tx([...said('Open settings.', 0), ...said('Then toggle dark mode on.', 2), ...said('Pick a nice accent colour.', 4)]);
+    const { project, tools } = await setup({ 'vo.m4a': full });
+    const epFile = join(project, 'episodes', '1', 'episode.json');
+    const rewrite = {
+      ...tools,
+      transcribe: async (wav: string) => {
+        // As if written by hand: one line, no keys whose value is the default.
+        const ep = JSON.parse(await readFile(epFile, 'utf8'));
+        delete ep.overlays;
+        delete ep.music;
+        delete ep.items[0].speed;
+        delete ep.items[0].hold;
+        await writeFile(epFile, JSON.stringify(ep));
+        return tools.transcribe(wav);
+      },
+    } as MediaTools;
+    const r = await fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools: rewrite });
+    expect(r.report.lines.map((l) => l.status)).toEqual(['placed', 'placed', 'placed']);
+    expect((await loadEpisode(project, 1)).voiceover).not.toBeNull();
+  });
+
   it('says so when the recording is a folder', async () => {
     const { project, tools } = await setup({});
     await expect(fitRecording({ project, episode: 1, recording: join(project, 'episodes'), tools })).rejects.toMatchObject({ code: 'BAD_INPUT', message: `${join(project, 'episodes')} is a folder, not a recording` });

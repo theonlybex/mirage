@@ -200,6 +200,16 @@ describe('analyzeLibrary', () => {
     expect(out.library.tracks).toEqual([gone]);
   });
 
+  it('finds a listed track whose extension music would not pick up by itself, instead of calling it missing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=2', '-f', 'wav', join(dir, 'theme.wave')]);
+    await writeFile(join(dir, 'library.json'), JSON.stringify({ version: 1, tracks: [{ file: 'theme.wave', mood: 'relaxed', licence: 'mine', bpm: null, beatOffset: null, durationSec: null }] }));
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.warnings).toEqual([]);
+    expect(out.tracks.map((t) => t.file)).toEqual(['theme.wave']);
+    expect(out.tracks[0].durationSec).toBeCloseTo(2, 1);
+  });
+
   it('matches file names however their accents are encoded (NFC or NFD), so a track is never listed twice', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we music '));
     const nfd = 'café.wav'.normalize('NFD');
