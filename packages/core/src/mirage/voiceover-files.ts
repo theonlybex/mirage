@@ -71,7 +71,7 @@ export async function fitRecording(o: {
   const vo = fit.episode.voiceover!;
   const episode: Episode = { ...fit.episode, voiceover: { ...vo, transcripts: { ...vo.transcripts, [recording]: file } } };
   // Only after a successful fit: a failed fit must never leave a new transcript beside the old lines.
-  if (!reused) await writeJsonFile(join(dir, file), TranscriptSchema, transcript);
+  if (!reused) await writeJsonFile(join(dir, file), TranscriptSchema, transcript, `episodes/${n}/${file}`);
   await saveEpisode(project, episode, n);
   return { episode, report: fit.report, reused };
 }

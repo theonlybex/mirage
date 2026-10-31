@@ -38,7 +38,7 @@ export async function loadCatalog(project: string): Promise<Catalog> {
 }
 
 export async function saveCatalog(project: string, catalog: Catalog): Promise<void> {
-  await writeJsonFile(join(resolve(project), 'catalog.json'), CatalogSchema, catalog);
+  await writeJsonFile(join(resolve(project), 'catalog.json'), CatalogSchema, catalog, 'catalog.json');
 }
 
 export function nextClipId(catalog: Catalog): string {

@@ -43,7 +43,7 @@ export async function analyzeLibrary(dir: string, tools: MediaTools): Promise<Mu
     }
     track.durationSec ??= p.durationSec;
   }
-  await writeJsonFile(join(root, 'library.json'), MusicLibrarySchema, lib);
+  await writeJsonFile(join(root, 'library.json'), MusicLibrarySchema, lib, 'music/library.json');
   return lib;
 }
 

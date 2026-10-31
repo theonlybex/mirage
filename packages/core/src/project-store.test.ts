@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EdlSchema } from '@wordedits/shared';
+import { EdlSchema, MusicLibrarySchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { createProject, JsonFileError, loadEdl, openProject, readJsonFile, saveEdl, slugify, writeJsonFile } from './project-store.js';
 
@@ -79,7 +79,29 @@ describe('writeJsonFile', () => {
   });
 });
 
+describe('writeJsonFile errors', () => {
+  it('names the file, the field and the problem instead of dumping the raw schema error, and writes nothing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'we-'));
+    const p = join(root, 'edl.json');
+    const err = await writeJsonFile(p, EdlSchema, { ...edl, scenes: [{ id: 's1', src: { in: 0, out: -1 } }] } as never, 'edl.json').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(JsonFileError);
+    expect((err as Error).message).toMatch(/^edl\.json: scenes\[0\]\.src\.out: /);
+    expect(await readdir(root)).toEqual([]);
+  });
+});
+
 describe('readJsonFile errors', () => {
+  it('names an unknown key and says to remove or rename it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'we-'));
+    const p = join(root, 'lib.json');
+    // "moood" also leaves "mood" missing: the unknown key is the one that explains it.
+    await writeFile(p, JSON.stringify({ version: 1, tracks: [{ file: 'a.mp3', moood: 'x' }] }));
+    await expect(readJsonFile(p, MusicLibrarySchema, 'music/library.json')).rejects.toMatchObject({
+      message: expect.stringMatching(/^music\/library\.json: tracks\[0\]: unknown key "moood" \(valid keys: file, mood, /),
+      hint: 'Remove or rename that key (a misspelled key would be ignored).',
+    });
+  });
+
   it('names the file, the field and the problem for a schema error', async () => {
     const root = await mkdtemp(join(tmpdir(), 'we-'));
     const p = join(root, 'edl.json');
