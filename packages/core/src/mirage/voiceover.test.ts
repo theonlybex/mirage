@@ -214,6 +214,52 @@ describe('fitVoiceover with a false start', () => {
     expect(kept[kept.length - 1].out).toBeCloseTo(5.65);
   });
 
+  it('cuts an abandoned attempt that the restart reads differently, and keeps the line to its end', () => {
+    // Real transcript (hunt final repro): the second attempt restarts with "So I cashed the forecast" but then differs.
+    const T: [string, number, number][] = [
+      ['Um,', 0, 0.48], ['every', 0.6, 0.84], ['request', 0.84, 1.26], ['was', 1.26, 1.74], ['waiting', 1.74, 2.16], ['on', 2.16, 2.46], ['a', 2.46, 2.64], ['slow', 2.64, 2.76],
+      ['weather', 2.76, 3.12], ['API.', 3.12, 4.38], ['So', 5.12, 5.34], ['I', 5.34, 5.52], ['cashed', 5.52, 5.94], ['the', 5.94, 6.06], ['forecast', 6.06, 6.24], ['and', 6.24, 6.72],
+      ['rewrote', 6.72, 7.38], ['the', 7.4, 7.56], ['back.', 7.56, 7.92], ['So', 8.61, 8.82], ['I', 8.82, 9.0], ['cashed', 9.0, 9.42], ['the', 9.42, 9.54], ['forecast', 9.54, 9.66],
+      ['in,', 9.66, 10.38], ['rewrote', 10.38, 10.86], ['the', 10.86, 11.04], ['back', 11.04, 11.16], ['end', 11.16, 11.34], ['in', 11.34, 11.58], ['one', 11.58, 11.76], ['long', 11.76, 11.94], ['night.', 11.94, 12.24],
+    ];
+    const rec = tx(T.map(([w, start, end]) => ({ w, start, end, conf: 1 })));
+    const line = 'Every request was waiting on a slow weather API, so I cached the forecast and rewrote the backend in one long night.';
+    const ep0 = { ...episode([{ id: 'n1', start: 0, end: 18, maxWords: 25, line }]), overlays: [] };
+    const { episode: ep, report } = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    const l = ep.voiceover!.lines[0];
+    expect(report.lines[0]).toMatchObject({ status: 'placed' });
+    expect(l.src.in).toBeCloseTo(0.55);
+    expect(l.src.out).toBeCloseTo(12.34);
+    const kept = keptSegments(l);
+    // Nothing of the abandoned attempt (5.12–7.92) plays; the restart from 8.61 plays to the end.
+    expect(kept.some((g) => g.out > 5.0 && g.in < 8.0)).toBe(false);
+    expect(kept.some((g) => g.in <= 8.61 && g.out >= 12.24)).toBe(true);
+  });
+
+  it('says so when the line\'s ending is in the recording right after the span used', () => {
+    const line = 'One two three. Four five. Six seven. Eight nine. Ten eleven. Twelve thirteen.';
+    const rec = tx(said(line, 0));
+    const { episode: ep, report } = fitVoiceover({ episode: episode([{ id: 'n1', start: 0, end: 12, maxWords: 20, line }]), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    // Six sentences read straight through are one span: placed whole, to the last word.
+    expect(report.lines[0].status).toBe('placed');
+    expect(ep.voiceover!.lines[0].src.out).toBeCloseTo(rec.words[rec.words.length - 1].end + 0.1);
+    // Read in more pieces than a span takes, the end can't be reached: reported, not placed cleanly.
+    const choppy = 'One two three four. Five. Six. Seven. Eight nine. Ten. Eleven. Twelve thirteen.';
+    const r2 = fitVoiceover({ episode: episode([{ id: 'n1', start: 0, end: 12, maxWords: 20, line: choppy }]), catalog: catalog(20), recording: 'vo.m4a', transcript: tx(said(choppy, 0)) });
+    expect(r2.episode.voiceover!.lines[0].src.in).toBe(0);
+    expect(r2.report.lines[0].status).toBe('partial');
+  });
+
+  it('cuts a flub that runs on into other words when the re-read starts with the same three words', () => {
+    const line = 'I shipped an app. Everything broke on every single request today.';
+    const rec = tx([...said('I shipped an app.', 0), ...said('Everything broke on every, no wait, that is wrong, hold on.', 1.5), ...said('Everything broke on every single request today.', 6)]);
+    const { episode: ep, report } = fitVoiceover({ episode: episode([{ id: 'n1', start: 0, end: 12, maxWords: 20, line }]), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(report.lines[0].status).toBe('placed');
+    const kept = keptSegments(ep.voiceover!.lines[0]);
+    expect(kept[0].in).toBe(0);
+    expect(kept.some((g) => g.in < 5.5 && g.out > 1.6)).toBe(false);
+  });
+
   it('cuts every earlier reading of a sentence, keeping the last', () => {
     const line = 'Open the settings. Then toggle dark mode on and wait.';
     const rec = tx([...said('Open the settings.', 0), ...said('Then toggle', 1.2), ...said('Then toggle dark', 2.4), ...said('Then toggle dark mode on and wait.', 3.6)]);
@@ -231,8 +277,8 @@ describe('fitVoiceover with a false start', () => {
 
   it('says so when only part of the line was found, instead of reporting it placed cleanly', () => {
     const line = 'I shipped an app. Everything broke on every single request today.';
-    // The flub runs on into words that are not a re-read, so it can't be cut: only the re-read is used.
-    const rec = tx([...said('I shipped an app.', 0), ...said('Everything broke on every, no wait, that is wrong, hold on.', 1.5), ...said('Everything broke on every single request today.', 6)]);
+    // The flub runs on into other words and shares only two words with the re-read, so it can't be cut: only the re-read is used.
+    const rec = tx([...said('I shipped an app.', 0), ...said('Everything broke, no wait, that is wrong, hold on.', 1.5), ...said('Everything broke on every single request today.', 6)]);
     const { report } = fitVoiceover({ episode: episode([{ id: 'n1', start: 0, end: 12, maxWords: 20, line }]), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
     expect(report.lines[0]).toMatchObject({ slot: 'n1', status: 'partial' });
   });

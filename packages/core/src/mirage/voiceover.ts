@@ -237,7 +237,13 @@ function mergeCuts(cuts: [number, number][]): [number, number][] {
  * A run of sentences [from, to] that reads a line: `matched` of the line's words, in order, among its `length` words;
  * `drop` holds the indices of words cut from it (earlier readings of what is re-read inside it).
  */
-type Cand = { from: number; to: number; score: number; matched: number; length: number; drop?: Set<number> };
+type Cand = { from: number; to: number; score: number; matched: number; length: number; endsLine: boolean; drop?: Set<number> };
+
+/** Words a restarted sentence must begin with again, and how far (in words) the restart may come after the attempt. */
+const RESTART_WORDS = 3;
+const MAX_RESTART_GAP = 25;
+/** Sentences with words that one span may cover (filler-only sentences don't count). */
+const MAX_SPAN_SENTENCES = 6;
 
 /** Coverage minus extra speech. */
 const worth = (c: Cand) => 2 * c.matched - c.length;
@@ -253,7 +259,7 @@ function takesOf(pool: Cand[], lineLength: number): Cand[] {
   const best = Math.max(...pool.map((c) => c.score));
   // Coverage minus extra speech: a span reaching back over a false start gains a word at most (a transcription
   // difference between the reads) but carries the whole false start.
-  const ranked = pool.filter((c) => c.score >= best - 0.15).sort((a, b) => worth(b) - worth(a) || b.score - a.score || b.from - a.from);
+  const ranked = pool.filter((c) => c.score >= best - 0.15).sort((a, b) => worth(b) - worth(a) || Number(b.endsLine) - Number(a.endsLine) || b.score - a.score || b.from - a.from);
   const picked: Cand[] = [];
   for (const c of ranked) if (!picked.some((p) => c.from <= p.to && p.from <= c.to)) picked.push(c);
   const most = Math.max(...picked.map((c) => c.matched));
@@ -271,8 +277,9 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const sTokens = sentences.map((s) => sentenceTokens(s, words));
   /**
    * Word indices in [from, to] read and then restarted: a run of words followed straight away (fillers aside) by the same
-   * words again, its last word allowed to differ (a cut-off word) when the run has three or more. Earlier readings go,
-   * so the last reading of each sentence or phrase wins.
+   * words again, its last word allowed to differ (a cut-off word) when the run has three or more; or an attempt whose
+   * first three words start a later run within MAX_RESTART_GAP words. Earlier readings go, so the last reading of each
+   * sentence or phrase wins.
    */
   const restarts = (from: number, to: number): Set<number> => {
     const idx: number[] = [];
@@ -286,12 +293,23 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
         for (let t = 0; t < len && same; t++) same = a[p + t] === a[p + len + t] || (t === len - 1 && len >= 3);
         if (same) break;
       }
-      if (len > (a.length - p) / 2) {
+      if (len <= (a.length - p) / 2) {
+        for (let t = 0; t < len; t++) drop.add(idx[p + t]);
+        p += len;
+        continue;
+      }
+      // A sentence restarted: a later run starts with the same three words, and the attempts may then differ ("and" vs
+      // "in", a cut-off "back" vs "back end"). Everything from this attempt up to the last restart goes.
+      let q = -1;
+      for (let r = p + RESTART_WORDS; r <= Math.min(a.length - RESTART_WORDS, p + MAX_RESTART_GAP); r++) {
+        if (a.slice(p, p + RESTART_WORDS).every((x, t) => x === a[r + t])) q = r;
+      }
+      if (q < 0) {
         p++;
         continue;
       }
-      for (let t = 0; t < len; t++) drop.add(idx[p + t]);
-      p += len;
+      for (let t = p; t < q; t++) drop.add(idx[t]);
+      p = q;
     }
     return drop;
   };
@@ -336,17 +354,19 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     for (let i = 0; i < sentences.length; i++) {
       if (!belongs[i]) continue;
       let tokens: string[] = [];
-      for (let j = i; j < Math.min(sentences.length, i + 4); j++) {
+      const ends = (t: string[]) => lineTokens.length > 0 && t.length > 0 && lineTokens.slice(-2).every((x, n, all) => x === t[t.length - all.length + n]);
+      for (let j = i, counted = 0; j < sentences.length && counted < MAX_SPAN_SENTENCES; j++) {
+        if (spans[j].length) counted++;
         tokens = tokens.concat(spans[j]);
         if (!belongs[j]) continue;
-        const raw = { from: i, to: j, score: similarity(tokens, lineTokens), matched: lcsLength(tokens, lineTokens), length: tokens.length };
+        const raw: Cand = { from: i, to: j, score: similarity(tokens, lineTokens), matched: lcsLength(tokens, lineTokens), length: tokens.length, endsLine: ends(tokens) };
         // The same span with every reading that is restarted inside it cut (a sentence flubbed and re-read), when that
         // reads the line better — a line that really repeats words keeps them.
         const drop = restarts(sentences[i].from, sentences[j].to);
         let best: Cand = raw;
         if (drop.size) {
           const kept = joinCompounds(words.slice(sentences[i].from, sentences[j].to + 1).filter((w, x) => !isFiller(w) && !drop.has(sentences[i].from + x)).flatMap((w) => matchTokens(w.w)), lineVocab);
-          const clean = { from: i, to: j, score: similarity(kept, lineTokens), matched: lcsLength(kept, lineTokens), length: kept.length, drop };
+          const clean: Cand = { from: i, to: j, score: similarity(kept, lineTokens), matched: lcsLength(kept, lineTokens), length: kept.length, endsLine: ends(kept), drop };
           if (worth(clean) > worth(raw)) best = clean;
         }
         if (best.score >= 0.6) out.push(best);
@@ -414,10 +434,12 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     const own = Math.max(1, readings.length - sameLater);
     const chosen = readings[own - 1];
     const takes = own;
-    // Safety net: the line's sentences read just before the chosen span cover more of it (a flub that couldn't be cut
-    // cleanly), so part of the line would be lost — say so rather than report it placed.
+    // Safety net: the line's sentences read just before or just after the chosen span (up to the next line's first read)
+    // cover more of it — a flub that couldn't be cut cleanly, or an ending the span doesn't reach — so part of the line
+    // would be lost: say so rather than report it placed.
     let near: string[] = [];
-    for (let m = Math.max(prevEnd + 1, chosen.from - 3); m <= chosen.to; m++) if (belongsOf[k][m]) near = near.concat(spansOf[k][m]);
+    const last = Math.min(sentences.length - 1, chosen.to + 3, nextFirst - 1);
+    for (let m = Math.max(prevEnd + 1, chosen.from - 3); m <= Math.max(chosen.to, last); m++) if (belongsOf[k][m]) near = near.concat(spansOf[k][m]);
     const partial = chosen.matched < lcsLength(near, lineTokensOf[k]) - Math.max(1, Math.floor(0.1 * lineTokensOf[k].length));
     if (!reReadLate) prevEnd = chosen.to;
 
