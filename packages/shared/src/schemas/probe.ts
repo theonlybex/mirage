@@ -17,6 +17,8 @@ export const ProbeInfoSchema = z.object({
   videoStartSec: z.number().min(0).optional(),
   /** The header promises more than the file holds (a copy or recording cut short); the durations are what is there. */
   truncated: z.boolean().optional(),
+  /** The file could not be read through in time: the durations are the header's, and truncation was not checked. */
+  scanFailed: z.boolean().optional(),
   /** How many audio streams the file has, when more than one. */
   audioStreams: z.number().int().min(2).optional(),
   /** Which audio stream (0 = first) has the clip's sound, when that is not the first (e.g. a silent system-audio track first). */

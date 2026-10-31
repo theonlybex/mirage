@@ -306,6 +306,14 @@ describe('ingestClips resilience', () => {
     expect(r.skipped).toEqual([{ file: 'old.avi', reason: 'not a video Mirage reads (.mp4, .mov, .m4v, .mkv, .webm)' }, { file: 'shot.png', reason: 'not a video Mirage reads (.mp4, .mov, .m4v, .mkv, .webm)' }]);
   });
 
+  it('warns when the whole file could not be read through, so its length is only what the header says', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const tools: MediaTools = { ...real, probe: async (f) => ({ ...(await real.probe(f)), scanFailed: true }), transcribe: async () => words(10, 3) };
+    const r = await ingestClips({ project, clipsDir: good, tools });
+    expect(r.added).toHaveLength(1);
+    expect(r.warnings).toEqual([expect.stringMatching(/^phone\.mov: Mirage couldn't read through the whole file, so its length is what its header says \(\d\.\d s\) — not checked for a cut-short copy/)]);
+  });
+
   it('skips a clip whose duration cannot be read instead of cataloguing 0 seconds', async () => {
     const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
     const tools: MediaTools = { ...real, probe: async (f) => ({ ...(await real.probe(f)), durationSec: 0 }), transcribe: async () => words(10, 3) };

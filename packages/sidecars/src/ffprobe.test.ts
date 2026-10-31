@@ -110,6 +110,18 @@ describe('probe of awkward files', () => {
     expect(info.videoDurationSec).toBeCloseTo(4, 0);
   });
 
+  it('falls back to the header when the packet scan fails, and says so', async () => {
+    const f = join(dir, 'scan.mp4');
+    await gen([...VIDEO(3), ...TONE(6), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', f]);
+    const info = await probe(f, { scanTimeoutMs: 1 });
+    expect(info.scanFailed).toBe(true);
+    // The streams' header durations.
+    expect(info.durationSec).toBeCloseTo(6, 1);
+    expect(info.videoDurationSec).toBeCloseTo(3, 1);
+    expect(info.hasVideo).toBe(true);
+    expect((await probe(f)).scanFailed).toBeUndefined();
+  });
+
   it('flags a file cut short (its header promises more than its data holds) and reports what is there', async () => {
     const f = join(dir, 'cut.mp4');
     await gen([...VIDEO(6), ...TONE(6), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', f]);

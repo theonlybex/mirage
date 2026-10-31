@@ -198,6 +198,9 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
         }
       }
       const videoSec = probe.videoDurationSec ?? probe.durationSec;
+      if (probe.scanFailed) {
+        result.warnings.push(`${name}: Mirage couldn't read through the whole file, so its length is what its header says (${s1(probe.durationSec)} s) — not checked for a cut-short copy; if renders of it fail, copy or export it again`);
+      }
       if (probe.truncated) {
         result.warnings.push(`${name} looks cut short: its header promises more than the file holds, so only its first ${s1(probe.durationSec)} s can be used — copy or export it again if more was recorded`);
       }

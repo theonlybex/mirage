@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { ProbeInfoSchema, type ProbeInfo } from '@wordedits/shared';
 import { SidecarError } from './errors.js';
 import { run } from './run.js';
@@ -37,34 +38,38 @@ const num = (s: string | undefined): number | null => {
 };
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
+/** Time allowed for the packet scan: it reads the whole file, so 15 s plus 1 s per 50 MB, at most 3 minutes. */
+export const scanTimeoutMs = (bytes: number) => Math.round(Math.min(180_000, 15_000 + bytes / 50_000));
+
 /**
  * Where each stream's packets really end (last timestamp + duration) and how many there are, read by demuxing the
  * whole file (no decoding, so fast): headers can promise more than a cut-short file holds, or nothing at all (a
- * streamed WebM). Null when the scan fails; probe then trusts the headers.
+ * streamed WebM). Lines are read as they come and only each stream's end kept, so a long file's packets are never held
+ * in memory. Null when the scan fails or runs out of time; probe then trusts the headers.
  */
-async function scanPackets(file: string): Promise<Map<number, { end: number; count: number }> | null> {
-  let stdout: string;
-  try {
-    // csv prints packet fields in ffprobe's own order: stream_index, pts_time, dts_time, duration_time.
-    ({ stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'packet=stream_index,pts_time,dts_time,duration_time', '-of', 'csv=p=0', file], { timeoutMs: 10 * 60_000 }));
-  } catch {
-    return null;
-  }
+async function scanPackets(file: string, timeoutMs: number): Promise<Map<number, { end: number; count: number }> | null> {
   const out = new Map<number, { end: number; count: number }>();
-  for (const line of stdout.split('\n')) {
+  const onStdoutLine = (line: string) => {
     const [idx, pts, dts, dur] = line.split(',');
     const i = num(idx);
     const t = num(pts) ?? num(dts);
-    if (i === null || t === null) continue;
+    if (i === null || t === null) return;
     const s = out.get(i) ?? { end: -Infinity, count: 0 };
     s.end = Math.max(s.end, t + (num(dur) ?? 0));
     s.count++;
     out.set(i, s);
+  };
+  try {
+    // csv prints packet fields in ffprobe's own order: stream_index, pts_time, dts_time, duration_time.
+    await run('ffprobe', ['-v', 'error', '-show_entries', 'packet=stream_index,pts_time,dts_time,duration_time', '-of', 'csv=p=0', file], { timeoutMs, onStdoutLine, keepStdout: false });
+  } catch {
+    return null;
   }
   return out;
 }
 
-export async function probe(file: string): Promise<ProbeInfo> {
+/** What `file` holds. `scanTimeoutMs` overrides the packet scan's time limit (tests). */
+export async function probe(file: string, opts: { scanTimeoutMs?: number } = {}): Promise<ProbeInfo> {
   const { stdout } = await run('ffprobe', [
     '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file,
   ], { timeoutMs: 60_000 });
@@ -80,7 +85,7 @@ export async function probe(file: string): Promise<ProbeInfo> {
   const v = raw.streams?.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
   const a = raw.streams?.find((s) => s.codec_type === 'audio');
   const audioStreams = raw.streams?.filter((s) => s.codec_type === 'audio').length ?? 0;
-  const packets = await scanPackets(file);
+  const packets = await scanPackets(file, opts.scanTimeoutMs ?? scanTimeoutMs((await stat(file)).size));
   // Times are measured from the container's start, the zero ffmpeg seeks from (-ss) when rendering.
   const start = num(raw.format?.start_time) ?? 0;
   const headerEnd = (s: RawStream) => {
@@ -125,6 +130,8 @@ export async function probe(file: string): Promise<ProbeInfo> {
     ...(hasVideo && videoEnd !== null ? { videoDurationSec: r3(Math.max(0, videoEnd - start)) } : {}),
     ...(videoStart > 0 ? { videoStartSec: videoStart } : {}),
     ...(truncated ? { truncated } : {}),
+    // Durations from the header only: a cut-short file goes unnoticed.
+    ...(packets ? {} : { scanFailed: true }),
     ...(audioStreams > 1 ? { audioStreams } : {}),
   };
   return ProbeInfoSchema.parse(info);

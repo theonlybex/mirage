@@ -32,6 +32,17 @@ describe('run', () => {
     });
     expect(lines.some((l) => l.startsWith('out_time_us='))).toBe(true);
   });
+
+  it('can stream stdout lines without holding them all in memory', async () => {
+    let lines = 0;
+    const { stdout, stderr } = await run('ffmpeg', ['-f', 'lavfi', '-i', 'testsrc2=duration=1', '-progress', 'pipe:1', '-nostats', '-f', 'null', '-'], {
+      onStdoutLine: () => (lines += 1),
+      keepStdout: false,
+    });
+    expect(lines).toBeGreaterThan(5);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('ffmpeg version');
+  });
 });
 
 describe('run with a binary that cannot start', () => {
