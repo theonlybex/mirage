@@ -1,5 +1,6 @@
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
+import { keptSegments } from './overlays.js';
 import { cutOf } from './slots.js';
 import { cutChanged, fitVoiceover, hasWords, holdAt, lineChanges, lineChangeWarnings, missingSlots, notEnglish } from './voiceover.js';
 import { itemsFingerprint, layoutTimeline, timelineDuration } from './timeline.js';
@@ -198,13 +199,42 @@ describe('fitVoiceover with a false start', () => {
     expect(ep.voiceover!.lines[0].src.in).toBeCloseTo(2.95);
   });
 
-  it('never plays a flubbed sentence and its re-read together', () => {
+  it('keeps the whole line and cuts a sentence flubbed and re-read in the middle of it', () => {
     const line = 'I shipped an app. Everything broke on every single request today.';
     const rec = tx([...said('I shipped an app.', 0), ...said('Everything broke on every', 1.5), { w: 'uh.', start: 2.8, end: 3, conf: 1 }, ...said('Everything broke on every single request today.', 3.5)]);
-    const slots = [{ id: 'n1', start: 0, end: 8, maxWords: 20, line }];
-    const { episode: ep } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
-    // One contiguous span can't skip the flub, so the re-read is used alone (its opening sentence is lost, not doubled).
-    expect(ep.voiceover!.lines[0].src.in).toBeCloseTo(3.45);
+    const slots = [{ id: 'n1', start: 0, end: 12, maxWords: 20, line }];
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    const l = ep.voiceover!.lines[0];
+    expect(l.src.in).toBe(0);
+    expect(report.lines[0]).toMatchObject({ status: 'placed', takes: 1 });
+    // The flub (1.5–3.0 s, with its "uh") is cut; what plays is "I shipped an app." then the re-read.
+    const kept = keptSegments(l);
+    expect(kept.some((g) => g.in < 2.7 && g.out > 1.6)).toBe(false);
+    expect(kept[0].in).toBe(0);
+    expect(kept[kept.length - 1].out).toBeCloseTo(5.65);
+  });
+
+  it('cuts every earlier reading of a sentence, keeping the last', () => {
+    const line = 'Open the settings. Then toggle dark mode on and wait.';
+    const rec = tx([...said('Open the settings.', 0), ...said('Then toggle', 1.2), ...said('Then toggle dark', 2.4), ...said('Then toggle dark mode on and wait.', 3.6)]);
+    const { episode: ep } = fitVoiceover({ episode: episode([{ id: 'n1', start: 0, end: 12, maxWords: 20, line }]), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    const kept = keptSegments(ep.voiceover!.lines[0]);
+    expect(kept[0].in).toBe(0);
+    expect(kept.some((g) => g.in < 3.3 && g.out > 1.3)).toBe(false);
+  });
+
+  it('leaves a line that really repeats words alone', () => {
+    const line = 'Wait. Wait for it.';
+    const { episode: ep } = fitVoiceover({ episode: episode([{ id: 'n1', start: 0, end: 6, maxWords: 8, line }]), catalog: catalog(20), recording: 'vo.m4a', transcript: tx(said(line, 0)) });
+    expect(ep.voiceover!.lines[0].cuts).toEqual([]);
+  });
+
+  it('says so when only part of the line was found, instead of reporting it placed cleanly', () => {
+    const line = 'I shipped an app. Everything broke on every single request today.';
+    // The flub runs on into words that are not a re-read, so it can't be cut: only the re-read is used.
+    const rec = tx([...said('I shipped an app.', 0), ...said('Everything broke on every, no wait, that is wrong, hold on.', 1.5), ...said('Everything broke on every single request today.', 6)]);
+    const { report } = fitVoiceover({ episode: episode([{ id: 'n1', start: 0, end: 12, maxWords: 20, line }]), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(report.lines[0]).toMatchObject({ slot: 'n1', status: 'partial' });
   });
 });
 

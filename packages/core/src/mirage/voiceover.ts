@@ -1,5 +1,5 @@
 import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
-import { isFiller, joinCompounds, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
+import { isFiller, joinCompounds, matchTokens, normalizeWord, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
 import { MirageError } from './errors.js';
 import { keptSegments } from './overlays.js';
 import { cutOf, slotsStale, slotsStaleError } from './slots.js';
@@ -90,10 +90,14 @@ function checkHold(item: Episode['items'][number]): typeof item {
 export interface FitLine {
   slot: string;
   /** kept: re-recording was asked for (--add --slots) but the new recording lacks it, so the earlier take stays. */
-  status: 'placed' | 'missing' | 'kept' | 'too long';
+  /** partial: placed, but part of the written line was not found in the take (it should be re-read). */
+  status: 'placed' | 'partial' | 'missing' | 'kept' | 'too long';
   takes: number;
   overrunSec: number;
 }
+
+/** The line got a new take from this recording (whole or partial). */
+export const placedStatus = (s: FitLine['status']): boolean => s === 'placed' || s === 'partial';
 
 export interface FitReport {
   lines: FitLine[];
@@ -229,8 +233,14 @@ function mergeCuts(cuts: [number, number][]): [number, number][] {
   return out;
 }
 
-/** A run of sentences [from, to] that reads a line: `matched` of the line's words, in order, among its `length` words. */
-type Cand = { from: number; to: number; score: number; matched: number; length: number };
+/**
+ * A run of sentences [from, to] that reads a line: `matched` of the line's words, in order, among its `length` words;
+ * `drop` holds the indices of words cut from it (earlier readings of what is re-read inside it).
+ */
+type Cand = { from: number; to: number; score: number; matched: number; length: number; drop?: Set<number> };
+
+/** Coverage minus extra speech. */
+const worth = (c: Cand) => 2 * c.matched - c.length;
 
 /**
  * The separate readings of a line among its candidate spans, in recording order. Overlapping spans are one reading: the
@@ -243,7 +253,6 @@ function takesOf(pool: Cand[], lineLength: number): Cand[] {
   const best = Math.max(...pool.map((c) => c.score));
   // Coverage minus extra speech: a span reaching back over a false start gains a word at most (a transcription
   // difference between the reads) but carries the whole false start.
-  const worth = (c: Cand) => 2 * c.matched - c.length;
   const ranked = pool.filter((c) => c.score >= best - 0.15).sort((a, b) => worth(b) - worth(a) || b.score - a.score || b.from - a.from);
   const picked: Cand[] = [];
   for (const c of ranked) if (!picked.some((p) => c.from <= p.to && p.from <= c.to)) picked.push(c);
@@ -260,6 +269,32 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const words = o.transcript.words;
   const sentences = splitSentences(words);
   const sTokens = sentences.map((s) => sentenceTokens(s, words));
+  /**
+   * Word indices in [from, to] read and then restarted: a run of words followed straight away (fillers aside) by the same
+   * words again, its last word allowed to differ (a cut-off word) when the run has three or more. Earlier readings go,
+   * so the last reading of each sentence or phrase wins.
+   */
+  const restarts = (from: number, to: number): Set<number> => {
+    const idx: number[] = [];
+    for (let x = from; x <= to; x++) if (!isFiller(words[x]) && normalizeWord(words[x].w)) idx.push(x);
+    const a = idx.map((x) => normalizeWord(words[x].w));
+    const drop = new Set<number>();
+    for (let p = 0; p < a.length; ) {
+      let len = 1;
+      for (; len <= (a.length - p) / 2; len++) {
+        let same = true;
+        for (let t = 0; t < len && same; t++) same = a[p + t] === a[p + len + t] || (t === len - 1 && len >= 3);
+        if (same) break;
+      }
+      if (len > (a.length - p) / 2) {
+        p++;
+        continue;
+      }
+      for (let t = 0; t < len; t++) drop.add(idx[p + t]);
+      p += len;
+    }
+    return drop;
+  };
   const prev = o.only ? o.episode.voiceover : null;
   if (prev && cutChanged(o.episode)) throw cutChangedError();
   // Slots of another cut would put the lines over the wrong picture (or past the end).
@@ -285,6 +320,8 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const fps = start.output.fps;
 
   const spokenVocab = new Set(sTokens.flat());
+  const belongsOf: boolean[][] = [];
+  const spansOf: string[][][] = [];
   const lineTokensOf = written.map((slot) => joinCompounds(textTokens(slot.line), spokenVocab));
   const cands: Cand[][] = written.map((slot, k) => {
     const lineTokens = lineTokensOf[k];
@@ -293,6 +330,8 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     // A span must start and end on sentences that belong to the line (at least half of the sentence's words appear in
     // order in the line), so retakes of a neighbour or "Um." never edge a span, even when neighbours share a word like "the".
     const belongs = spans.map((t) => t.length > 0 && lcsLength(t, lineTokens) / t.length >= 0.5);
+    belongsOf.push(belongs);
+    spansOf.push(spans);
     const out: Cand[] = [];
     for (let i = 0; i < sentences.length; i++) {
       if (!belongs[i]) continue;
@@ -300,8 +339,17 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       for (let j = i; j < Math.min(sentences.length, i + 4); j++) {
         tokens = tokens.concat(spans[j]);
         if (!belongs[j]) continue;
-        const score = similarity(tokens, lineTokens);
-        if (score >= 0.6) out.push({ from: i, to: j, score, matched: lcsLength(tokens, lineTokens), length: tokens.length });
+        const raw = { from: i, to: j, score: similarity(tokens, lineTokens), matched: lcsLength(tokens, lineTokens), length: tokens.length };
+        // The same span with every reading that is restarted inside it cut (a sentence flubbed and re-read), when that
+        // reads the line better — a line that really repeats words keeps them.
+        const drop = restarts(sentences[i].from, sentences[j].to);
+        let best: Cand = raw;
+        if (drop.size) {
+          const kept = joinCompounds(words.slice(sentences[i].from, sentences[j].to + 1).filter((w, x) => !isFiller(w) && !drop.has(sentences[i].from + x)).flatMap((w) => matchTokens(w.w)), lineVocab);
+          const clean = { from: i, to: j, score: similarity(kept, lineTokens), matched: lcsLength(kept, lineTokens), length: kept.length, drop };
+          if (worth(clean) > worth(raw)) best = clean;
+        }
+        if (best.score >= 0.6) out.push(best);
       }
     }
     return out;
@@ -366,14 +414,33 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     const own = Math.max(1, readings.length - sameLater);
     const chosen = readings[own - 1];
     const takes = own;
+    // Safety net: the line's sentences read just before the chosen span cover more of it (a flub that couldn't be cut
+    // cleanly), so part of the line would be lost — say so rather than report it placed.
+    let near: string[] = [];
+    for (let m = Math.max(prevEnd + 1, chosen.from - 3); m <= chosen.to; m++) if (belongsOf[k][m]) near = near.concat(spansOf[k][m]);
+    const partial = chosen.matched < lcsLength(near, lineTokensOf[k]) - Math.max(1, Math.floor(0.1 * lineTokensOf[k].length));
     if (!reReadLate) prevEnd = chosen.to;
 
-    const span = words.slice(sentences[chosen.from].from, sentences[chosen.to].to + 1);
-    const spoken = span.filter((w) => !isFiller(w));
+    const first = sentences[chosen.from].from;
+    const span = words.slice(first, sentences[chosen.to].to + 1);
+    const dropped = (x: number) => chosen.drop?.has(first + x) ?? false;
+    const spoken = span.filter((w, x) => !isFiller(w) && !dropped(x));
     const srcIn = Math.max(0, spoken[0].start - 0.05);
     const srcOut = spoken[spoken.length - 1].end + 0.1;
     const cuts: [number, number][] = [];
     for (const w of span) if (isFiller(w) && w.start > srcIn && w.end < srcOut) cuts.push([r3(w.start - 0.02), r3(w.end + 0.02)]);
+    // Each restarted reading goes, with the pause around it, keeping 0.15 s of air on either side.
+    for (let x = 0; x < span.length; x++) {
+      if (!dropped(x)) continue;
+      let y = x;
+      while (y + 1 < span.length && (dropped(y + 1) || isFiller(span[y + 1]))) y++;
+      const before = span.slice(0, x).filter((w, z) => !isFiller(w) && !dropped(z)).pop();
+      const after = span.slice(y + 1).find((w, z) => !isFiller(w) && !dropped(y + 1 + z));
+      const a = before ? Math.max(before.end, Math.min(span[x].start, before.end + 0.15)) : span[x].start;
+      const b = after ? Math.min(after.start, Math.max(span[y].end, after.start - 0.15)) : span[y].end;
+      cuts.push([r3(a), r3(b)]);
+      x = y;
+    }
     for (let i = 1; i < spoken.length; i++) {
       const a = spoken[i - 1].end;
       const b = spoken[i].start;
@@ -413,10 +480,10 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       overrun = 0;
     }
     ep = { ...ep, voiceover: { ...ep.voiceover!, lines: [...ep.voiceover!.lines, { ...draft, at }] } };
-    report.lines.push({ slot: slot.id, status: 'placed', takes, overrunSec: r3(overrun) });
+    report.lines.push({ slot: slot.id, status: partial ? 'partial' : 'placed', takes, overrunSec: r3(overrun) });
   }
 
-  if (!report.lines.some((l) => l.status === 'placed')) {
+  if (!report.lines.some((l) => placedStatus(l.status))) {
     const long = report.lines.find((l) => l.status === 'too long');
     if (long) throw new MirageError('BAD_ITEM', `Line ${long.slot} runs ${long.overrunSec}s past its slot (more than ${MAX_HOLD} s)`, HOLD_HINT);
     throw new MirageError('NOTHING_MATCHED', 'None of the script lines were found in the recording', 'Check that you read the current lines; re-run slots and guide if the cut changed.');

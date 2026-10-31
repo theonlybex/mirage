@@ -156,8 +156,9 @@ async function main() {
         const status =
           l.status === 'kept' ? 'kept the earlier take (not found in this recording)'
           : l.status === 'too long' ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold — shorten it or give it a longer slot, then vo --add`
+          : l.status === 'partial' ? `⚠ only part of the line was found — re-read the whole line with vo --add --slots ${l.slot}`
           : l.status;
-        console.log(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec && l.status === 'placed' ? `  held picture +${l.overrunSec}s` : ''}`);
+        console.log(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec && (l.status === 'placed' || l.status === 'partial') ? `  held picture +${l.overrunSec}s` : ''}`);
       }
       const missing = report.lines.filter((l) => l.status === 'missing').map((l) => l.slot);
       console.log(`✓ voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ''}`);

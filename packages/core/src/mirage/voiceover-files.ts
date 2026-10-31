@@ -9,7 +9,7 @@ import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';
 import { slotsStale, slotsStaleError } from './slots.js';
-import { cutChanged, cutChangedError, englishOnlyError, fitVoiceover, fittedRecordingSha, hasWords, missingSlots, notEnglish, type FitReport } from './voiceover.js';
+import { cutChanged, cutChangedError, englishOnlyError, fitVoiceover, fittedRecordingSha, hasWords, missingSlots, notEnglish, placedStatus, type FitReport } from './voiceover.js';
 import { refineTranscript } from './word-timing.js';
 
 /** A recording's transcript file in the episode folder, named by the recording's content so a re-fit can reuse it. */
@@ -96,7 +96,7 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
 
   const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only });
   const vo = fit.episode.voiceover!;
-  const placed = new Set(fit.report.lines.filter((l) => l.status === 'placed').map((l) => l.slot));
+  const placed = new Set(fit.report.lines.filter((l) => placedStatus(l.status)).map((l) => l.slot));
   if (only) await checkKeptRecordings(project, fit.episode, (l) => !placed.has(l.slot), recording, sha);
   const shas = { ...(only ? ep.voiceover?.recordingSha256 : {}), [recording]: sha };
   const episode: Episode = { ...fit.episode, voiceover: { ...vo, transcripts: { ...vo.transcripts, [recording]: file }, recordingSha256: shas } };
