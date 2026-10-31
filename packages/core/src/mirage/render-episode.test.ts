@@ -61,9 +61,9 @@ describe('itemChunkArgs', () => {
     expect(args.slice(7, 14)).toEqual(['-threads', '4', '-noaccurate_seek', '-ss', '0', '-i', join(CLIPS, 'c002.mp4')]);
   });
   it('speeds up, punches in, letterboxes and cuts to exact frames', () => {
-    expect(graph).toContain('[0:v]setpts=PTS/1,fps=30:start_time=0:round=up,trim=end_frame=61,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
+    expect(graph).toContain('[0:v]setpts=(PTS-0.008333/TB)/1,fps=30:start_time=0:round=up,trim=end_frame=61,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
     // Frames are dropped to the output rate before any scaling, so a 20x item scales 1 frame in 20.
-    expect(graph).toContain('[1:v]setpts=PTS/20,fps=30:start_time=0:round=up,trim=end_frame=91,scale=960:540:');
+    expect(graph).toContain('[1:v]setpts=(PTS-0.008333/TB)/20,fps=30:start_time=0:round=up,trim=end_frame=91,scale=960:540:');
   });
   it('keeps live audio only at real-time speed; sped-up items get silence', () => {
     expect(graph).toContain('[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
