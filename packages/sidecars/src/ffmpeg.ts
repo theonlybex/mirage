@@ -29,11 +29,14 @@ export async function runFfmpeg(args: string[], opts: FfmpegOptions = {}): Promi
   });
 }
 
-/** 16 kHz mono 16-bit WAV, the input the transcriber expects. */
+/**
+ * 16 kHz mono 16-bit WAV, the input the transcriber expects. WAV time is clip time: audio that starts after the clip
+ * does (or has gaps) is padded with silence, so word times line up with the picture.
+ */
 export async function extractWav(src: string, out: string, opts: { timeoutMs?: number } = {}): Promise<void> {
   await run('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
-    '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', out,
+    '-vn', '-af', 'aresample=async=1:first_pts=0', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', out,
   ], { timeoutMs: opts.timeoutMs ?? 10 * 60_000 });
 }
 

@@ -2,7 +2,8 @@ import { mkdtemp, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { MediaTools } from '../media-tools.js';
+import { run } from '@wordedits/sidecars';
+import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { decodeMono, detectTempo } from './tempo.js';
 
 const SR = 11025;
@@ -103,5 +104,17 @@ describe('decodeMono', () => {
     } as unknown as MediaTools;
     await expect(decodeMono('/x.wav', tmpOut, tools, { sampleRate: 11025 })).rejects.toThrow('ffmpeg exploded');
     await expect(access(tmpOut)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('with clipTime, keeps sample time equal to file time when the audio starts late (as its transcript does)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-late-'));
+    const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=30:duration=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(dir, 'v.mp4')]);
+    await gen(['-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=2', '-c:a', 'aac', join(dir, 'tone.m4a')]);
+    await gen(['-i', join(dir, 'v.mp4'), '-itsoffset', '1', '-i', join(dir, 'tone.m4a'), '-map', '0:v', '-map', '1:a', '-c', 'copy', join(dir, 'late.mp4')]);
+    const x = await decodeMono(join(dir, 'late.mp4'), join(dir, 'x.f32'), await realMediaTools(), { sampleRate: 1000, clipTime: true });
+    const peak = (a: number, b: number) => x.slice(a, b).reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+    expect(peak(0, 900)).toBeLessThan(1e-4);
+    expect(peak(1100, 2900)).toBeGreaterThan(0.1);
   });
 });

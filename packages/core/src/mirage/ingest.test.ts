@@ -277,3 +277,39 @@ describe('ingestClips resilience', () => {
     await expect(ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: join(dir, 'bad.mp4'), tools: real })).rejects.toMatchObject({ code: 'BAD_INPUT', message: `${join(dir, 'bad.mp4')} is a file, not a folder` });
   });
 });
+
+describe('ingestClips against the source clock (real ffmpeg)', () => {
+  // Each source frame is a flat grey encoding its frame number at 10 fps: Y = 16 + 3N.
+  const NUMBERED = (d: number) => `color=black:s=64x36:r=10:d=${d},format=gray,geq=lum='16+3*N',format=yuv420p`;
+  const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+  const shown = async (jpg: string) => {
+    const raw = `${jpg}.gray`;
+    await gen(['-i', jpg, '-vf', 'scale=1:1:flags=area,format=gray', '-f', 'rawvideo', raw]);
+    // JPEG frames are full range: undo the 16–235 expansion.
+    return Math.round(((await readFile(raw))[0] * 219) / 255 / 3);
+  };
+  let real: MediaTools;
+  beforeAll(async () => {
+    real = { ...(await realMediaTools()), transcribe: async () => words(0, 1) };
+  });
+
+  it('labels each catalog frame with the source time it shows, holding frames across a VFR gap', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-vfr-'));
+    // Frames 0–19 (0–1.9 s), nothing while the screen was still, then 51–59 (5.1–5.9 s).
+    await gen(['-f', 'lavfi', '-i', `${NUMBERED(6)},select='not(between(t\\,2\\,5))'`, '-c:v', 'libx264', '-qp', '0', '-fps_mode', 'vfr', join(dir, 'gap.mp4')]);
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const r = await ingestClips({ project, clipsDir: dir, tools: real });
+    const frames = r.added[0].frames;
+    expect(frames.map((f) => f.t)).toEqual([0, 2, 4]);
+    expect(await Promise.all(frames.map((f) => shown(join(project, f.file))))).toEqual([0, 19, 19]);
+  });
+
+  it('gives a clip shorter than the frame interval one frame, from its middle', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-short-'));
+    await gen(['-f', 'lavfi', '-i', NUMBERED(0.8), '-c:v', 'libx264', '-qp', '0', join(dir, 'blip.mp4')]);
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const r = await ingestClips({ project, clipsDir: dir, tools: real });
+    expect(r.added[0].frames.map((f) => f.t)).toEqual([0.4]);
+    expect(await shown(join(project, r.added[0].frames[0].file))).toBe(4);
+  });
+});

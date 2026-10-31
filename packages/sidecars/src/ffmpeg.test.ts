@@ -2,7 +2,8 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { makeProxy, measureLoudness, pickEncoder, runFfmpeg } from './ffmpeg.js';
+import { extractWav, makeProxy, measureLoudness, pickEncoder, runFfmpeg } from './ffmpeg.js';
+import { run } from './run.js';
 import { probe } from './ffprobe.js';
 
 describe('pickEncoder', () => {
@@ -52,5 +53,24 @@ describe('measureLoudness', () => {
     expect(r.integratedLufs).toBeLessThan(0);
     expect(r.integratedLufs).toBeGreaterThan(-70);
     expect(r.truePeakDb).toBeLessThan(3);
+  });
+});
+
+describe('extractWav', () => {
+  it('keeps WAV time equal to clip time when the audio stream starts after the video', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-wav-'));
+    const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=30:duration=5', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(dir, 'v.mp4')]);
+    await gen(['-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=3', '-c:a', 'aac', join(dir, 'tone.m4a')]);
+    await gen(['-i', join(dir, 'v.mp4'), '-itsoffset', '1.5', '-i', join(dir, 'tone.m4a'), '-map', '0:v', '-map', '1:a', '-c', 'copy', join(dir, 'late.mp4')]);
+    await extractWav(join(dir, 'late.mp4'), join(dir, 'late.wav'));
+    const rms = async (ss: number, t: number) => {
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-ss', String(ss), '-t', String(t), '-i', join(dir, 'late.wav'), '-af', 'astats=metadata=0', '-f', 'null', '-']);
+      const m = /Overall[\s\S]*?RMS level dB:\s+(-?[\d.]+|-inf)/.exec(stderr);
+      return m && m[1] !== '-inf' ? Number(m[1]) : -Infinity;
+    };
+    expect(await rms(0, 1.4)).toBeLessThan(-80);
+    expect(await rms(1.6, 2.5)).toBeGreaterThan(-30);
+    expect((await probe(join(dir, 'late.wav'))).durationSec).toBeCloseTo(4.5, 1);
   });
 });

@@ -10,6 +10,7 @@ import { acquireLock, clearLeftovers } from './lock.js';
 
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm']);
 const HDR_TRANSFERS = new Set(['arib-std-b67', 'smpte2084']);
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
 export function guessKind(probe: ProbeInfo, transcript: Transcript | null): ClipKind {
   const words = transcript?.words.length ?? 0;
@@ -159,8 +160,12 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
       await rm(framesDir, { recursive: true, force: true });
       await mkdir(framesDir, { recursive: true });
       const interval = frameInterval(probe.durationSec);
+      // A clip shorter than the interval gets one frame, from its middle.
+      const first = probe.durationSec < interval ? r3(probe.durationSec / 2) : 0;
+      // Frame i shows the latest source frame at or before first + i × interval (start_time and round=up; plain fps
+      // picks the nearest frame, up to half an interval late), on the clock render seeks by (see itemChunkArgs).
       // Run inside the frames folder with a bare pattern: a % in the project path would be read as part of it.
-      await o.tools.runFfmpeg(['-i', path, '-vf', `fps=1/${interval},scale=640:-2`, '-q:v', '5', 'f%04d.jpg'], {
+      await o.tools.runFfmpeg(['-noaccurate_seek', '-ss', String(first), '-i', path, '-vf', `fps=1/${interval}:start_time=0:round=up,scale=640:-2`, ...(first ? ['-frames:v', '1'] : []), '-q:v', '5', 'f%04d.jpg'], {
         cwd: framesDir,
         expectedDurationSec: probe.durationSec,
         timeoutMs: Math.max(120_000, probe.durationSec * 5000),
@@ -178,7 +183,7 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
           // Someone else catalogued a clip meanwhile: take the next free id (its frames folder moves below).
           id = nextClipId(cat);
         }
-        const frames = frameFiles.map((f, i) => ({ t: i * interval, file: `frames/${id}/${f}` }));
+        const frames = frameFiles.map((f, i) => ({ t: first + i * interval, file: `frames/${id}/${f}` }));
         clip = { id, path, sha256, probe, kind: guessKind(probe, transcript), transcript, frames, notes: '', moments: [] };
         cat.clips.push(clip);
       });

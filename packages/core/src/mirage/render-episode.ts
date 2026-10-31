@@ -60,19 +60,24 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     // Real-time items decode on one thread each (a chunk opens up to 30 inputs); sped-up items read far more source
     // than they output, so they get every thread.
     if (item.speed <= 1) inputs.push('-threads', '1');
-    // One extra output frame of source so fps never comes up short.
-    inputs.push('-ss', ffNum(item.src.in), '-t', ffNum(((l.srcFrames + 1) / o.fps) * item.speed), '-i', src.path);
+    // Seek to the keyframe before src.in and keep the source clock (time 0 = src.in) instead of starting at the first
+    // frame after the seek point: VFR screen recordings write no frames while the screen is still, and a video stream
+    // can start after the container does.
+    inputs.push('-noaccurate_seek', '-ss', ffNum(item.src.in), '-i', src.path);
     const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2,` : '';
-    // fps right after setpts drops frames to the output rate before any crop or scale touches them.
+    // fps (right after setpts, so it drops frames before any crop or scale touches them) shows at each output frame
+    // the latest source frame at or before its time: it holds a frame across a gap, and the first frame until a late
+    // video stream starts. The first trim keeps one frame past src.out for a hold and ends decoding there.
     chains.push(
-      `[${k}:v]setpts=(PTS-STARTPTS)/${ffNum(item.speed)},fps=${ffNum(o.fps)},${zoom}` +
+      `[${k}:v]setpts=PTS/${ffNum(item.speed)},fps=${ffNum(o.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}` +
         `scale=${o.width}:${o.height}:force_original_aspect_ratio=decrease,pad=${o.width}:${o.height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,` +
         `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`,
     );
     const dur = ffNum(l.frames / o.fps);
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
-      // Cut at the end of the source first so the extra input frame never leaks into a hold.
-      chains.push(`[${k}:a]asetpts=PTS-STARTPTS,aresample=48000,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
+      // aresample on the source clock drops what the seek read before src.in and pads silence before audio that
+      // starts late (or across a gap), so sound stays with its picture. Cut at src.out before padding under a hold.
+      chains.push(`[${k}:a]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
     } else {
       chains.push(`anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`);
     }
@@ -335,7 +340,7 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
     let voiceRaw: string | undefined;
     if (final && ep.voiceover) {
       const pcm = new Map<string, Float32Array>();
-      for (const [i, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve(project, rec), join(work, `rec-${i}.f32`), o.tools, { sampleRate: 48000 }));
+      for (const [i, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve(project, rec), join(work, `rec-${i}.f32`), o.tools, { sampleRate: 48000, clipTime: true }));
       const track = buildVoiceTrack({ recording: pcm, defaultRecording: ep.voiceover.recording, sampleRate: 48000, lines: ep.voiceover.lines, durationSec: D });
       await writeFile(join(work, 'vo.f32'), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
       voiceRaw = 'vo.f32';

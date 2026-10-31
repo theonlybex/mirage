@@ -47,17 +47,17 @@ describe('itemChunkArgs', () => {
   const args = itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30 }, sourcesFor(e, cat), '/w/chunk-000.mov');
   const graph = args[args.indexOf('-filter_complex') + 1];
   it('seeks each item and reads only the source it needs at its speed', () => {
-    expect(args.slice(0, 8)).toEqual(['-threads', '1', '-ss', '1', '-t', '2.033333', '-i', join(CLIPS, 'c001.mp4')]);
+    expect(args.slice(0, 7)).toEqual(['-threads', '1', '-noaccurate_seek', '-ss', '1', '-i', join(CLIPS, 'c001.mp4')]);
     // Sped-up items decode with all threads: they read far more source than they output.
-    expect(args.slice(8, 14)).toEqual(['-ss', '0', '-t', '60.666667', '-i', join(CLIPS, 'c002.mp4')]);
+    expect(args.slice(7, 12)).toEqual(['-noaccurate_seek', '-ss', '0', '-i', join(CLIPS, 'c002.mp4')]);
   });
   it('speeds up, punches in, letterboxes and cuts to exact frames', () => {
-    expect(graph).toContain('[0:v]setpts=(PTS-STARTPTS)/1,fps=30,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
+    expect(graph).toContain('[0:v]setpts=PTS/1,fps=30:start_time=0:round=up,trim=end_frame=61,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]');
     // Frames are dropped to the output rate before any scaling, so a 20x item scales 1 frame in 20.
-    expect(graph).toContain('[1:v]setpts=(PTS-STARTPTS)/20,fps=30,scale=960:540:');
+    expect(graph).toContain('[1:v]setpts=PTS/20,fps=30:start_time=0:round=up,trim=end_frame=91,scale=960:540:');
   });
   it('keeps live audio only at real-time speed; sped-up items get silence', () => {
-    expect(graph).toContain('[0:a]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
+    expect(graph).toContain('[0:a]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
     expect(graph).toContain('anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=3,aformat=sample_fmts=fltp:channel_layouts=stereo[a1]');
     expect(graph).toContain('[v0][a0][v1][a1]concat=n=2:v=1:a=1[vcat][acat]');
     expect(args.at(-1)).toBe('/w/chunk-000.mov');
