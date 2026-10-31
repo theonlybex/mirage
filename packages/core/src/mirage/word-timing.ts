@@ -6,6 +6,9 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const FRAME_SEC = 0.01;
 /** A quiet stretch at least this long ends a word's sound. */
 const QUIET_FRAMES = 10;
+/** Sound shorter than this at a word's credited start, followed by a pause at least TAIL_PAUSE_FRAMES long, is the previous word's tail. */
+const TAIL_FRAMES = 20;
+const TAIL_PAUSE_FRAMES = 15;
 /** A word's end moves later by at most this much. */
 const MAX_EXTEND_SEC = 1;
 
@@ -24,7 +27,8 @@ const percentile = (sorted: number[], q: number) => sorted[Math.floor(q * (sorte
 
 /**
  * Word timings checked against the audio they came from. The transcriber credits the silence before a word to the word
- * and can end a word before its sound does, so: a word's start moves forward to its first frame of sound (if it has one),
+ * and can end a word before its sound does, so: a word's start moves forward to its first frame of sound (if it has one;
+ * soft sound clearly above the noise floor counts),
  * and its end moves later to where its sound stops — before the next word, within a second, and only when a quiet
  * stretch shows where it stops. Audio without clear quiet parts (steady noise, music) leaves timings as they are.
  */
@@ -37,13 +41,36 @@ export function refineWordTimes(words: Word[], samples: Float32Array, sampleRate
   if (loud - quiet < 20) return words;
   const threshold = Math.min(loud - 10, Math.max(quiet + 15, loud - 40));
   const sounds = (f: number) => db[f] >= threshold;
+  // Soft sounds (an unstressed word, a quiet consonant) can sit under the threshold in noisy audio: a start found on
+  // the loud part walks back over them while they stay clearly above the noise floor.
+  const audible = (f: number) => db[f] >= quiet + 6;
   const frame = (t: number) => Math.max(0, Math.min(db.length, Math.round(t / FRAME_SEC)));
 
+  /** The first frame of sound in [from, to), walked back over soft sound to no earlier than `floor`; -1 if none. */
+  const onset = (from: number, to: number, floor: number) => {
+    for (let f = from; f < to; f++) {
+      if (!sounds(f)) continue;
+      while (f > floor && audible(f - 1)) f--;
+      return f;
+    }
+    return -1;
+  };
   const starts = words.map((w) => {
     const a = frame(w.start);
     const b = frame(w.end);
-    for (let f = a; f < b; f++) if (sounds(f)) return f > a ? r3(f * FRAME_SEC) : w.start;
-    return w.start;
+    let f = onset(a, b, a);
+    // A short burst then a pause, with the word's sound after it: the burst is the previous word's tail.
+    while (f >= 0) {
+      let g = f;
+      let gap = 0;
+      while (g < b && gap < TAIL_PAUSE_FRAMES) gap = audible(g++) ? 0 : gap + 1;
+      const burst = g - gap - f;
+      if (gap < TAIL_PAUSE_FRAMES || burst >= TAIL_FRAMES) break;
+      const later = onset(g, b, g - gap);
+      if (later < 0) break;
+      f = later;
+    }
+    return f > a ? r3(f * FRAME_SEC) : w.start;
   });
   return words.map((w, i) => {
     const start = starts[i];

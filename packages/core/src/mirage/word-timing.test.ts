@@ -56,6 +56,30 @@ describe('refineWordTimes', () => {
   });
 });
 
+describe('refineWordTimes in noisy audio', () => {
+  it('keeps a soft opening that is quieter than the speech but clearly above the noise floor', () => {
+    const pcm = audio(6, [[3, 4]], 0.01); // noise floor about -45 dB; a loud word at 3–4 s sets the speech level
+    // "and": 0.3 s of soft sound (about -33 dB) before its loud part.
+    for (let i = Math.round(1.0 * RATE); i < Math.round(1.3 * RATE); i++) pcm[i] += 0.03 * Math.sin((2 * Math.PI * 300 * i) / RATE);
+    for (let i = Math.round(1.3 * RATE); i < Math.round(1.6 * RATE); i++) pcm[i] += 0.3 * Math.sin((2 * Math.PI * 300 * i) / RATE);
+    const out = refineWordTimes([w('and', 0.5, 1.6), w('then', 3, 4)], pcm, RATE);
+    expect(out[0].start).toBeGreaterThan(0.95);
+    expect(out[0].start).toBeLessThan(1.05);
+  });
+});
+
+describe('refineWordTimes and the previous word\'s tail', () => {
+  it('starts a word after a short tail of sound and a pause at its credited start, in clean and noisy audio', () => {
+    for (const floor of [1e-4, 0.01]) {
+      // "JS" ends with a soft hiss at 1.0–1.1 s; "and" really starts at 1.3 s after a pause.
+      const pcm = audio(6, [[0.2, 0.9], [1.3, 1.6], [3, 4]], floor);
+      for (let i = Math.round(1.0 * RATE); i < Math.round(1.1 * RATE); i++) pcm[i] += 0.04 * Math.sin((2 * Math.PI * 3000 * i) / RATE);
+      const out = refineWordTimes([w('JS,', 0.2, 1.0), w('and', 1.0, 1.6), w('then', 3, 4)], pcm, RATE);
+      expect(out[1].start).toBeCloseTo(1.3, 1);
+    }
+  });
+});
+
 describe('readWavMono / refineTranscript', () => {
   it('reads a 16-bit mono WAV and refines a transcript from it; anything else is left as is', async () => {
     const pcm = audio(3, [[1.0, 1.5]]);
