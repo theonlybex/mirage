@@ -136,6 +136,27 @@ describe('fitVoiceover fixes', () => {
   });
 });
 
+describe('fitVoiceover sentence containment', () => {
+  const slotsOf = (...s: [string, number, number, string][]) => s.map(([id, start, end, line]) => ({ id, start, end, maxWords: 8, line }));
+
+  it('does not let a shared word like "the" attach a retake to the next line', () => {
+    const rec = tx([...said('Open the settings.', 0), ...said('Open the settings.', 2), ...said('Then toggle the dark mode on.', 4)]);
+    const slots = slotsOf(['n1', 0, 3, 'Open the settings.'], ['n2', 6, 9, 'Then toggle the dark mode on.']);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(ep.voiceover!.lines.find((l) => l.slot === 'n1')!.src.in).toBeCloseTo(1.95);
+    expect(report.lines[0]).toMatchObject({ slot: 'n1', status: 'placed', takes: 2 });
+    expect(report.lines[1]).toMatchObject({ slot: 'n2', status: 'placed', takes: 1 });
+  });
+
+  it('places a line whose first sentence is a short spoken "So."', () => {
+    const rec = tx([...said('So.', 0), ...said('Open the settings now.', 1)]);
+    const slots = slotsOf(['n1', 0, 5, 'So. Open the settings now.']);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(report.lines[0]).toMatchObject({ slot: 'n1', status: 'placed', takes: 1 });
+    expect(ep.voiceover!.lines[0].src.in).toBeCloseTo(0, 1);
+  });
+});
+
 describe('holdAt in the frozen tail', () => {
   const held = (extra: object) => EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, overlays: [{ kind: 'label', text: 'x', start: 6.5, end: 7 }], ...extra });
   it('adds hold only when the point is inside an existing hold', () => {

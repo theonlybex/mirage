@@ -62,6 +62,19 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
   return { ...shiftAfter(ep, l.start + splitFrames / fps, delta), items };
 }
 
+function lcsLength(a: string[], b: string[]): number {
+  const dp: number[] = new Array(b.length + 1).fill(0);
+  for (const x of a) {
+    let prev = 0;
+    for (let j = 1; j < b.length + 1; j++) {
+      const tmp = dp[j];
+      dp[j] = x === b[j - 1] ? prev + 1 : Math.max(dp[j], dp[j - 1]);
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
 function mergeCuts(cuts: [number, number][]): [number, number][] {
   const sorted = [...cuts].sort((a, b) => a[0] - b[0]);
   const out: [number, number][] = [];
@@ -83,9 +96,9 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   type Cand = { from: number; to: number; score: number };
   const cands: Cand[][] = written.map((slot) => {
     const lineTokens = textTokens(slot.line);
-    const lineSet = new Set(lineTokens);
-    // A span must start and end on sentences that belong to the line, so retakes of a neighbour or "Um." never edge a span.
-    const belongs = sTokens.map((t) => t.some((x) => lineSet.has(x)));
+    // A span must start and end on sentences that belong to the line (at least half of the sentence's words appear in
+    // order in the line), so retakes of a neighbour or "Um." never edge a span, even when neighbours share a word like "the".
+    const belongs = sTokens.map((t) => t.length > 0 && lcsLength(t, lineTokens) / t.length >= 0.5);
     const out: Cand[] = [];
     for (let i = 0; i < sentences.length; i++) {
       if (!belongs[i]) continue;
