@@ -219,7 +219,8 @@ export async function saveEpisode(project: string, ep: Episode, n: number = ep.n
   if (ep.number !== n) throw wrongNumber(n, ep.number);
   const dir = episodeDir(project, n);
   await mkdir(dir, { recursive: true });
-  await writeJsonFile(join(dir, 'episode.json'), EpisodeSchema, ep, `episodes/${n}/episode.json`);
+  // Unchanged content is not rewritten, so checking an unchanged episode writes nothing.
+  await writeJsonFile(join(dir, 'episode.json'), EpisodeSchema, ep, `episodes/${n}/episode.json`, { onlyIfChanged: true });
 }
 
 export type EpisodeMode = 'rough' | 'guide' | 'final';

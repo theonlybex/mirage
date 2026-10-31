@@ -50,6 +50,12 @@ The schema is `packages/shared/src/schemas/episode.ts`. A minimal file:
 - `number` must be the episode's folder number: when you start an episode from a copy of another's `episode.json`, set `number` to the new folder's number and remove `voiceover` (its transcripts stay in the old folder) — every command refuses a mismatch.
 
 Work in this order: write the items → `pnpm mirage check <project> <n>` (it prints each item's output start–end) → place overlays and music cues on those output times → `pnpm mirage cut <project> <n>`. `check` and `cut` rewrite `episode.json` (beat snapping shifts times), so re-read it before editing it again.
+`check` stops on a misspelled key (`unknown key "…"`: rename it) and on a cue whose track is not in `music/library.json` or whose file is gone. Act on its `⚠` lines:
+- `… starts at … after the episode ends` — that overlay or cue never shows: move it onto the timeline or delete it.
+- `item … is onBeat but no music plays under it` / `… has no clear beat — left unsnapped` — put a cue with a beat under it, or drop `onBeat`.
+- `music cue … will loop` — the track is shorter than offset + cue length: shorten the cue or lower its `offset`, unless a loop is fine.
+- `music cue … has gainDb -18, the old default` — delete `gainDb` (or set it per mood, below).
+- `… was inside time that beat snapping removed, so it was dropped` — place that overlay, cue or line again on the new times.
 
 Beats in order, about 13 minutes total, scaled to the footage you have (shorter is fine; never pad):
 cold-open (stakes in the first line + 6–10 teaser shots) → title → recap (callback to the previous episode's `summary.md`, "today the plan is…") → new-toy → problem (failure on screen, diagnosis, cheap fix) → montage (`onBeat` items, 0.7–2 s, timelapses with `speed` > 1) → twist → truth (the reveal: `quiet: true`, music cue ends 0.5–1.5 s before it, then a `reveal` cue) → outro (what's left, a viewer question, tease).

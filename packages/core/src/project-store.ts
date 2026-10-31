@@ -67,8 +67,11 @@ export async function readJsonFile<T>(path: string, schema: ZodType<T>, display:
   }
 }
 
-/** Validates and writes a JSON file atomically. A value that fails its schema writes nothing and throws a JsonFileError naming `display`. */
-export async function writeJsonFile<T>(path: string, schema: ZodType<T>, value: T, display: string = path): Promise<void> {
+/**
+ * Validates and writes a JSON file atomically. A value that fails its schema writes nothing and throws a JsonFileError
+ * naming `display`. With `onlyIfChanged`, a file that already holds exactly this content is left untouched.
+ */
+export async function writeJsonFile<T>(path: string, schema: ZodType<T>, value: T, display: string = path, o: { onlyIfChanged?: boolean } = {}): Promise<void> {
   let parsed: T;
   try {
     parsed = schema.parse(value);
@@ -76,8 +79,10 @@ export async function writeJsonFile<T>(path: string, schema: ZodType<T>, value: 
     if (!(e instanceof ZodError)) throw e;
     throw schemaError(display, e, 'Nothing was written. Fix that field and run the command again.');
   }
+  const text = JSON.stringify(parsed, null, 2) + '\n';
+  if (o.onlyIfChanged && (await readFile(path, 'utf8').catch(() => null)) === text) return;
   const tmpPath = `${path}.tmp-${randomUUID()}`;
-  await writeFile(tmpPath, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+  await writeFile(tmpPath, text, 'utf8');
   await rename(tmpPath, path);
 }
 
