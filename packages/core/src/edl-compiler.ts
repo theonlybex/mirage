@@ -89,7 +89,7 @@ export function bitrateFor(width: number, height: number, fps: number): string {
 
 // Microsecond precision: frame-derived times like 2/30 must not round to whole
 // milliseconds, or the audio of each segment drifts from its video by up to 0.5 ms.
-const num = (n: number) => String(Math.round(n * 1e6) / 1e6);
+export const ffNum = (n: number) => String(Math.round(n * 1e6) / 1e6);
 
 export interface GraphOptions {
   mode: 'preview' | 'final';
@@ -109,21 +109,36 @@ export function buildFilterGraph(edl: Edl, opts: GraphOptions): string {
     const { x: ax, y: ay } = seg.scene.zoom.anchor;
     const crop =
       S > 1 + EPS
-        ? `crop=trunc(iw/${num(S)}/2)*2:trunc(ih/${num(S)}/2)*2:(iw-iw/${num(S)})*${num(ax)}:(ih-ih/${num(S)})*${num(ay)},`
+        ? `crop=trunc(iw/${ffNum(S)}/2)*2:trunc(ih/${ffNum(S)}/2)*2:(iw-iw/${ffNum(S)})*${ffNum(ax)}:(ih-ih/${ffNum(S)})*${ffNum(ay)},`
         : '';
     // Both streams are cut to exactly seg.frames frames so concat never pads one to
     // match the other (which would add up to a frame of drift per segment). tpad
     // clones the last frame in case the source runs out a frame early.
     chains.push(
-      `[${k}:v]setpts=PTS-STARTPTS,${crop}scale=${W}:${H}:flags=bicubic,setsar=1,fps=${num(fps)},` +
-        `tpad=stop=1:stop_mode=clone,trim=end_frame=${num(seg.frames)},setpts=PTS-STARTPTS[v${k}]`,
+      `[${k}:v]setpts=PTS-STARTPTS,${crop}scale=${W}:${H}:flags=bicubic,setsar=1,fps=${ffNum(fps)},` +
+        `tpad=stop=1:stop_mode=clone,trim=end_frame=${ffNum(seg.frames)},setpts=PTS-STARTPTS[v${k}]`,
     );
-    chains.push(`[${k}:a]asetpts=PTS-STARTPTS,apad,atrim=end=${num(seg.frames / fps)},asetpts=PTS-STARTPTS[a${k}]`);
+    chains.push(`[${k}:a]asetpts=PTS-STARTPTS,apad,atrim=end=${ffNum(seg.frames / fps)},asetpts=PTS-STARTPTS[a${k}]`);
     labels.push(`[v${k}][a${k}]`);
   });
   chains.push(`${labels.join('')}concat=n=${segments.length}:v=1:a=1[vcat][acat]`);
-  chains.push(`[acat]highpass=f=90,loudnorm=I=${num(edl.audio.loudnessLufs)}:TP=-1:LRA=11,asetpts=N/SR/TB[aout]`);
+  chains.push(`[acat]highpass=f=90,loudnorm=I=${ffNum(edl.audio.loudnessLufs)}:TP=-1:LRA=11,asetpts=N/SR/TB[aout]`);
   return chains.join(';');
+}
+
+export function encodeArgs(o: { mode: 'preview' | 'final'; encoder: Encoder; width: number; height: number; fps: number }): string[] {
+  const video =
+    o.mode === 'preview'
+      ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28']
+      : ['-c:v', o.encoder.name, ...o.encoder.extraArgs, '-b:v', bitrateFor(o.width, o.height, o.fps), '-g', String(Math.round(o.fps * 2))];
+  const audio = o.mode === 'preview' ? ['-c:a', 'aac', '-b:a', '128k'] : ['-c:a', 'aac', '-b:a', '384k'];
+  return [
+    ...video,
+    '-pix_fmt', 'yuv420p',
+    '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
+    ...audio, '-ar', '48000', '-ac', '2',
+    '-movflags', '+faststart',
+  ];
 }
 
 export interface CompileOptions extends GraphOptions {
@@ -136,21 +151,12 @@ export function compileEdl(edl: Edl, opts: CompileOptions): string[] {
   const graph = buildFilterGraph(edl, opts);
   const fps = resolveFps(edl, opts.sourceFps);
   // One extra frame of input so the fps filter never comes up a frame short.
-  const inputs = edlSegments(edl, fps).flatMap((seg) => ['-ss', num(seg.start), '-t', num((seg.frames + 1) / fps), '-i', opts.input]);
-  const video =
-    opts.mode === 'preview'
-      ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28']
-      : ['-c:v', opts.encoder.name, ...opts.encoder.extraArgs, '-b:v', bitrateFor(edl.output.width, edl.output.height, fps), '-g', String(Math.round(fps * 2))];
-  const audio = opts.mode === 'preview' ? ['-c:a', 'aac', '-b:a', '128k'] : ['-c:a', 'aac', '-b:a', '384k'];
+  const inputs = edlSegments(edl, fps).flatMap((seg) => ['-ss', ffNum(seg.start), '-t', ffNum((seg.frames + 1) / fps), '-i', opts.input]);
   return [
     ...inputs,
     '-filter_complex', graph,
     '-map', '[vcat]', '-map', '[aout]',
-    ...video,
-    '-pix_fmt', 'yuv420p',
-    '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
-    ...audio, '-ar', '48000', '-ac', '2',
-    '-movflags', '+faststart',
+    ...encodeArgs({ mode: opts.mode, encoder: opts.encoder, width: edl.output.width, height: edl.output.height, fps }),
     opts.output,
   ];
 }
