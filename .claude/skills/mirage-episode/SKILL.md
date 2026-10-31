@@ -9,7 +9,7 @@ Mirage episodes follow spec §14 (`docs/superpowers/specs/2026-09-28-wordedits-d
 
 Every `⚠` line a command prints is for the user: pass each one on in plain words with what to do about it.
 
-A `✖` line stops the command; its next line says what to do. `✖ episode <n> is busy: render (pid …)` means another `cut`/`guide`/`render`/`vo` of that episode is still running (the project or music folder: another `ingest`/`music`): wait for it, don't delete its files. Every command but `init` needs an existing project (`✖ no Mirage project at …`: check the path).
+A `✖` line stops the command; its next line says what to do. `✖ episode <n> is busy: render (pid …)` means another `cut`/`guide`/`render`/`vo` of that episode is still running (the project or music folder: another `ingest`/`music`): wait for it, don't delete its files. Only if no Mirage command is running at all (e.g. the Mac restarted mid-render) delete the `.mirage.lock` file the hint names. Every command but `init` needs an existing project (`✖ no Mirage project at …`: check the path).
 
 ## 1. Catalog the batch
 `pnpm mirage ingest <project> <clips folder>`. Tell the user about every `⚠` line:

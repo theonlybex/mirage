@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -18,13 +18,53 @@ describe('acquireLock', () => {
     await (await acquireLock(dir, 'cut', 'episode 1')).release();
   });
 
-  it('takes over a lock left by a process that is gone, or one that is unreadable', async () => {
+  it('takes over a lock left by a process that is gone, or one left unreadable a while ago', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we-lock-'));
     await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: DEAD_PID, command: 'render', startedAt: new Date().toISOString(), token: 'x' }));
     const a = await acquireLock(dir, 'render', 'episode 1');
     await a.release();
     await writeFile(join(dir, LOCK_FILE), 'garbage');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(join(dir, LOCK_FILE), old, old);
     await (await acquireLock(dir, 'render', 'episode 1')).release();
+  });
+
+  it('treats a lock that is still being written (empty, just created) as live', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-lock-'));
+    await writeFile(join(dir, LOCK_FILE), '');
+    await expect(acquireLock(dir, 'cut', 'episode 1')).rejects.toMatchObject({ code: 'BUSY', message: 'episode 1 is busy: another Mirage command is starting in it' });
+    expect(await readFile(join(dir, LOCK_FILE), 'utf8')).toBe('');
+  });
+
+  it('takes over a lock older than 24 h even when its pid is alive again (reused after a restart)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-lock-'));
+    const day = new Date(Date.now() - 25 * 3600_000).toISOString();
+    await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: process.pid, command: 'render', startedAt: day, token: 'x' }));
+    const a = await acquireLock(dir, 'cut', 'episode 1');
+    expect(JSON.parse(await readFile(join(dir, LOCK_FILE), 'utf8'))).toMatchObject({ command: 'cut' });
+    await a.release();
+  });
+
+  it('says when the holder started, with the date, and that the lock file can go if no Mirage command runs', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-lock-'));
+    const started = new Date(Date.now() - 3600_000);
+    await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: process.pid, command: 'render', startedAt: started.toISOString(), token: 'x' }));
+    const e = await acquireLock(dir, 'cut', 'episode 1').catch((x: unknown) => x as { message: string; hint: string });
+    expect(e.message).toBe(`episode 1 is busy: render (pid ${process.pid}) has been running since ${started.toLocaleString()}`);
+    expect(e.hint).toContain(`If no Mirage command is running, delete ${join(dir, LOCK_FILE)}`);
+  });
+
+  it('lets exactly one of several commands starting at once take a free or abandoned lock', async () => {
+    for (let round = 0; round < 150; round++) {
+      const dir = await mkdtemp(join(tmpdir(), 'we-lock-'));
+      if (round % 2) await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: DEAD_PID, command: 'render', startedAt: new Date().toISOString(), token: 'dead' }));
+      const tries = await Promise.allSettled(Array.from({ length: 8 }, () => acquireLock(dir, 'cut', 'episode 1')));
+      const won = tries.filter((t) => t.status === 'fulfilled');
+      expect(won).toHaveLength(1);
+      expect(tries.filter((t) => t.status === 'rejected').map((t) => (t as PromiseRejectedResult).reason.code)).toEqual(Array(7).fill('BUSY'));
+      expect((await readdir(dir)).sort()).toEqual([LOCK_FILE]);
+      await (won[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof acquireLock>>>).value.release();
+    }
   });
 
   it('never releases a lock someone else took over', async () => {
