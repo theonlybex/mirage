@@ -259,3 +259,85 @@ The user needs to edit real videos before the desktop app exists. Sub-projects 2
 - Spec §7's per-side padding values are read as the *total* pause kept when a pause is shortened (0.4 / 0.25 / 0.15 s), split evenly before and after the cut.
 - Renders run in chunks of at most 30 segments to near-lossless intermediates, then one final pass applies captions, the audio chain and music, and encodes. This replaces the single command that hit Windows' command-line limit and macOS's thread limit on long takes.
 - Out of scope for this deliverable: punch-in zooms, section titles, end screen, YouTube upload, the desktop app.
+
+## 14. Future features (post-v1 roadmap)
+
+Added 2026-10-30 after comparing WordEdits with ChatCut, Descript and Gling. None of this is in v1. Each item keeps the v1 principles: the EDL stays the single source of truth, AI decisions are written to inspectable files, and anything that needs the cloud is optional.
+
+**Phase A — close the obvious gaps in the talking-head format**
+- Face-tracked punch-ins (replaces the fixed anchor from §12).
+- Context-aware filler removal for "like", "you know", "I mean" (deferred in §13).
+- B-roll and screen-recording inserts: `markers` become real overlay clips; user-supplied files first.
+- In-app recording with a teleprompter driven by `script.json`.
+
+**Phase B — multi-track editing**
+- Multi-track timeline (video overlays, B-roll, music, SFX lanes) with the EDL extended to tracks; the scene list stays the default view.
+- Basic transitions, speed changes and keyframed position/scale for overlays.
+- Motion-graphics templates (lower thirds, callouts, animated titles) rendered as deterministic `.ass`/overlay layers.
+
+**Phase C — generative media (optional, provider-pluggable)**
+- AI voiceover and voice correction ("Overdub"-style fixes for a misspoken word), with explicit consent for voice cloning.
+- AI image and video generation for B-roll and thumbnails.
+- AI music generation alongside the bundled CC0 library.
+- Stock media search (licensed providers) inserted as B-roll.
+- Every generated asset is saved into the project folder and referenced from the EDL, so renders stay deterministic.
+
+**Phase D — more formats and languages**
+- Formats: gameplay + voice-over, screen tutorial, documentary/stock, podcast/interview multicam, short-form vertical clips cut from a long video.
+- Multi-language: transcription and captions in other languages, translated captions, and dubbed audio tracks.
+
+**Phase E — sharing and collaboration**
+- Cloud sync of projects, review links with time-coded comments, multiple editors on one project.
+- Accounts, signed/notarised builds, auto-update, public distribution.
+
+## 14. Revision (2026-10-30): Mirage, first format "build story", Phase A
+
+The app is renamed **Mirage**. Its first format is no longer the talking-head explainer (§2, §7) but a **build-story series** about the user's own software projects, modelled on Mat Armstrong's car-rebuild series. The fast-track talking-head CLI of §13 is **superseded and will not be built**; its transcriber, retake detection, captions, chunked rendering and ducking are reused here. Further formats are added only when needed.
+
+### 14.1 The format (one episode ≈ 13 min, one episode per build stage)
+
+| Beat | Target | Content |
+|---|---|---|
+| Cold open | 0:00–0:30 | Stakes in the first line (goal, number, obstacle) + teaser of 6–10 quick shots of upcoming wins and failures |
+| Title sting | ~5 s | Project title card |
+| Recap + plan | ~1 min | Callback to the previous episode; "today the plan is…" with one goal, optional deadline |
+| New toy | ~1 min | A new library/tool/API arrives; first install |
+| Problem | ~2 min | Failure on screen (red build, crash), diagnosis, cheap clever fix |
+| Build montage | ~1.5 min | Timelapse + screen clips, 0.7–2 s shots cut on the music beat |
+| Mid-point twist | ~2 min | New blocker or a side quest with its own timer |
+| Moment of truth | ~1.5 min | Deploy/demo: music cut to silence 0.5–1.5 s, then it works, before/after |
+| Outro | ~1 min | What's left, a viewer question, tease of the next episode |
+
+Edit grammar: talking/explaining shots 3–6 s; montage 0.7–2 s on the beat; reveal holds 4–8 s; punch-in 1.10–1.20× on reactions; timelapses sped up to fit. Overlays: big number callouts when a figure is spoken, running counters (hours, commits, cost, users), FAILED / PASSED / LIVE badges, tool labels, chapter cards, before/after labels. Music by beat: punchy cold open, light plan, low drone under problems, upbeat montage, riser into the twist, silence then a big track at the reveal, relaxed outro; ducked 15–20 dB under speech. Titles: all caps with a number ("I BUILT X IN 7 DAYS", "X SAID IT WAS IMPOSSIBLE").
+
+### 14.2 Episode workflow (voice-over last)
+
+1. **Import** the episode's clips in one batch (screen recordings, phone clips, pieces to camera, long timelapses).
+2. **Catalog:** probe each clip; transcribe clips with speech; sample frames (every few seconds plus scene changes); classify the clip type; record key moments (error appears, test passes, before/after) with timestamps.
+3. **Story edit (picture + music + overlays, no narration):** an episode timeline in the beats above. Live commentary and pieces to camera keep their own sound; montages snap to the music beat; reveals get silence before them.
+4. **Rough cut:** render and watch; changes requested in chat until the cut works.
+5. **Voice-over script:** narration slots are the stretches without live speech that the story marks for narration; each slot gets lines sized at ~170 wpm; reveal silences and live commentary stay clear.
+6. **Record:** the user narrates while a guide render of the cut plays, with each line shown on screen shortly before its slot. One take; re-reading a fumbled line is allowed.
+7. **Fit:** transcribe the recording; match each spoken sentence to its script line by words (keep the last take; drop fillers); place each line at its slot start; when a line runs past its slot, hold the picture of that item longer; re-duck music under all speech.
+8. **Final render** with captions from all speech; publish.
+
+### 14.3 Phase A decisions
+
+- **Phase A is command-line plus this chat.** Claude in the chat (Claude Code) performs the creative steps: describing frames, writing the story timeline, writing voice-over lines, episode summaries. Deterministic `pnpm mirage <command>` steps do cataloguing, beat detection, rendering and voice-over fitting. All creative output is files (`catalog.json` notes, `episode.json`), so the app can later fill the same files through the Claude API. Frames read by Claude are sent to Anthropic; screens showing secrets should not be recorded.
+- **Music library** is a folder of user-supplied or free-licence tracks with a `library.json` (mood, licence); tempo is detected by Mirage. Sound effects are Phase B.
+- **Recording sync** is by words, not beeps, so headphones work.
+- **Phase B (later):** counters from git history, sound effects, speed ramps, title/thumbnail suggestions, automated recaps from episode summaries. **Then** the desktop app (§8 UI, adapted to this flow).
+
+### 14.4 Data: catalog and timeline (EDL v2)
+
+`<project>/catalog.json` — clips: `{ id, path, sha256, probe, kind: screen|camera|talking|timelapse, transcript?, frames: [{t, file}], notes?, moments: [{t, label}] }`.
+
+`<project>/episodes/<n>/episode.json` — the timeline, times in seconds on the output timeline unless named `src`:
+- `items[]` (back to back, video track): `{ id, beat, clip, src: {in, out}, speed (1 = normal; timelapses > 1), audio: keep|mute, zoom?, onBeat? }`
+- `overlays[]`: `{ kind: callout|counter|badge|label|chapter|beforeAfter, text, start, end }`
+- `music[]`: `{ track, start, end, gainDb, fadeIn, fadeOut }` — gaps are silence
+- `slots[]`: `{ id, start, end, maxWords, line? }` — narration slots and their script lines
+- `voiceover?`: `{ recording, lines: [{ slot, src: {in, out}, cuts: [[a,b]] }] }`
+- `output`: `{ width, height, fps }`
+
+Rendering reuses §13's chunked approach: items render in chunks of ≤30 to intermediates (speed via setpts/atempo, muted audio as silence); the final pass adds overlays and captions (ASS), voice-over and music tracks, the mix and the encode.
