@@ -42,8 +42,10 @@ export function missingSlots(ep: Episode): string[] {
     .map((s) => s.id);
 }
 
-/** Fitted lines whose slot's written line changed (or was cleared) since the fit; `fitted` is what the voice-over says. */
+/** Fitted lines whose slot's written line changed (or was cleared) since the fit, on an unchanged cut; `fitted` is what the voice-over says. */
 export function lineChanges(ep: Episode): { slot: string; cleared: boolean; fitted: string }[] {
+  // After a re-cut slots are renumbered and the next full vo replaces every line: only the cut-change advice applies.
+  if (cutChanged(ep)) return [];
   const tidy = (t: string) => t.trim().replace(/\s+/g, ' ');
   const out: { slot: string; cleared: boolean; fitted: string }[] = [];
   for (const l of ep.voiceover?.lines ?? []) {

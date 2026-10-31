@@ -98,7 +98,8 @@ describe('checkEpisode', () => {
     await saveEpisode(dir, { ...fitted, slots: [{ ...fitted.slots[0], line: 'This is the new line.' }] });
     expect((await checkEpisode(dir, 1)).warnings).toEqual(["n1's line changed since vo — re-record it with vo --add --slots n1"]);
 
-    await saveEpisode(dir, { ...fitted, items: [fitted.items[0], { ...fitted.items[1], src: { in: 5, out: 9 } }] });
+    // After a re-cut the slots are renumbered and lines move: only the cut-change advice applies (vo --add would refuse).
+    await saveEpisode(dir, { ...fitted, items: [fitted.items[0], { ...fitted.items[1], src: { in: 5, out: 9 } }], slots: [{ ...fitted.slots[0], id: 'n2' }] });
     const changed = await checkEpisode(dir, 1);
     expect(changed.warnings).toEqual(['The cut changed after the voice-over was fitted. Run: pnpm mirage slots <project> <n>, then pnpm mirage vo <project> <n> <recording> (it reuses the saved transcript)']);
     expect(JSON.parse(await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8')).items[1].src.out).toBe(9);
