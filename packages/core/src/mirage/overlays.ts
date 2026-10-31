@@ -104,9 +104,13 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
       const spoken: Word[] = [];
       for (const w of tx.words) {
         if (isFiller(w)) continue;
-        const seg = segs.find((g) => w.start >= g.in - EPS && w.start < g.out);
+        // A word belongs to the kept segment holding its midpoint: filler cuts are padded, so a
+        // neighbouring word's start can fall a few ms inside a cut while the word itself is kept.
+        const mid = (w.start + Math.max(w.start, w.end)) / 2;
+        const seg = segs.find((g) => mid >= g.in - EPS && mid < g.out);
         if (!seg) continue;
-        spoken.push({ ...w, start: r3(line.at + seg.offset + w.start - seg.in), end: r3(line.at + seg.offset + Math.min(w.end, seg.out) - seg.in) });
+        const start = Math.max(w.start, seg.in);
+        spoken.push({ ...w, start: r3(line.at + seg.offset + start - seg.in), end: r3(line.at + seg.offset + Math.min(w.end, seg.out) - seg.in) });
       }
       out.push(...(line.text?.trim() ? alignWritten(spoken, line.text) : spoken));
     }
