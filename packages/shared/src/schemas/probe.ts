@@ -11,5 +11,17 @@ export const ProbeInfoSchema = z.object({
   audioCodec: z.string().nullable(),
   /** ffprobe's color_transfer of the video stream, e.g. bt709, arib-std-b67 (HLG), smpte2084 (PQ). */
   colorTransfer: z.string().nullable().default(null),
+  /** How long the video stream runs, from the clip's start (catalogs before it was recorded: assume durationSec). */
+  videoDurationSec: z.number().min(0).optional(),
+  /** When the video stream starts, from the clip's start, if later (its sound comes first). */
+  videoStartSec: z.number().min(0).optional(),
+  /** The header promises more than the file holds (a copy or recording cut short); the durations are what is there. */
+  truncated: z.boolean().optional(),
+  /** The file could not be read through in time: the durations are the header's, and truncation was not checked. */
+  scanFailed: z.boolean().optional(),
+  /** How many audio streams the file has, when more than one. */
+  audioStreams: z.number().int().min(2).optional(),
+  /** Which audio stream (0 = first) has the clip's sound, when that is not the first (e.g. a silent system-audio track first). */
+  audioStream: z.number().int().min(1).optional(),
 });
 export type ProbeInfo = z.infer<typeof ProbeInfoSchema>;

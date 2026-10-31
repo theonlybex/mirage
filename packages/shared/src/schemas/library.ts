@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { strictObject } from './strict.js';
 
 export const MoodSchema = z.enum(['punchy', 'light', 'tension', 'upbeat', 'riser', 'reveal', 'relaxed']);
 export type Mood = z.infer<typeof MoodSchema>;
 
-export const MusicTrackSchema = z.object({
+export const MusicTrackSchema = strictObject({
   file: z.string().min(1),
   mood: MoodSchema,
   licence: z.string().default(''),
@@ -14,5 +15,5 @@ export const MusicTrackSchema = z.object({
 });
 export type MusicTrack = z.infer<typeof MusicTrackSchema>;
 
-export const MusicLibrarySchema = z.object({ version: z.literal(1), tracks: z.array(MusicTrackSchema) });
+export const MusicLibrarySchema = strictObject({ version: z.literal(1), tracks: z.array(MusicTrackSchema) });
 export type MusicLibrary = z.infer<typeof MusicLibrarySchema>;

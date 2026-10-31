@@ -137,9 +137,14 @@ export function detectTempo(samples: Float32Array, sampleRate: number): Tempo {
 }
 
 /** Decodes the first `maxSec` (or all) of a file to mono float PCM. */
-export async function decodeMono(file: string, tmpOut: string, tools: MediaTools, o: { sampleRate: number; maxSec?: number }): Promise<Float32Array> {
+/**
+ * Decodes `file` to mono float samples. `clipTime` pads audio that starts after the file does with silence, as
+ * extractWav does, so sample times match its transcript's word times.
+ */
+export async function decodeMono(file: string, tmpOut: string, tools: MediaTools, o: { sampleRate: number; maxSec?: number; clipTime?: boolean }): Promise<Float32Array> {
   try {
-    await tools.runFfmpeg([...(o.maxSec ? ['-t', String(o.maxSec)] : []), '-i', file, '-vn', '-ac', '1', '-ar', String(o.sampleRate), '-f', 'f32le', tmpOut]);
+    const pad = o.clipTime ? ['-af', 'aresample=async=1:first_pts=0'] : [];
+    await tools.runFfmpeg([...(o.maxSec ? ['-t', String(o.maxSec)] : []), '-i', file, '-vn', ...pad, '-ac', '1', '-ar', String(o.sampleRate), '-f', 'f32le', tmpOut]);
     const buf = await readFile(tmpOut);
     return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
   } finally {

@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import { ProbeInfoSchema, type ProbeInfo } from '@wordedits/shared';
 import { SidecarError } from './errors.js';
 import { run } from './run.js';
@@ -12,6 +13,7 @@ export function parseFps(rate: string): number {
 }
 
 interface RawStream {
+  index?: number;
   codec_type?: string;
   codec_name?: string;
   width?: number;
@@ -19,13 +21,55 @@ interface RawStream {
   r_frame_rate?: string;
   avg_frame_rate?: string;
   color_transfer?: string;
+  start_time?: string;
+  duration?: string;
+  disposition?: { attached_pic?: number };
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number }[];
 }
 interface RawProbe {
-  format?: { duration?: string };
+  format?: { duration?: string; start_time?: string };
   streams?: RawStream[];
 }
 
-export async function probe(file: string): Promise<ProbeInfo> {
+const num = (s: string | undefined): number | null => {
+  const n = s === undefined ? NaN : Number(s);
+  return Number.isFinite(n) ? n : null;
+};
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/** Time allowed for the packet scan: it reads the whole file, so 15 s plus 1 s per 50 MB, at most 3 minutes. */
+export const scanTimeoutMs = (bytes: number) => Math.round(Math.min(180_000, 15_000 + bytes / 50_000));
+
+/**
+ * Where each stream's packets really end (last timestamp + duration) and how many there are, read by demuxing the
+ * whole file (no decoding, so fast): headers can promise more than a cut-short file holds, or nothing at all (a
+ * streamed WebM). Lines are read as they come and only each stream's end kept, so a long file's packets are never held
+ * in memory. Null when the scan fails or runs out of time; probe then trusts the headers.
+ */
+async function scanPackets(file: string, timeoutMs: number): Promise<Map<number, { end: number; count: number }> | null> {
+  const out = new Map<number, { end: number; count: number }>();
+  const onStdoutLine = (line: string) => {
+    const [idx, pts, dts, dur] = line.split(',');
+    const i = num(idx);
+    const t = num(pts) ?? num(dts);
+    if (i === null || t === null) return;
+    const s = out.get(i) ?? { end: -Infinity, count: 0 };
+    s.end = Math.max(s.end, t + (num(dur) ?? 0));
+    s.count++;
+    out.set(i, s);
+  };
+  try {
+    // csv prints packet fields in ffprobe's own order: stream_index, pts_time, dts_time, duration_time.
+    await run('ffprobe', ['-v', 'error', '-show_entries', 'packet=stream_index,pts_time,dts_time,duration_time', '-of', 'csv=p=0', file], { timeoutMs, onStdoutLine, keepStdout: false });
+  } catch {
+    return null;
+  }
+  return out;
+}
+
+/** What `file` holds. `scanTimeoutMs` overrides the packet scan's time limit (tests). */
+export async function probe(file: string, opts: { scanTimeoutMs?: number } = {}): Promise<ProbeInfo> {
   const { stdout } = await run('ffprobe', [
     '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file,
   ], { timeoutMs: 60_000 });
@@ -37,18 +81,58 @@ export async function probe(file: string): Promise<ProbeInfo> {
     throw new SidecarError('ffprobe', 'PARSE', 'ffprobe returned invalid JSON', 'The file may be corrupt.', stdout);
   }
 
-  const v = raw.streams?.find((s) => s.codec_type === 'video');
+  // Cover art in an audio file is a one-picture "video" stream: not footage.
+  const v = raw.streams?.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
   const a = raw.streams?.find((s) => s.codec_type === 'audio');
+  const audioStreams = raw.streams?.filter((s) => s.codec_type === 'audio').length ?? 0;
+  const packets = await scanPackets(file, opts.scanTimeoutMs ?? scanTimeoutMs((await stat(file)).size));
+  // Times are measured from the container's start, the zero ffmpeg seeks from (-ss) when rendering.
+  const start = num(raw.format?.start_time) ?? 0;
+  const headerEnd = (s: RawStream) => {
+    const d = num(s.duration);
+    return d === null ? null : (num(s.start_time) ?? start) + d;
+  };
+  const end = (s: RawStream | undefined): number | null => {
+    if (!s) return null;
+    const scanned = packets?.get(s.index ?? -1);
+    if (scanned && scanned.count > 0) return scanned.end;
+    return packets && packets.size > 0 ? null : headerEnd(s);
+  };
+  const videoEnd = end(v);
+  const audioEnd = end(a);
+  const ends = [videoEnd, audioEnd].filter((e): e is number => e !== null);
+  const durationSec = ends.length ? Math.max(...ends) - start : (num(raw.format?.duration) ?? 0);
+  // A header that promises noticeably more than the packets hold: the copy or recording was cut short.
+  const truncated = [v, a].some((s) => {
+    const promised = s ? headerEnd(s) : null;
+    const real = end(s);
+    return promised !== null && real !== null && promised - real > Math.max(0.5, 0.05 * promised);
+  });
+  // A stream with no packets at all has nothing to show.
+  const hasVideo = Boolean(v) && (!packets || packets.size === 0 || videoEnd !== null);
+
+  // A video stream that starts after the container (its sound first): render can't seek its audio before that.
+  const videoStart = v && hasVideo ? r3((num(v.start_time) ?? start) - start) : 0;
+
+  const rotation = v ? (v.side_data_list?.find((d) => typeof d.rotation === 'number')?.rotation ?? num(v.tags?.rotate) ?? 0) : 0;
+  const sideways = Math.abs(rotation) % 180 === 90;
+  const [w, h] = [v?.width ?? 0, v?.height ?? 0];
   const info = {
-    durationSec: Number(raw.format?.duration ?? 0),
-    width: v?.width ?? 0,
-    height: v?.height ?? 0,
-    fps: v ? parseFps(v.avg_frame_rate ?? v.r_frame_rate ?? '0/0') : 0,
-    hasVideo: Boolean(v),
+    durationSec: r3(Math.max(0, durationSec)),
+    width: hasVideo ? (sideways ? h : w) : 0,
+    height: hasVideo ? (sideways ? w : h) : 0,
+    fps: hasVideo && v ? parseFps(v.avg_frame_rate ?? v.r_frame_rate ?? '0/0') : 0,
+    hasVideo,
     hasAudio: Boolean(a),
-    videoCodec: v?.codec_name ?? null,
+    videoCodec: hasVideo ? (v?.codec_name ?? null) : null,
     audioCodec: a?.codec_name ?? null,
-    colorTransfer: v?.color_transfer ?? null,
+    colorTransfer: hasVideo ? (v?.color_transfer ?? null) : null,
+    ...(hasVideo && videoEnd !== null ? { videoDurationSec: r3(Math.max(0, videoEnd - start)) } : {}),
+    ...(videoStart > 0 ? { videoStartSec: videoStart } : {}),
+    ...(truncated ? { truncated } : {}),
+    // Durations from the header only: a cut-short file goes unnoticed.
+    ...(packets ? {} : { scanFailed: true }),
+    ...(audioStreams > 1 ? { audioStreams } : {}),
   };
   return ProbeInfoSchema.parse(info);
 }

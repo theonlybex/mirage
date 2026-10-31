@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Episode, TimelineItem } from '@wordedits/shared';
 
 export interface LaidItem {
@@ -27,6 +28,15 @@ export function layoutTimeline(ep: Episode): LaidItem[] {
   });
 }
 
+/**
+ * Identifies a cut: sha256 (first 16 hex) of each item's id, clip, source range, speed and hold. Hold is included
+ * because a changed hold moves everything after it just like a changed source range.
+ */
+export function itemsFingerprint(items: TimelineItem[]): string {
+  const key = items.map((i) => [i.id, i.clip, i.src.in, i.src.out, i.speed, i.hold]);
+  return createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 16);
+}
+
 export function timelineDuration(ep: Episode): number {
   const laid = layoutTimeline(ep);
   return laid.length ? laid[laid.length - 1].end : 0;
@@ -41,13 +51,19 @@ export function formatTime(sec: number): string {
 }
 
 const EPS = 1e-9;
+/** Where a range edge lands when `delta` seconds open at `at` (or, for delta < 0, the time just before `at` is removed). */
+const shiftEdge = (p: number, after: boolean, at: number, delta: number) => (after ? p + delta : delta < 0 ? Math.min(p, at + delta) : p);
 const shiftRange = <T extends { start: number; end: number }>(r: T, at: number, delta: number): T => ({
   ...r,
-  start: r.start >= at - EPS ? r.start + delta : r.start,
-  end: r.end > at + EPS ? r.end + delta : r.end,
+  start: shiftEdge(r.start, r.start >= at - EPS, at, delta),
+  end: shiftEdge(r.end, r.end > at + EPS, at, delta),
 });
 
-/** Opens `delta` seconds at output time `at`: everything after moves, anything spanning it stretches. Items are untouched. */
+/**
+ * Opens `delta` seconds at output time `at`: everything after moves, anything spanning it stretches. A negative `delta`
+ * removes the time just before `at`; ranges inside it collapse to its start (never end before they start; see dropCollapsed).
+ * Items are untouched.
+ */
 export function shiftAfter(ep: Episode, at: number, delta: number): Episode {
   return {
     ...ep,
@@ -58,4 +74,24 @@ export function shiftAfter(ep: Episode, at: number, delta: number): Episode {
       ? { ...ep.voiceover, lines: ep.voiceover.lines.map((l) => (l.at >= at - EPS ? { ...l, at: l.at + delta } : l)) }
       : null,
   };
+}
+
+/**
+ * Removes overlays, music cues and slots that closing a gap (shiftAfter) left shorter than one frame, naming each one
+ * removed. `before` is the episode before the shifts (same lists, same order): a range already that short there was
+ * written so and is kept.
+ */
+export function dropCollapsed(ep: Episode, before: Episode): { episode: Episode; dropped: string[] } {
+  const min = 1 / ep.output.fps - EPS;
+  const dropped: string[] = [];
+  const keep = <T extends { start: number; end: number }>(list: T[], was: T[], name: (x: T, i: number) => string) =>
+    list.filter((x, i) => {
+      if (x.end - x.start >= min || !was[i] || was[i].end - was[i].start < min) return true;
+      dropped.push(name(x, i));
+      return false;
+    });
+  const overlays = keep(ep.overlays, before.overlays, (o, i) => `overlay ${i + 1} ("${o.text}")`);
+  const music = keep(ep.music, before.music, (c, i) => `music cue ${i + 1} (${c.track})`);
+  const slots = keep(ep.slots, before.slots, (s) => `slot ${s.id}${s.line.trim() ? ` (line "${s.line}")` : ''}`);
+  return dropped.length ? { episode: { ...ep, overlays, music, slots }, dropped } : { episode: ep, dropped };
 }

@@ -35,7 +35,8 @@ export function keptSegments(line: VoiceLine): { in: number; out: number; offset
 /**
  * Re-spells transcribed words (already on the output timeline) with the written line: tokens are aligned by LCS on
  * normalized words. Matches take the written spelling with the spoken timing; a differing run between matches becomes
- * the written run spread over the spoken run's time; extra spoken words stay; written words never spoken are dropped.
+ * the written run spread over the spoken run's time (unless it is much longer than the spoken run: then the spoken words
+ * stay); extra spoken words stay; written words never spoken are dropped.
  */
 export function alignWritten(spoken: Word[], text: string): Word[] {
   const written: string[] = [];
@@ -59,8 +60,10 @@ export function alignWritten(spoken: Word[], text: string): Word[] {
   const out: Word[] = [];
   const gap = (i0: number, i1: number, j0: number, j1: number) => {
     if (i1 <= i0) return; // written words never spoken
-    if (j1 <= j0) {
-      out.push(...spoken.slice(i0, i1)); // extra spoken words
+    // Extra spoken words; or a written run much longer than what was spoken there (the take stops short of the line):
+    // the spoken words stay as transcribed, so a caption never shows words the audio doesn't have.
+    if (j1 <= j0 || j1 - j0 > i1 - i0 + 1) {
+      out.push(...spoken.slice(i0, i1));
       return;
     }
     const t0 = spoken[i0].start;
@@ -119,7 +122,17 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
 }
 
 const SENTENCE_END = /[.?!]["'”’)\]]*$/;
-const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu;
+/**
+ * Colour emoji: characters shown as emoji by default (🚀 ✅ ⌚, flags, skin tones), pictographs from U+1F000 on, and
+ * every part of a ZWJ sequence (👩‍💻 ❤️‍🔥). Symbols that are text by default (© ® ™ ⚠ ▶ ✔ ↔) are not: the fonts draw them.
+ */
+const PICTO = String.raw`[\p{Emoji_Presentation}]|(?=\p{Extended_Pictographic})[\u{1F000}-\u{1FAFF}]|\p{Extended_Pictographic}(?=\u{FE0F}?\u{200D})|(?<=\u{200D})\p{Extended_Pictographic}`;
+/** Emoji plus the invisible parts of emoji sequences: variation selector 16, ZWJ, the keycap mark and tag characters. */
+const EMOJI = new RegExp(`${PICTO}|[\\u{FE0F}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E007F}]`, 'gu');
+/** libass draws no emoji (colour glyphs): they come out as empty boxes, so captions and overlays leave them out. */
+export const undrawable = (text: string) => new RegExp(PICTO, 'u').test(text);
+/** Runs of Chinese/Japanese text. macOS's fallback for Han is a font libass can't open, so they get an explicit one. */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]+/gu;
 const tidy = (t: string) => t.replace(EMOJI, '').replace(/\s+([.,!?;:])/g, '$1').trim();
 
 export function groupCaptions(words: Word[], o: { durationSec: number; maxChars?: number; maxGap?: number; lead?: number; minDur?: number }): Cue[] {
@@ -174,6 +187,10 @@ function assTime(sec: number): string {
 
 const assText = (t: string) => t.replace(/\\/g, '/').replace(/\{/g, '(').replace(/\}/g, ')').replace(/\r?\n/g, '\\N');
 
+function defaultCjkFont(): string | null {
+  return process.platform === 'darwin' ? 'Hiragino Sans GB' : null;
+}
+
 function defaultFont(): string {
   if (process.platform === 'darwin') return 'Helvetica Neue';
   if (process.platform === 'win32') return 'Segoe UI';
@@ -185,7 +202,13 @@ const WHITE = '&H00FFFFFF';
 const BLACK = '&H00000000';
 const BOX = '&H4D000000';
 
-export function buildAss(o: { width: number; height: number; font?: string; captions: Cue[]; overlays: Overlay[]; prompts: Slot[] }): string {
+export function buildAss(o: { width: number; height: number; font?: string; cjkFont?: string | null; captions: Cue[]; overlays: Overlay[]; prompts: Slot[] }): string {
+  const cjk = o.cjkFont === undefined ? defaultCjkFont() : o.cjkFont;
+  // Emoji left out; CJK runs switch to a font that has them and back to the style's font (\fn alone).
+  const draw = (t: string) => {
+    const s = assText(t.replace(EMOJI, '').replace(/ {2,}/g, ' ').trim());
+    return cjk ? s.replace(CJK, (run) => `{\\fn${cjk}}${run}{\\fn}`) : s;
+  };
   const k = Math.min(o.width, o.height) / 1080;
   const px = (n: number) => Math.max(1, Math.round(n * k));
   const font = o.font ?? defaultFont();
@@ -214,9 +237,9 @@ export function buildAss(o: { width: number; height: number; font?: string; capt
   const ev = (layer: number, start: number, end: number, style: string, text: string) =>
     events.push(`Dialogue: ${layer},${assTime(start)},${assTime(end)},${style},,0,0,0,,${text}`);
 
-  for (const c of o.captions) ev(2, c.start, c.end, 'Caption', assText(c.text));
+  for (const c of o.captions) ev(2, c.start, c.end, 'Caption', draw(c.text));
   for (const ov of o.overlays) {
-    const text = assText(ov.text);
+    const text = draw(ov.text);
     switch (ov.kind) {
       case 'callout':
         ev(5, ov.start, ov.end, 'Callout', `{\\fad(120,200)\\t(0,150,\\fscx115\\fscy115)\\t(150,300,\\fscx100\\fscy100)}${text}`);
@@ -241,8 +264,8 @@ export function buildAss(o: { width: number; height: number; font?: string; capt
   }
   for (const p of o.prompts) {
     if (!p.line.trim()) continue;
-    ev(6, Math.max(0, p.start - 1.5), p.start, 'PromptNext', `Next: ${assText(p.line)}`);
-    ev(6, p.start, p.end, 'Prompt', assText(p.line));
+    ev(6, Math.max(0, p.start - 1.5), p.start, 'PromptNext', `Next: ${draw(p.line)}`);
+    ev(6, p.start, p.end, 'Prompt', draw(p.line));
   }
 
   return [

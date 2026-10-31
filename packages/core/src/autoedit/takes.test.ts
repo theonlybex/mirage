@@ -1,6 +1,6 @@
 import type { Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { detectRetakes, isFiller, normalizeWord, similarity, splitScript, splitSentences } from './takes.js';
+import { detectRetakes, isFiller, joinCompounds, normalizeWord, sentenceTokens, similarity, splitScript, splitSentences, textTokens } from './takes.js';
 
 /** Words from text, 0.3 s each, back to back. */
 function words(text: string): Word[] {
@@ -79,5 +79,34 @@ describe('detectRetakes', () => {
 describe('splitScript', () => {
   it('ignores markdown headings and splits sentences', () => {
     expect(splitScript('# Hook\nFirst line. Second line?\n\n## Body\nThird')).toEqual(['First line.', 'Second line?', 'Third']);
+  });
+});
+
+describe('matching tokens (textTokens / sentenceTokens)', () => {
+  it('reads a written line with digits and units the way it is spoken', () => {
+    const line = 'Requests went from 1,200ms to 80ms, a 15x speedup on 3/14.';
+    const spoken = words('Requests went from 1200 milliseconds to 80 milliseconds, a 15 times speed up on March 14th.');
+    const [s] = splitSentences(spoken);
+    expect(textTokens(line)).toEqual(['requests', 'went', 'from', 'one', 'thousand', 'two', 'hundred', 'milliseconds', 'to', 'eighty', 'milliseconds', 'a', 'fifteen', 'times', 'speedup', 'on', 'march', 'fourteenth']);
+    expect(similarity(sentenceTokens(s, spoken), textTokens(line))).toBeGreaterThan(0.85);
+  });
+  it('folds curly apostrophes, number words and digits, money, percent, k and seconds', () => {
+    expect(textTokens('It’s 7 days')).toEqual(textTokens("it's seven days"));
+    expect(textTokens('I spent $1,000 on 2 GPUs')).toEqual(['i', 'spent', 'one', 'thousand', 'dollars', 'on', 'two', 'gpus']);
+    expect(textTokens('$5k and 30% in 2.5s')).toEqual(['five', 'thousand', 'dollars', 'and', 'thirty', 'percent', 'in', 'two', 'point', 'five', 'seconds']);
+    expect(textTokens('1200 or 1,200 or 21 or 100 or 3,000,000')).toEqual([
+      'one', 'thousand', 'two', 'hundred', 'or', 'one', 'thousand', 'two', 'hundred', 'or', 'twenty', 'one', 'or', 'one', 'hundred', 'or', 'three', 'million',
+    ]);
+    expect(textTokens('v2 is 10x faster, a twenty-one-step fix')).toEqual(['v', 'two', 'is', 'ten', 'times', 'faster', 'a', 'twenty', 'one', 'step', 'fix']);
+    // A lone "s" or "x" is a word, not a unit.
+    expect(textTokens('x marks the s')).toEqual(['x', 'marks', 'the', 's']);
+  });
+});
+
+describe('joinCompounds', () => {
+  it('joins a split pair that the other side writes as one word', () => {
+    expect(joinCompounds(textTokens('We re-cut the intro'), new Set(['we', 'recut', 'the', 'intro']))).toEqual(['we', 'recut', 'the', 'intro']);
+    expect(joinCompounds(['a', 'speed', 'up'], new Set(['speedup']))).toEqual(['a', 'speedup']);
+    expect(joinCompounds(['real', 'time'], new Set(['real', 'time']))).toEqual(['real', 'time']);
   });
 });

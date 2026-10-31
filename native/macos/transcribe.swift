@@ -38,11 +38,16 @@ import Speech
       for try await result in transcriber.results {
         for run in result.text.runs {
           guard let range = run.audioTimeRange else { continue }
+          // JSONSerialization throws on NaN/infinity (an invalid CMTime): a word with no real time is skipped.
+          let start = range.start.seconds
+          let end = range.end.seconds
+          guard start.isFinite, end.isFinite else { continue }
+          let conf = run.transcriptionConfidence ?? 1.0
           words.append([
             "w": String(result.text[run.range].characters),
-            "start": range.start.seconds,
-            "end": range.end.seconds,
-            "conf": run.transcriptionConfidence ?? 1.0,
+            "start": start,
+            "end": end,
+            "conf": conf.isFinite ? conf : 1.0,
           ])
         }
       }

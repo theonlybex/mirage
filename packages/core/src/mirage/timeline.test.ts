@@ -1,6 +1,6 @@
 import { EpisodeSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { formatTime, itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
+import { dropCollapsed, formatTime, itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
 
 const ep = EpisodeSchema.parse({
   version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
@@ -38,6 +38,38 @@ describe('shiftAfter', () => {
     expect(s.overlays.map((o) => [o.start, o.end])).toEqual([[1, 4], [4, 5], [0, 1]]);
     expect(s.slots[0]).toMatchObject({ start: 3.5, end: 6 });
     expect(s.items).toBe(ep.items);
+  });
+
+  it('closes a gap without ever ending a range before it starts: what was inside the removed time collapses to its start', () => {
+    // Removes 1.5–2 s: the badge 1.6–1.9 was entirely inside it, the callout 1–3 spanned it, the slot starts after it.
+    const withBadge = EpisodeSchema.parse({ ...ep, overlays: [...ep.overlays, { kind: 'badge', text: 'w', start: 1.6, end: 1.9 }, { kind: 'label', text: 'v', start: 1.8, end: 2.4 }] });
+    const s = shiftAfter(withBadge, 2, -0.5);
+    expect(s.overlays.map((o) => [o.start, o.end])).toEqual([[1, 2.5], [2.5, 3.5], [0, 1], [1.5, 1.5], [1.5, 1.9]]);
+    expect(s.slots[0]).toMatchObject({ start: 2, end: 4.5 });
+    expect(s.overlays.every((o) => o.end >= o.start)).toBe(true);
+  });
+});
+
+describe('dropCollapsed', () => {
+  it('removes overlays, cues and slots shorter than one frame and says which', () => {
+    const collapsed = {
+      ...ep,
+      overlays: [{ ...ep.overlays[0], text: 'FAILED', start: 1.5, end: 1.51 }, ep.overlays[1]],
+      music: [{ track: 'drive.mp3', start: 2, end: 2, gainDb: -5, fadeIn: 0, fadeOut: 0, offset: 0 }],
+      slots: [{ id: 'n1', start: 3, end: 3.01, maxWords: 0, line: 'Gone.' }],
+    };
+    const before = { ...collapsed, overlays: [{ ...collapsed.overlays[0], end: 2 }, ep.overlays[1]], music: [{ ...collapsed.music[0], end: 4 }], slots: [{ ...collapsed.slots[0], end: 4 }] };
+    const r = dropCollapsed(collapsed, before);
+    expect(r.episode.overlays).toEqual([ep.overlays[1]]);
+    expect(r.episode.music).toEqual([]);
+    expect(r.episode.slots).toEqual([]);
+    expect(r.dropped).toEqual(['overlay 1 ("FAILED")', 'music cue 1 (drive.mp3)', 'slot n1 (line "Gone.")']);
+    expect(dropCollapsed(ep, ep)).toEqual({ episode: ep, dropped: [] });
+  });
+
+  it('leaves a range that was already shorter than one frame before snapping alone', () => {
+    const short = { ...ep, overlays: [{ ...ep.overlays[0], text: 'LIVE', start: 4, end: 4.02 }, ep.overlays[1]] };
+    expect(dropCollapsed(short, short)).toEqual({ episode: short, dropped: [] });
   });
 });
 

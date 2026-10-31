@@ -1,6 +1,10 @@
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
+import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
-import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
+import { buildAss, groupCaptions, keptSegments, speechWords, toSrt, undrawable } from './overlays.js';
 
 const w = (text: string, start: number, end: number): Word => ({ w: text, start, end, conf: 1 });
 const tx = (words: Word[]): Transcript => ({ words, segments: [], speech: [] });
@@ -123,6 +127,14 @@ describe('speechWords with the written line', () => {
     }
   });
 
+  it('never captions written words the kept audio does not have', () => {
+    // The take stops at "the back." — the written line goes on to "backend in one long night".
+    const vo = tx(said('So I cashed the forecast and rewrote the back.', 20));
+    const words = speechWords(withLine('So I cached the forecast and rewrote the backend in one long night.', { in: 19.95, out: 23.95 }), catalog, vo);
+    expect(words.map((x) => x.w)).toEqual(['So', 'I', 'cached', 'the', 'forecast', 'and', 'rewrote', 'the', 'back.']);
+    expect(words[words.length - 1].end).toBeCloseTo(1 + 0.05 + 3.5, 3);
+  });
+
   it('keeps extra spoken words and drops written words that were never said', () => {
     const vo = tx(said('So the build really kept failing.', 20));
     const words = speechWords(withLine('So the build kept failing badly.', { in: 19.95, out: 23 }), catalog, vo);
@@ -139,4 +151,57 @@ describe('speechWords with several recordings', () => {
     const map = new Map([['vo.m4a', tx([w('First.', 0.1, 0.5)])], ['n2.m4a', tx([w('Second.', 0.2, 0.6)])]]);
     expect(speechWords(e, catalog, map).map((x) => [x.w, x.start])).toEqual([['First.', 0.1], ['Second.', 2.2]]);
   });
+});
+
+describe('buildAss text the fonts can draw', () => {
+  const one = (text: string, o: { font?: string; cjkFont?: string | null } = {}, kind: 'label' | 'counter' = 'label') =>
+    buildAss({ width: 640, height: 360, captions: [], overlays: [{ kind, text, start: 0, end: 2, tone: 'neutral' }], prompts: [], ...o });
+  const dialogue = (ass: string) => ass.split('\n').find((l) => l.startsWith('Dialogue:'))!;
+
+  it('leaves emoji out of overlay text, as captions do', () => {
+    expect(dialogue(one('Shipped 🚀 it ✅', { cjkFont: null }))).toMatch(/,\{\\fad\(150,150\)\}Shipped it$/);
+  });
+
+  it('sets CJK runs in a font that has them', () => {
+    expect(dialogue(one('Day 3 漢字かな done', { cjkFont: 'Hiragino Sans GB' }))).toMatch(/Day 3 \{\\fnHiragino Sans GB\}漢字かな\{\\fn\} done$/);
+    expect(dialogue(one('Day 3 漢字', { cjkFont: null }))).toMatch(/Day 3 漢字$/);
+  });
+
+  it('names overlay text that has characters which cannot be drawn', () => {
+    expect(undrawable('Ship it 🚀')).toBe(true);
+    expect(undrawable('漢字 עברית')).toBe(false);
+  });
+
+  it('keeps symbols the fonts draw (©, ®, ™, ⚠, ▶, ✔, ↔), leaving out only colour emoji', () => {
+    expect(dialogue(one('Mirage™ © 2026 ▶ ⚠ ✔ ↔ ®', { cjkFont: null }))).toMatch(/\}Mirage™ © 2026 ▶ ⚠ ✔ ↔ ®$/);
+    expect(undrawable('Mirage™ © 2026 ▶ ⚠ ✔ ↔ ®')).toBe(false);
+    // An emoji-style variation selector is dropped and the symbol kept; ZWJ sequences, flags and skin tones go whole.
+    expect(dialogue(one('Careful ⚠️ 1️⃣ dev 👩🏽‍💻 🇫🇷 ❤️‍🔥 done ✅ ⌚', { cjkFont: null }))).toMatch(/\}Careful ⚠ 1 dev done$/);
+    expect(undrawable('Careful ⚠️')).toBe(false);
+    expect(undrawable('👩🏽‍💻')).toBe(true);
+    expect(undrawable('❤️‍🔥')).toBe(true);
+    expect(undrawable('🕶')).toBe(true);
+  });
+
+  it('keeps drawable symbols in captions too', () => {
+    const cues = groupCaptions([{ w: 'Mirage™', start: 0, end: 0.4, conf: 1 }, { w: '▶', start: 0.5, end: 0.6, conf: 1 }, { w: '🚀', start: 0.7, end: 0.8, conf: 1 }], { durationSec: 2 });
+    expect(cues.map((c) => c.text)).toEqual(['Mirage™ ▶']);
+  });
+
+  it.runIf(process.platform === 'darwin')('draws Han characters on macOS instead of empty boxes (real frame)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-ass-'));
+    const frame = async (name: string, ass: string) => {
+      await writeFile(join(dir, `${name}.ass`), ass);
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=gray:s=640x360:d=1', '-vf', `ass=${name}.ass,format=gray`, '-frames:v', '1', '-f', 'rawvideo', `${name}.gray`], { cwd: dir });
+      return readFile(join(dir, `${name}.gray`));
+    };
+    const diff = (a: Buffer, b: Buffer) => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0) / a.length;
+    // A counter has no fade-in, so it is fully drawn on the first frame.
+    const drawn = await frame('drawn', one('漢字', {}, 'counter'));
+    // The same text set in the CJK font throughout is the reference; the style font alone shows boxes.
+    const reference = await frame('reference', one('漢字', { font: 'Hiragino Sans GB', cjkFont: null }, 'counter'));
+    const boxes = await frame('boxes', one('漢字', { cjkFont: null }, 'counter'));
+    expect(diff(drawn, reference)).toBeLessThan(0.01);
+    expect(diff(boxes, reference)).toBeGreaterThan(0.05);
+  }, 60_000);
 });

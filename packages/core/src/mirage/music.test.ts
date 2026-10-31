@@ -1,11 +1,12 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
 import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
 import { realMediaTools } from '../media-tools.js';
-import { analyzeLibrary, snapToBeats } from './music.js';
+import { acquireLock, LOCK_FILE } from './lock.js';
+import { analyzeLibrary, findTrack, snapToBeats } from './music.js';
 import { layoutTimeline } from './timeline.js';
 
 const lib = (bpm: number, beatOffset: number): MusicLibrary => ({ version: 1, tracks: [{ file: 'beat.wav', mood: 'upbeat', licence: '', bpm, beatOffset, durationSec: 60 }] });
@@ -98,6 +99,36 @@ describe('snapToBeats', () => {
     expect(snapToBeats(once, catalog(60), l)).toEqual(once);
   });
 
+  it('never changes the speed of an item that keeps its live audio: it ends on an earlier beat inside the clip instead', () => {
+    // 100 BPM (0.6 s beats); the nearest beat end (1.2 s) needs 1.2 s of footage but only 1.0 s is left after src.in.
+    const ep = episode([{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0.2, out: 1.2 }, onBeat: true, audio: 'keep' }]);
+    const s = snapToBeats(ep, catalog(1.2), lib(100, 0));
+    expect(s.items[0]).toMatchObject({ speed: 1, src: { in: 0.2, out: 0.8 } });
+    expect(layoutTimeline(s)[0].frames).toBe(18);
+    expect(snapToBeats(s, catalog(1.2), lib(100, 0))).toEqual(s);
+  });
+
+  it('leaves a kept-audio item unsnapped when no beat end fits in its clip', () => {
+    // 60 BPM: the first beat is 1 s away, but only 0.3 s of footage is left.
+    const ep = episode([{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0.9, out: 1.1 }, onBeat: true, audio: 'keep' }]);
+    expect(snapToBeats(ep, catalog(1.2), lib(60, 0)).items).toEqual(ep.items);
+  });
+
+  it('keeps a manual hold: the source part ends earlier so the item with its hold ends on the beat', () => {
+    const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.3 }, onBeat: true, hold: 0.5 }]);
+    const s = snapToBeats(ep, catalog(60), lib(120, 0));
+    expect(s.items[0]).toMatchObject({ hold: 0.5, speed: 1, src: { in: 0, out: 1.5 } });
+    expect(layoutTimeline(s)[0].end).toBeCloseTo(2);
+    expect(snapToBeats(s, catalog(60), lib(120, 0))).toEqual(s);
+  });
+
+  it('extends a sped-up item only within the video of its clip, not into audio past it', () => {
+    const short = catalog(10);
+    short.clips[0].probe.videoDurationSec = 1.2;
+    const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0.2, out: 1.2 }, onBeat: true }]);
+    expect(snapToBeats(ep, short, lib(100, 0)).items[0].src.out).toBe(1.2);
+  });
+
   it('leaves items alone when no cue with a known tempo plays under them', () => {
     const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.3 }, onBeat: true }], { music: [] });
     expect(snapToBeats(ep, catalog(60), lib(120, 0))).toEqual(ep);
@@ -122,5 +153,80 @@ describe('analyzeLibrary', () => {
     const out = await analyzeLibrary(dir, await realMediaTools());
     expect(out.tracks[0]).toMatchObject({ file: 'quiet.wav', bpm: null, beatOffset: null });
     expect(out.tracks[0].durationSec).toBeCloseTo(5, 0);
+  });
+
+  it('clears decode files left by a killed run, and refuses while another music run holds the folder', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, 'quiet.wav')]);
+    await writeFile(join(dir, '.tmp-0f8fad5b-d9cb-469f-a165-70867728950e.f32'), 'x');
+    await writeFile(join(dir, LOCK_FILE), JSON.stringify({ pid: 4_194_305, command: 'music', startedAt: new Date().toISOString(), token: 'dead' }));
+    await analyzeLibrary(dir, await realMediaTools());
+    expect((await readdir(dir)).sort()).toEqual(['library.json', 'quiet.wav']);
+    const lock = await acquireLock(dir, 'music', 'the music folder');
+    try {
+      await expect(analyzeLibrary(dir, await realMediaTools())).rejects.toMatchObject({ code: 'BUSY' });
+    } finally {
+      await lock.release();
+    }
+  });
+
+  it('skips a file that is not audio with a warning, and still analyses the rest and writes the library', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, 'quiet.wav')]);
+    await writeFile(join(dir, 'notes.mp3'), 'not audio at all');
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.warnings).toEqual([expect.stringMatching(/^skipped notes\.mp3: ffprobe exited with code 1 — /)]);
+    expect(out.tracks.map((t) => t.file)).toEqual(['quiet.wav']);
+    expect(JSON.parse(await readFile(join(dir, 'library.json'), 'utf8')).tracks.map((t: { file: string }) => t.file)).toEqual(['quiet.wav']);
+  });
+
+  it('skips a track whose duration cannot be read instead of failing on the library schema', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, 'stream.wav')]);
+    const real = await realMediaTools();
+    const out = await analyzeLibrary(dir, { ...real, probe: async (f) => ({ ...(await real.probe(f)), durationSec: 0 }) });
+    expect(out.warnings).toEqual(["skipped stream.wav: its duration can't be read (a damaged or streamed file) — re-export it"]);
+    expect(out.tracks).toEqual([]);
+    expect(out.library.tracks).toEqual([]);
+  });
+
+  it('reports a listed track whose file is gone, and does not list it as present', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    const gone = { file: 'gone.mp3', mood: 'tension', licence: 'CC0', bpm: 100, beatOffset: 0, durationSec: 30 };
+    await writeFile(join(dir, 'library.json'), JSON.stringify({ version: 1, tracks: [gone] }));
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.warnings).toEqual(['gone.mp3 is in library.json but not in the music folder — put it back, or remove its entry']);
+    expect(out.tracks).toEqual([]);
+    expect(out.library.tracks).toEqual([gone]);
+  });
+
+  it('finds a listed track whose extension music would not pick up by itself, instead of calling it missing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100:duration=2', '-f', 'wav', join(dir, 'theme.wave')]);
+    await writeFile(join(dir, 'library.json'), JSON.stringify({ version: 1, tracks: [{ file: 'theme.wave', mood: 'relaxed', licence: 'mine', bpm: null, beatOffset: null, durationSec: null }] }));
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.warnings).toEqual([]);
+    expect(out.tracks.map((t) => t.file)).toEqual(['theme.wave']);
+    expect(out.tracks[0].durationSec).toBeCloseTo(2, 1);
+  });
+
+  it('matches file names however their accents are encoded (NFC or NFD), so a track is never listed twice', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we music '));
+    const nfd = 'café.wav'.normalize('NFD');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '2', join(dir, nfd)]);
+    const entry = { file: 'café.wav'.normalize('NFC'), mood: 'relaxed', licence: 'mine', bpm: 90, beatOffset: 0, durationSec: 2 };
+    await writeFile(join(dir, 'library.json'), JSON.stringify({ version: 1, tracks: [entry] }));
+    const out = await analyzeLibrary(dir, await realMediaTools());
+    expect(out.library.tracks).toEqual([entry]);
+    expect(out.tracks).toEqual([entry]);
+    expect(out.warnings).toEqual([]);
+  });
+});
+
+describe('findTrack', () => {
+  it('finds a track by name in either Unicode form', () => {
+    const l = { version: 1 as const, tracks: [{ file: 'café.wav'.normalize('NFD'), mood: 'upbeat' as const, licence: '', bpm: null, beatOffset: null, durationSec: null }] };
+    expect(findTrack(l, 'café.wav'.normalize('NFC'))).toBe(l.tracks[0]);
+    expect(findTrack(l, 'cafe.wav')).toBeUndefined();
   });
 });

@@ -29,11 +29,14 @@ export async function runFfmpeg(args: string[], opts: FfmpegOptions = {}): Promi
   });
 }
 
-/** 16 kHz mono 16-bit WAV, the input the transcriber expects. */
-export async function extractWav(src: string, out: string, opts: { timeoutMs?: number } = {}): Promise<void> {
+/**
+ * 16 kHz mono 16-bit WAV, the input the transcriber expects. WAV time is clip time: audio that starts after the clip
+ * does (or has gaps) is padded with silence, so word times line up with the picture.
+ */
+export async function extractWav(src: string, out: string, opts: { timeoutMs?: number; audioStream?: number } = {}): Promise<void> {
   await run('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
-    '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', out,
+    '-map', `0:a:${opts.audioStream ?? 0}`, '-af', 'aresample=async=1:first_pts=0', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', out,
   ], { timeoutMs: opts.timeoutMs ?? 10 * 60_000 });
 }
 
@@ -94,18 +97,20 @@ export async function makeProxy(
   ], { onProgress: opts.onProgress, expectedDurationSec: opts.expectedDurationSec ?? (await probe(src)).durationSec });
 }
 
-export async function measureLoudness(file: string): Promise<{ integratedLufs: number; truePeakDb: number }> {
+/** Integrated loudness and true peak of audio stream `audioStream` (default the first) of `file`, over its first `maxSec` seconds when given. */
+export async function measureLoudness(file: string, opts: { audioStream?: number; maxSec?: number } = {}): Promise<{ integratedLufs: number; truePeakDb: number }> {
   const { stderr } = await run('ffmpeg', [
-    '-hide_banner', '-nostats', '-i', file, '-map', '0:a:0', '-af', 'ebur128=peak=true', '-f', 'null', '-',
+    '-hide_banner', '-nostats', ...(opts.maxSec ? ['-t', String(opts.maxSec)] : []), '-i', file, '-map', `0:a:${opts.audioStream ?? 0}`, '-af', 'ebur128=peak=true', '-f', 'null', '-',
   ], { timeoutMs: 5 * 60_000 });
   // Only the final "Summary:" block (not the per-frame progress lines, which
   // also contain "I: ... LUFS" text) has the values we want.
   const summaryIdx = stderr.lastIndexOf('Summary:');
   const summary = summaryIdx >= 0 ? stderr.slice(summaryIdx) : stderr;
   const i = /I:\s+(-?[\d.]+)\s+LUFS/.exec(summary);
-  const p = /Peak:\s+(-?[\d.]+)\s+dBFS/.exec(summary);
+  // Pure silence has no peak: -inf.
+  const p = /Peak:\s+(-?[\d.]+|-inf)\s+dBFS/.exec(summary);
   if (!i || !p) {
     throw new SidecarError('ffmpeg', 'PARSE', 'Could not read loudness from ebur128 output', 'The file may have no audio.', stderr);
   }
-  return { integratedLufs: Number(i[1]), truePeakDb: Number(p[1]) };
+  return { integratedLufs: Number(i[1]), truePeakDb: p[1] === '-inf' ? -Infinity : Number(p[1]) };
 }

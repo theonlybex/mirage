@@ -19,8 +19,8 @@ export interface MediaTools {
   runFfmpeg(args: string[], opts?: FfmpegRunOptions): Promise<void>;
   pickEncoder(): Promise<Encoder>;
   makeProxy(src: string, out: string, opts?: { height?: number; onProgress?: (f: number) => void }): Promise<void>;
-  measureLoudness(file: string): Promise<{ integratedLufs: number; truePeakDb: number }>;
-  extractWav(src: string, out: string, opts?: { timeoutMs?: number }): Promise<void>;
+  measureLoudness(file: string, opts?: { audioStream?: number; maxSec?: number }): Promise<{ integratedLufs: number; truePeakDb: number }>;
+  extractWav(src: string, out: string, opts?: { timeoutMs?: number; audioStream?: number }): Promise<void>;
   transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number }): Promise<Transcript>;
 }
 
@@ -31,7 +31,7 @@ export async function realMediaTools(): Promise<MediaTools> {
     runFfmpeg: s.runFfmpeg,
     pickEncoder: s.pickEncoder,
     makeProxy: s.makeProxy,
-    measureLoudness: s.measureLoudness,
+    measureLoudness: (file, opts) => s.measureLoudness(file, opts),
     extractWav: (src, out, opts) => s.extractWav(src, out, opts),
     transcribe: (audio, opts) => s.transcribeAudio(audio, opts),
   };

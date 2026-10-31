@@ -2,13 +2,100 @@ import type { Word } from '@wordedits/shared';
 
 export const FILLERS = new Set(['um', 'umm', 'uh', 'uhh', 'uhm', 'er', 'erm', 'ah', 'ahh', 'hmm', 'mm', 'mhm']);
 
+/** Curly and other look-alike apostrophes, folded to ' so "it’s" and "it's" match. */
+const APOSTROPHES = /[‘’ʼ`´]/g;
+
 export function normalizeWord(w: string): string {
   return w
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[̀-ͯ]/g, '')
+    .replace(APOSTROPHES, "'")
     .replace(/[^a-z0-9']/g, '')
     .replace(/^'+|'+$/g, '');
+}
+
+const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+const ORDINAL: Record<string, string> = { one: 'first', two: 'second', three: 'third', five: 'fifth', eight: 'eighth', nine: 'ninth', twelve: 'twelfth' };
+/** Units read out after a number they are glued to ("80ms", "15x"); alone they are ordinary words. */
+const UNITS: Record<string, string> = { ms: 'milliseconds', s: 'seconds', sec: 'seconds', secs: 'seconds', min: 'minutes', mins: 'minutes', hr: 'hours', hrs: 'hours', x: 'times', k: 'thousand' };
+const CURRENCY: Record<string, string> = { $: 'dollars', '€': 'euros', '£': 'pounds' };
+const MULTIPLIER: Record<string, string> = { k: 'thousand', m: 'million', bn: 'billion' };
+
+function under1000(n: number): string[] {
+  const out: string[] = [];
+  if (n >= 100) {
+    out.push(ONES[Math.floor(n / 100)], 'hundred');
+    n %= 100;
+  }
+  if (n >= 20) {
+    out.push(TENS[Math.floor(n / 10)]);
+    n %= 10;
+  }
+  if (n > 0) out.push(ONES[n]);
+  return out;
+}
+
+/** A whole number as it is spoken: 1200 → one thousand two hundred. Very long digit runs are read digit by digit. */
+export function numberWords(digits: string): string[] {
+  if (digits.length > 12) return [...digits].map((d) => ONES[Number(d)]);
+  let n = Number(digits);
+  if (n === 0) return ['zero'];
+  const out: string[] = [];
+  for (const [v, name] of [[1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']] as const) {
+    if (n >= v) {
+      out.push(...under1000(Math.floor(n / v)), name);
+      n %= v;
+    }
+  }
+  return [...out, ...under1000(n)];
+}
+
+const ordinal = (w: string) => ORDINAL[w] ?? (w.endsWith('y') ? `${w.slice(0, -1)}ieth` : `${w}th`);
+
+/**
+ * One written or spoken word as the words a reader says, for matching a line against its transcript: digits become
+ * number words (1,200ms → one thousand two hundred milliseconds; $5k → five thousand dollars; 3/14 → march fourteenth;
+ * 2.5 → two point five), glued units are read out (ms, s, x, k, %), and hyphens split words.
+ */
+export function matchTokens(raw: string): string[] {
+  let t = raw.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(APOSTROPHES, "'");
+  t = t.replace(/(\d),(?=\d{3}(?!\d))/g, '$1');
+  t = t.replace(/^(1[0-2]|0?[1-9])\/(3[01]|[12]\d|0?[1-9])(?!\d)/, (_, m: string, d: string) => `${MONTHS[Number(m) - 1]} ${d}th`);
+  const parts = t.match(/[$€£]|\d+(?:\.\d+)?|[a-z']+|%/g) ?? [];
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    if (Object.hasOwn(CURRENCY, p) && /^\d/.test(parts[i + 1] ?? '')) {
+      const [int, frac] = parts[++i].split('.');
+      out.push(...numberWords(int));
+      if (frac) out.push('point', ...[...frac].map((d) => ONES[Number(d)]));
+      if (Object.hasOwn(MULTIPLIER, parts[i + 1] ?? '')) out.push(MULTIPLIER[parts[++i]]);
+      out.push(CURRENCY[p]);
+    } else if (/^\d/.test(p)) {
+      const [int, frac] = p.split('.');
+      const words = numberWords(int);
+      const next = parts[i + 1];
+      if (!frac && next && /^(st|nd|rd|th)$/.test(next)) {
+        words.push(ordinal(words.pop()!));
+        i++;
+      }
+      out.push(...words);
+      if (frac) out.push('point', ...[...frac].map((d) => ONES[Number(d)]));
+      if (next && Object.hasOwn(UNITS, next) && parts[i + 1] === next) {
+        out.push(UNITS[next]);
+        i++;
+      }
+    } else if (p === '%') {
+      out.push('percent');
+    } else {
+      const w = p.replace(/^'+|'+$/g, '');
+      if (w) out.push(w);
+    }
+  }
+  return out;
 }
 
 export const isFiller = (w: Word): boolean => FILLERS.has(normalizeWord(w.w));
@@ -47,11 +134,24 @@ export function splitSentences(words: Word[]): Sentence[] {
 }
 
 export function sentenceTokens(s: Sentence, words: Word[]): string[] {
-  return words.slice(s.from, s.to + 1).filter((w) => !isFiller(w)).map((w) => normalizeWord(w.w)).filter(Boolean);
+  return words.slice(s.from, s.to + 1).filter((w) => !isFiller(w)).flatMap((w) => matchTokens(w.w)).filter((t) => !FILLERS.has(t));
 }
 
 export function textTokens(text: string): string[] {
-  return text.split(/\s+/).map(normalizeWord).filter((t) => t && !FILLERS.has(t));
+  return text.split(/\s+/).flatMap(matchTokens).filter((t) => !FILLERS.has(t));
+}
+
+/**
+ * Joins each pair of neighbouring tokens that `vocab` (the other side's words) has as one word: a line's "re-cut" ([re,
+ * cut]) then matches a transcript's "recut", and a transcript's "speed up" a line's "speedup".
+ */
+export function joinCompounds(tokens: string[], vocab: Set<string>): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (i + 1 < tokens.length && vocab.has(tokens[i] + tokens[i + 1])) out.push(tokens[i] + tokens[++i]);
+    else out.push(tokens[i]);
+  }
+  return out;
 }
 
 /** Longest-common-subsequence length divided by the longer sequence's length. */
