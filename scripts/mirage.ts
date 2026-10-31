@@ -1,10 +1,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import type { Slot } from '@wordedits/shared';
 import {
-  analyzeLibrary, checkEpisode, computeSlots, describeError, fitRecording, formatTime, ingestClips, initProject, layoutTimeline, loadCatalog,
-  loadEpisode, mergeSlots, MirageError, realMediaTools, renderEpisode, requireProject, resolveUserPath, saveEpisode, timelineDuration, type EpisodeMode,
+  analyzeLibrary, carrySlots, checkEpisode, computeSlots, cutOf, describeError, fitRecording, formatTime, ingestClips, initProject, layoutTimeline, loadCatalog,
+  loadEpisode, MirageError, realMediaTools, renderEpisode, requireProject, resolveUserPath, saveEpisode, timelineDuration, type EpisodeMode,
 } from '@wordedits/core';
 
 const USAGE = `usage: pnpm mirage <command> ...
@@ -37,21 +36,6 @@ const progress = (f: number) => {
 };
 const range = (s: { start: number; end: number }) => `${s.start.toFixed(1)}–${s.end.toFixed(1)}`;
 const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
-
-/** Written lines in `prev` that `merged` no longer carries (counted per text, so duplicate lines are matched one to one). */
-function droppedLines(prev: Slot[], merged: Slot[]): Slot[] {
-  const kept = new Map<string, number>();
-  for (const s of merged) if (s.line.trim()) kept.set(s.line, (kept.get(s.line) ?? 0) + 1);
-  return prev.filter((s) => {
-    if (!s.line.trim()) return false;
-    const n = kept.get(s.line) ?? 0;
-    if (n > 0) {
-      kept.set(s.line, n - 1);
-      return false;
-    }
-    return true;
-  });
-}
 
 async function check(project: string, n: number) {
   const { episode: ep, warnings, notes } = await checkEpisode(project, n);
@@ -147,14 +131,14 @@ async function main() {
     }
     case 'slots': {
       const ep = await loadEpisode(project, n);
-      const slots = mergeSlots(ep.slots, computeSlots(ep, await loadCatalog(project)));
-      await saveEpisode(project, { ...ep, slots }, n);
+      const { slots, moved, dropped } = carrySlots(ep, computeSlots(ep, await loadCatalog(project)));
+      await saveEpisode(project, { ...ep, slots, slotsCut: cutOf(ep) }, n);
       for (const s of slots) {
         const words = wordCount(s.line);
         const over = words > s.maxWords ? `  ⚠ over budget (${words} > ${s.maxWords} words)` : '';
         console.log(`  ${s.id}  ${range(s)} s  ≤${s.maxWords} words  ${s.line || '(no line yet)'}${over}`);
       }
-      const dropped = droppedLines(ep.slots, slots);
+      for (const m of moved) console.log(`⚠ moved line (was ${m.from.id} ${range(m.from)}, now ${m.to.id} ${range(m.to)}): "${m.line}" — it followed its picture; check it still fits`);
       for (const s of dropped) console.log(`⚠ dropped line (was ${s.id} ${range(s)}): "${s.line}"`);
       const written = slots.filter((s) => s.line.trim()).length;
       console.log(`✓ ${slots.length} slot${slots.length === 1 ? '' : 's'}, ${written} with lines${dropped.length ? `, ${dropped.length} dropped` : ''}`);

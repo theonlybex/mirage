@@ -1,6 +1,6 @@
 import { EpisodeSchema, type Catalog } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { computeSlots, mergeSlots } from './slots.js';
+import { carrySlots, computeSlots, cutOf, mergeSlots, slotsStale } from './slots.js';
 
 const catalog: Catalog = {
   version: 1,
@@ -64,5 +64,53 @@ describe('mergeSlots', () => {
     const prev = [{ id: 'n1', start: 2, end: 8, maxWords: 16, line: 'Old.' }];
     const next = [{ id: 'n1', start: 7.99, end: 12, maxWords: 10, line: '' }];
     expect(mergeSlots(prev, next).map((s) => s.line)).toEqual(['']);
+  });
+});
+
+describe('slots after a re-cut (carrySlots)', () => {
+  const screens = EpisodeSchema.parse({
+    version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
+    items: [
+      { id: 'intro', beat: 'cold-open', clip: 'c001', src: { in: 10, out: 14 } },
+      { id: 'talk', beat: 'problem', clip: 'c001', src: { in: 0, out: 3 }, audio: 'keep' },
+      { id: 's1', beat: 'problem', clip: 'c001', src: { in: 10, out: 16 } },
+      { id: 'reveal', beat: 'truth', clip: 'c001', src: { in: 20, out: 23 }, quiet: true },
+      { id: 'outro', beat: 'outro', clip: 'c001', src: { in: 24, out: 29 } },
+    ],
+  });
+  const written = (() => {
+    const slots = computeSlots(screens, catalog);
+    const lines = ['Intro line.', 'Screen line.', 'Outro line.'];
+    return { ...screens, slots: slots.map((s, i) => ({ ...s, line: lines[i] ?? '' })), slotsCut: cutOf(screens) };
+  })();
+
+  it('records the cut the slots were computed for, and knows when it changed', () => {
+    expect(written.slots.map((s) => [s.id, s.start, s.end])).toEqual([['n1', 0, 4.2], ['n2', 6.8, 13], ['n3', 16, 21]]);
+    expect(slotsStale(written)).toBe(false);
+    expect(slotsStale({ ...written, items: written.items.slice(1) })).toBe(true);
+    // An episode from before slotsCut, with no voice-over: nothing to compare.
+    expect(slotsStale({ ...written, slotsCut: undefined, items: written.items.slice(1) })).toBe(false);
+  });
+
+  it('keeps each line on the picture it was written for when an item before it is removed', () => {
+    const recut = { ...written, items: written.items.slice(1) }; // the 4 s intro is gone
+    const r = carrySlots(recut, computeSlots(recut, catalog));
+    expect(r.slots.map((s) => [s.id, s.start, s.end, s.line])).toEqual([['n1', 2.8, 9, 'Screen line.'], ['n2', 12, 17, 'Outro line.']]);
+    expect(r.dropped.map((s) => s.line)).toEqual(['Intro line.']);
+    expect(r.moved.map((m) => [m.line, m.from.id, m.to.id])).toEqual([['Screen line.', 'n2', 'n1'], ['Outro line.', 'n3', 'n2']]);
+  });
+
+  it('follows the source when an item is trimmed at its start', () => {
+    // s1 now starts 2 s later in its clip; the screen line still sits on what it showed (src 12–16).
+    const items = written.items.map((i) => (i.id === 's1' ? { ...i, src: { in: 12, out: 16 } } : i));
+    const recut = { ...written, items };
+    const r = carrySlots(recut, computeSlots(recut, catalog));
+    expect(r.slots.filter((s) => s.line).map((s) => [s.line, s.start])).toEqual([['Intro line.', 0], ['Screen line.', 6.8], ['Outro line.', 14]]);
+    expect(r.dropped).toEqual([]);
+  });
+
+  it('matches by absolute time for slots written before slotsCut existed', () => {
+    const old = { ...written, slotsCut: undefined };
+    expect(carrySlots(old, computeSlots(old, catalog)).slots.map((s) => s.line)).toEqual(['Intro line.', 'Screen line.', 'Outro line.']);
   });
 });

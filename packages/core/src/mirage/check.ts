@@ -4,6 +4,7 @@ import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
 import { undrawable } from './overlays.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { slotsStale } from './slots.js';
 import { dropCollapsed, layoutTimeline, timelineDuration } from './timeline.js';
 import { cutChanged, cutChangedError } from './voiceover.js';
 
@@ -83,6 +84,8 @@ export async function checkEpisode(project: string, n: number): Promise<{ episod
   if (cutChanged(ep)) {
     const e = cutChangedError();
     warnings.push(`${e.message}. ${e.hint}`);
+  } else if (slotsStale(ep) && ep.slots.some((s) => s.line.trim())) {
+    warnings.push(`The cut changed since slots were written — run: pnpm mirage slots <project> ${n}, and check the lines it carried over`);
   }
   for (const item of ep.items) {
     if (item.audio !== 'keep' || item.speed !== 1) continue;

@@ -1,7 +1,8 @@
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { cutChanged, fitVoiceover, holdAt, itemsFingerprint, missingSlots } from './voiceover.js';
-import { layoutTimeline, timelineDuration } from './timeline.js';
+import { cutOf } from './slots.js';
+import { cutChanged, fitVoiceover, holdAt, missingSlots } from './voiceover.js';
+import { itemsFingerprint, layoutTimeline, timelineDuration } from './timeline.js';
 
 function said(text: string, t0: number, per = 0.3): Word[] {
   return text.split(' ').map((w, i) => ({ w, start: +(t0 + i * per).toFixed(3), end: +(t0 + i * per + 0.25).toFixed(3), conf: 1 }));
@@ -294,5 +295,25 @@ describe('fitVoiceover adding re-recorded lines', () => {
     expect(() => fitVoiceover({ episode: recut, catalog: catalog(20), recording: 'n2.m4a', transcript: retake, only: ['n2'] })).toThrow(
       expect.objectContaining({ code: 'BAD_ITEM', message: 'The cut changed after the voice-over was fitted' }),
     );
+  });
+});
+
+describe('fitVoiceover and the cut the slots were written for', () => {
+  it('refuses when the items changed since slots, and keeps the slots in step with the holds it adds', () => {
+    const ep = { ...episode(SLOTS), slotsCut: cutOf(episode(SLOTS)) };
+    const recut = { ...ep, items: [{ ...ep.items[0], src: { in: 1, out: 20 } }] };
+    expect(() => fitVoiceover({ episode: recut, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).toThrow(
+      expect.objectContaining({ code: 'BAD_ITEM', message: 'The cut changed since slots were written — run slots first' }),
+    );
+    const { episode: fitted, report } = fitVoiceover({ episode: ep, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(report.extendedSec).toBeGreaterThan(0);
+    expect(fitted.slotsCut).toEqual(cutOf(fitted));
+    expect(() => fitVoiceover({ episode: fitted, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).not.toThrow();
+  });
+
+  it('refuses a re-fit after a re-cut of an episode from before slotsCut, until slots runs', () => {
+    const { episode: fitted } = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    const old = { ...fitted, slotsCut: undefined, items: [{ ...fitted.items[0], src: { in: 1, out: 20 } }] };
+    expect(() => fitVoiceover({ episode: old, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).toThrow(expect.objectContaining({ message: 'The cut changed since slots were written — run slots first' }));
   });
 });

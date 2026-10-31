@@ -8,6 +8,7 @@ import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';
+import { slotsStale, slotsStaleError } from './slots.js';
 import { cutChanged, cutChangedError, fitVoiceover, missingSlots, type FitReport } from './voiceover.js';
 
 /** A recording's transcript file in the episode folder, named by the recording's content so a re-fit can reuse it. */
@@ -47,8 +48,9 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
     throw new MirageError('NOTHING_MATCHED', 'No narration lines are written yet', `Run pnpm mirage slots <project> ${n} and write the lines first.`);
   }
   let only: string[] | undefined;
+  if (o.add && cutChanged(ep)) throw cutChangedError();
+  if (slotsStale(ep)) throw slotsStaleError(n);
   if (o.add) {
-    if (cutChanged(ep)) throw cutChangedError();
     const written = new Set(ep.slots.filter((s) => s.line.trim()).map((s) => s.id));
     for (const id of o.slots ?? []) if (!written.has(id)) throw new MirageError('BAD_ITEM', `slot ${id} has no written line`, 'List slots that have a line (see pnpm mirage slots).');
     only = o.slots?.length ? o.slots : missingSlots(ep);

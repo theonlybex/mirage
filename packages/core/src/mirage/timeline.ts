@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Episode, TimelineItem } from '@wordedits/shared';
 
 export interface LaidItem {
@@ -25,6 +26,15 @@ export function layoutTimeline(ep: Episode): LaidItem[] {
     frame += f.frames;
     return { item, index, start, end: frame / fps, ...f };
   });
+}
+
+/**
+ * Identifies a cut: sha256 (first 16 hex) of each item's id, clip, source range, speed and hold. Hold is included
+ * because a changed hold moves everything after it just like a changed source range.
+ */
+export function itemsFingerprint(items: TimelineItem[]): string {
+  const key = items.map((i) => [i.id, i.clip, i.src.in, i.src.out, i.speed, i.hold]);
+  return createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 16);
 }
 
 export function timelineDuration(ep: Episode): number {

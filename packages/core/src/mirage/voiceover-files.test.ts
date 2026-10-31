@@ -8,6 +8,7 @@ import type { MediaTools } from '../media-tools.js';
 import { sha256File } from './ingest.js';
 import { acquireLock } from './lock.js';
 import { loadEpisode, loadVoiceoverTranscripts, saveEpisode } from './render-episode.js';
+import { cutOf } from './slots.js';
 import { fitRecording, voTranscriptFile } from './voiceover-files.js';
 
 function said(text: string, t0: number): Word[] {
@@ -131,6 +132,20 @@ describe('fitRecording', () => {
     expect(transcripts.get('n2.m4a')!.words[0].w).toBe('Then');
 
     await expect(fitRecording({ project, episode: 1, recording: join(project, 'n2.m4a'), tools, add: true })).rejects.toMatchObject({ code: 'NOTHING_MATCHED', message: 'Every written line already has a voice-over' });
+  });
+});
+
+describe('fitRecording and the slots', () => {
+  it('refuses before transcribing when the cut changed since slots were written', async () => {
+    const { project, tools, calls } = await setup({ 'vo.m4a': tx(said('Open settings.', 0)) });
+    const ep = await loadEpisode(project, 1);
+    await saveEpisode(project, { ...ep, slotsCut: cutOf(ep), items: [{ ...ep.items[0], src: { in: 2, out: 20 } }] });
+    await expect(fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools })).rejects.toMatchObject({
+      code: 'BAD_ITEM',
+      message: 'The cut changed since slots were written — run slots first',
+      hint: expect.stringContaining('pnpm mirage slots <project> 1'),
+    });
+    expect(calls).toEqual([]);
   });
 });
 

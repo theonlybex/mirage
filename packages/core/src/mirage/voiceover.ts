@@ -1,21 +1,12 @@
-import { createHash } from 'node:crypto';
-import { EpisodeSchema, type Catalog, type Episode, type TimelineItem, type Transcript, type VoiceLine } from '@wordedits/shared';
+import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { isFiller, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
 import { MirageError } from './errors.js';
 import { keptSegments } from './overlays.js';
-import { itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
+import { cutOf, slotsStale, slotsStaleError } from './slots.js';
+import { itemFrames, itemsFingerprint, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
-
-/**
- * Identifies a cut: sha256 (first 16 hex) of each item's id, clip, source range, speed and hold. Hold is included
- * because a changed hold moves everything after it just like a changed source range.
- */
-export function itemsFingerprint(items: TimelineItem[]): string {
-  const key = items.map((i) => [i.id, i.clip, i.src.in, i.src.out, i.speed, i.hold]);
-  return createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 16);
-}
 
 /** True when the episode's items are no longer the ones its voice-over was fitted to. */
 export function cutChanged(ep: Episode): boolean {
@@ -160,6 +151,8 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const allWritten = o.episode.slots.filter((s) => s.line.trim()).sort((a, b) => a.start - b.start);
   const prev = o.only ? o.episode.voiceover : null;
   if (prev && cutChanged(o.episode)) throw cutChangedError();
+  // Slots of another cut would put the lines over the wrong picture (or past the end).
+  if (slotsStale(o.episode)) throw slotsStaleError(o.episode.number);
   const targets = o.only ? new Set(o.only) : null;
   const written = targets ? allWritten.filter((s) => targets.has(s.id)) : allWritten;
   const fps = o.episode.output.fps;
@@ -273,5 +266,6 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   }
   const vo = ep.voiceover!;
   const lines = [...vo.lines].sort((a, b) => a.at - b.at);
-  return { episode: EpisodeSchema.parse({ ...ep, voiceover: { ...vo, lines, fittedItemsFingerprint: itemsFingerprint(ep.items) } }), report };
+  // The holds moved the slots with the picture, so they now belong to the held cut.
+  return { episode: EpisodeSchema.parse({ ...ep, slotsCut: cutOf(ep), voiceover: { ...vo, lines, fittedItemsFingerprint: itemsFingerprint(ep.items) } }), report };
 }

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { checkEpisode } from './check.js';
 import { saveCatalog } from './ingest.js';
 import { saveEpisode } from './render-episode.js';
+import { cutOf } from './slots.js';
 import { fitVoiceover } from './voiceover.js';
 
 async function project(transcript: Catalog['clips'][number]['transcript']) {
@@ -98,6 +99,16 @@ describe('checkEpisode', () => {
     const changed = await checkEpisode(dir, 1);
     expect(changed.warnings).toEqual(['The cut changed after the voice-over was fitted. Run: pnpm mirage slots <project> <n>, then pnpm mirage vo <project> <n> <recording> (it reuses the saved transcript)']);
     expect(JSON.parse(await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8')).items[1].src.out).toBe(9);
+  });
+
+  it('warns when the cut changed since slots were written and lines are waiting for a voice-over', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    const items = [{ id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 10 } }];
+    const ep = base({ items, music: [], slots: [{ id: 'n1', start: 1, end: 4, maxWords: 8, line: 'A line.' }] });
+    await saveEpisode(dir, { ...ep, slotsCut: cutOf(ep) });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    await saveEpisode(dir, { ...ep, slotsCut: cutOf(ep), items: [{ ...ep.items[0], src: { in: 5, out: 9 } }] });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['The cut changed since slots were written — run: pnpm mirage slots <project> 1, and check the lines it carried over']);
   });
 
   it('does not rewrite episode.json when nothing changed', async () => {
