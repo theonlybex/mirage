@@ -12,6 +12,8 @@ pnpm mirage ingest ~/Mirage/weather-app ~/Movies/weather-app/batch-1
 pnpm mirage music ~/Mirage/weather-app
 ```
 
+Paths may be relative to the folder you run `pnpm` from; every command but `init` needs a folder made by `init`, and `init` never touches an existing project.
+
 `music` writes `music/library.json` with each track's tempo. Set every track's `mood` (`punchy`, `light`, `tension`, `upbeat`, `riser`, `reveal`, `relaxed`) and `licence` there (Claude picks music by mood). Ingest extracts still frames from every clip into `frames/`, and Claude reads them (they are sent to Anthropic) to describe your footage: don't record screens showing secrets.
 
 Then ask Claude (in this repo) to make episode 1: it describes your clips, writes `episodes/1/episode.json`, and runs `pnpm mirage cut` so you can watch the rough cut. When the cut is right it writes the narration lines (`slots`) and renders `guide.mp4`. Play the guide, narrate along in one take, then:
