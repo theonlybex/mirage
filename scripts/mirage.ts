@@ -151,6 +151,7 @@ async function main() {
       const missing = report.lines.filter((l) => l.status === 'missing').map((l) => l.slot);
       console.log(`✓ voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ''}`);
       if (missing.length) console.log(`⚠ not found: ${missing.join(', ')} — record just those lines, then: pnpm mirage vo <project> ${n} <new recording> --add`);
+      for (const w of report.warnings) console.log(`⚠ ${w}`);
       break;
     }
   }

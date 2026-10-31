@@ -97,6 +97,10 @@ export const EpisodeSchema = strictObject({
     cutFingerprint: z.string().optional(),
     /** Fingerprint of the items right after the fit; any other value means the cut changed since. */
     fittedItemsFingerprint: z.string().optional(),
+    /** The items before the fit held the picture: a full re-fit starts from them again. */
+    baseItems: z.array(TimelineItemSchema).optional(),
+    /** Time the fits opened (output time `at`, `sec` seconds), in order, so a full re-fit can close it again. */
+    holds: z.array(strictObject({ at: z.number(), sec: z.number() })).optional(),
   })
     .nullable()
     .default(null),

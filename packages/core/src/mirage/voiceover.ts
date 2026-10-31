@@ -3,7 +3,7 @@ import { isFiller, sentenceTokens, similarity, splitSentences, textTokens } from
 import { MirageError } from './errors.js';
 import { keptSegments } from './overlays.js';
 import { cutOf, slotsStale, slotsStaleError } from './slots.js';
-import { itemFrames, itemsFingerprint, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
+import { dropCollapsed, itemFrames, itemsFingerprint, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
@@ -52,6 +52,8 @@ export interface FitLine {
 export interface FitReport {
   lines: FitLine[];
   extendedSec: number;
+  /** Things the user should hear about (printed with ⚠). */
+  warnings: string[];
 }
 
 /**
@@ -59,6 +61,11 @@ export interface FitReport {
  * then frozen frames); inside an item, the item splits at `t` and its frame there is held. Everything after `t` shifts.
  */
 export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number): Episode {
+  return openAt(ep, catalog, t, delta).episode;
+}
+
+/** holdAt, also saying where the time opened and by how much everything after it moved (so it can be closed again). */
+function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { episode: Episode; at: number; shift: number } {
   const fps = ep.output.fps;
   const laid = layoutTimeline(ep);
   const l = laid.find((x) => t > x.start + 1e-9 && t <= x.end + 1e-9) ?? laid[laid.length - 1];
@@ -76,7 +83,7 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
     const next = checkHold({ ...item, src: { in: item.src.in, out: r6(item.src.out + useSource * item.speed) }, hold: r6(item.hold + (delta - useSource)) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    return { ...shiftAfter(ep, l.end, grown), items };
+    return { episode: { ...shiftAfter(ep, l.end, grown), items }, at: l.end, shift: grown };
   }
 
   if (t >= srcEnd - 1e-9 || splitFrames >= l.srcFrames) {
@@ -84,7 +91,7 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
     const next = checkHold({ ...item, hold: r6(item.hold + delta) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    return { ...shiftAfter(ep, t, grown), items };
+    return { episode: { ...shiftAfter(ep, t, grown), items }, at: t, shift: grown };
   }
 
   const splitSrc = r6(item.src.in + (splitFrames / fps) * item.speed);
@@ -94,7 +101,23 @@ export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number):
   const first = checkHold({ ...item, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) });
   const second = { ...item, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
-  return { ...shiftAfter(ep, l.start + splitFrames / fps, delta), items };
+  const at = l.start + splitFrames / fps;
+  return { episode: { ...shiftAfter(ep, at, delta), items }, at, shift: delta };
+}
+
+/**
+ * The episode as it was before its voice-over's fits held the picture: the items before the first fit, and every
+ * overlay, cue and slot moved back by closing the time each hold opened (newest first). Ranges that were inside a
+ * frozen frame shrink to nothing and are dropped (named in `dropped`). The voice-over is cleared.
+ */
+export function revertHolds(ep: Episode): { episode: Episode; dropped: string[] } {
+  const vo = ep.voiceover;
+  if (!vo?.baseItems) return { episode: ep, dropped: [] };
+  let out: Episode = ep;
+  for (const h of [...(vo.holds ?? [])].reverse()) out = shiftAfter(out, h.at + h.sec, -h.sec);
+  const r6s = <T extends { start: number; end: number }>(x: T): T => ({ ...x, start: r6(x.start), end: r6(x.end) });
+  out = { ...out, items: vo.baseItems, overlays: out.overlays.map(r6s), music: out.music.map(r6s), slots: out.slots.map(r6s), voiceover: null };
+  return dropCollapsed(out, ep);
 }
 
 function lcsLength(a: string[], b: string[]): number {
@@ -148,14 +171,23 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const words = o.transcript.words;
   const sentences = splitSentences(words);
   const sTokens = sentences.map((s) => sentenceTokens(s, words));
-  const allWritten = o.episode.slots.filter((s) => s.line.trim()).sort((a, b) => a.start - b.start);
   const prev = o.only ? o.episode.voiceover : null;
   if (prev && cutChanged(o.episode)) throw cutChangedError();
   // Slots of another cut would put the lines over the wrong picture (or past the end).
   if (slotsStale(o.episode)) throw slotsStaleError(o.episode.number);
+  const report: FitReport = { lines: [], extendedSec: 0, warnings: [] };
+  // A full fit starts from the cut before the voice-over, so holds never pile up across re-fits. After a re-cut the
+  // cut as it is now is the starting point (its slots were computed for it).
+  let start = o.episode;
+  if (!o.only && !cutChanged(o.episode)) {
+    const reverted = revertHolds(o.episode);
+    start = reverted.episode;
+    for (const d of reverted.dropped) report.warnings.push(`${d} was inside a frozen frame the earlier fit added, so it was dropped — place it again`);
+  }
+  const allWritten = start.slots.filter((s) => s.line.trim()).sort((a, b) => a.start - b.start);
   const targets = o.only ? new Set(o.only) : null;
   const written = targets ? allWritten.filter((s) => targets.has(s.id)) : allWritten;
-  const fps = o.episode.output.fps;
+  const fps = start.output.fps;
 
   const cands: Cand[][] = written.map((slot) => {
     const lineTokens = textTokens(slot.line);
@@ -187,15 +219,16 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const recording = prev ? prev.recording : o.recording;
   const lineRecording = o.recording === recording ? {} : { recording: o.recording };
   let ep: Episode = {
-    ...o.episode,
+    ...start,
     voiceover: {
       recording,
       lines: prev ? prev.lines.filter((l) => !targets!.has(l.slot)) : [],
       transcripts: prev ? prev.transcripts : {},
-      cutFingerprint: prev?.cutFingerprint ?? itemsFingerprint(o.episode.items),
+      cutFingerprint: prev?.cutFingerprint ?? itemsFingerprint(start.items),
+      baseItems: prev ? prev.baseItems : start.items,
+      holds: prev?.holds ?? [],
     },
   };
-  const report: FitReport = { lines: [], extendedSec: 0 };
   let prevEnd = -1;
 
   const lineKeys = written.map((s) => textTokens(s.line).join(' '));
@@ -249,10 +282,12 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       overrun = Math.ceil(overrun * fps - 1e-9) / fps;
       if (overrun > MAX_HOLD + 1e-9) throw new MirageError('BAD_ITEM', `Line ${slot.id} runs ${r3(overrun)}s past its slot (more than ${MAX_HOLD} s)`, HOLD_HINT);
       const before = timelineDuration(ep);
-      const held = holdAt(ep, o.catalog, slot.end, overrun);
+      const opened = openAt(ep, o.catalog, slot.end, overrun);
+      const held = opened.episode;
       const grown = timelineDuration(held) - before;
       // The narration stretch really grew; keep the slot in step so a re-fit finds no overrun left.
-      ep = { ...held, slots: held.slots.map((x) => (x.id === slot.id ? { ...x, end: r6(slot.end + grown) } : x)) };
+      const holds = [...(held.voiceover!.holds ?? []), { at: r6(opened.at), sec: r6(opened.shift) }];
+      ep = { ...held, slots: held.slots.map((x) => (x.id === slot.id ? { ...x, end: r6(slot.end + grown) } : x)), voiceover: { ...held.voiceover!, holds } };
       report.extendedSec = r6(report.extendedSec + grown);
     } else {
       overrun = 0;

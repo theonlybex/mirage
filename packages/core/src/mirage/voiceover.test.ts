@@ -111,8 +111,9 @@ describe('fitVoiceover fixes', () => {
     const first = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
     expect(first.report.extendedSec).toBeGreaterThan(0);
     const second = fitVoiceover({ episode: first.episode, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
-    expect(second.report.extendedSec).toBe(0);
-    expect(second.report.lines.map((l) => l.overrunSec)).toEqual([0, 0]);
+    // It starts again from the cut before the voice-over, so it holds exactly as much as the first fit did.
+    expect(second.report.extendedSec).toBeCloseTo(first.report.extendedSec, 6);
+    expect(second.episode.items).toEqual(first.episode.items);
     expect(timelineDuration(second.episode)).toBeCloseTo(timelineDuration(first.episode), 6);
     expect(second.episode.voiceover!.lines).toEqual(first.episode.voiceover!.lines);
   });
@@ -315,5 +316,43 @@ describe('fitVoiceover and the cut the slots were written for', () => {
     const { episode: fitted } = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
     const old = { ...fitted, slotsCut: undefined, items: [{ ...fitted.items[0], src: { in: 1, out: 20 } }] };
     expect(() => fitVoiceover({ episode: old, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).toThrow(expect.objectContaining({ message: 'The cut changed since slots were written — run slots first' }));
+  });
+});
+
+describe('fitVoiceover from the cut before the voice-over', () => {
+  const short = tx([...said('This is the first line.', 2), ...said('And here is the second one.', 4, 0.2)]);
+
+  it('a full re-fit undoes the holds and splits of the earlier fit before fitting again', () => {
+    const before = { ...episode(SLOTS), items: [{ ...episode(SLOTS).items[0], src: { in: 0, out: 11 } }, { id: 'b', beat: 'problem' as const, clip: 'c001', src: { in: 11, out: 20 }, speed: 1, audio: 'mute' as const, zoom: 1, hold: 0, quiet: false, onBeat: false }] };
+    const first = fitVoiceover({ episode: before, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(first.report.extendedSec).toBeGreaterThan(0.5);
+    expect(first.episode.items.length).toBe(3); // n2 ends inside item a: split and held
+    const again = fitVoiceover({ episode: first.episode, catalog: catalog(20), recording: 'short.m4a', transcript: short });
+    expect(again.report.extendedSec).toBe(0);
+    expect(again.episode.items).toEqual(before.items);
+    expect(again.episode.overlays).toEqual(before.overlays);
+    expect(again.episode.slots).toEqual(before.slots);
+    expect(timelineDuration(again.episode)).toBeCloseTo(20, 6);
+    expect(again.episode.voiceover!.cutFingerprint).toBe(itemsFingerprint(before.items));
+  });
+
+  it('holds never pile up across re-fits, also after lines were added', () => {
+    const first = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    const added = fitVoiceover({ episode: first.episode, catalog: catalog(20), recording: 'n2.m4a', transcript: tx(said('And here is the second one.', 0, 0.6)), only: ['n2'] });
+    expect(timelineDuration(added.episode)).toBeGreaterThan(timelineDuration(first.episode));
+    const refit = fitVoiceover({ episode: added.episode, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(refit.episode.items).toEqual(first.episode.items);
+    expect(refit.episode.overlays).toEqual(first.episode.overlays);
+    expect(refit.episode.voiceover!.lines).toEqual(first.episode.voiceover!.lines);
+    expect(refit.report.extendedSec).toBeCloseTo(first.report.extendedSec, 6);
+  });
+
+  it('a full fit after a re-cut starts from the cut as it is now', () => {
+    const first = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    const recut = { ...first.episode, items: [{ ...first.episode.items[0], src: { in: 0, out: 19 } }] };
+    const ep = { ...recut, slotsCut: cutOf(recut) };
+    const refit = fitVoiceover({ episode: ep, catalog: catalog(20), recording: 'short.m4a', transcript: short });
+    expect(refit.episode.items).toEqual(recut.items);
+    expect(refit.episode.voiceover!.cutFingerprint).toBe(itemsFingerprint(recut.items));
   });
 });
