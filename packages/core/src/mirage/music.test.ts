@@ -65,6 +65,13 @@ describe('snapToBeats', () => {
     expect(s.items).toEqual(ep.items);
   });
 
+  it('is idempotent when an item is slowed to fit the footage left', () => {
+    const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 3 }, onBeat: true }]);
+    const once = snapToBeats(ep, catalog(1), lib(60, 0));
+    expect(once.items[0].src.out).toBe(1);
+    expect(snapToBeats(once, catalog(1), lib(60, 0))).toEqual(once);
+  });
+
   it('keeps cut points on the beat grid with no accumulated drift', () => {
     const items = Array.from({ length: 12 }, (_, i) => ({ id: `i${i}`, beat: 'montage', clip: 'c001', src: { in: i, out: i + 0.5 }, onBeat: true }));
     const ep = episode(items, { music: [{ track: 'beat.wav', start: 0, end: 60 }] });

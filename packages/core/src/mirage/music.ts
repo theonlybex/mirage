@@ -75,7 +75,7 @@ export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): E
     if (item.onBeat) {
       const cue = cur.music.find((c) => t >= c.start - 1e-6 && t < c.end);
       const tr = cue ? track(cue.track) : undefined;
-      if (cue && tr?.bpm) {
+      if (cue && tr?.bpm && tr.beatOffset !== null) {
         const beat = 60 / tr.bpm;
         // Grid times are cue.start + k * beat (the offset step above puts a beat at the cue start).
         const kEnd = Math.max(Math.floor((t - cue.start) / beat + 1e-6) + 1, Math.round((t + oldDur - cue.start) / beat));
@@ -86,7 +86,7 @@ export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): E
         const avail = clipDur - item.src.in;
         let srcLen = target * item.speed;
         let speed = item.speed;
-        if (avail > 0 && srcLen > avail) {
+        if (avail > 0 && srcLen > avail - 1e-5) {
           srcLen = avail;
           speed = srcLen / target;
         }

@@ -10,13 +10,13 @@ export interface Tempo {
 const HOP = 128;
 const WIN = 1024;
 /**
- * Window-end bias, in samples. The RMS window of hop i spans [i*HOP, i*HOP + WIN), so the energy rise of
- * a click that starts at sample s peaks when the window END is DELTA samples past s (the click's
- * energy is front-loaded). Hence trueStart = (i*HOP + WIN - DELTA) / sampleRate. DELTA = 76 was calibrated
- * on the synthetic click tracks in tempo.test.ts: before correction the offset came out a constant
- * ~7 ms late.
+ * Window-end bias, in samples. The RMS window of hop i spans [i*HOP, i*HOP + WIN), so a click that
+ * starts at sample s shows up at the hop whose window END has passed it: trueStart = (i*HOP + WIN - DELTA) / sampleRate.
+ * DELTA = half a hop of window-end latency (the onset peaks somewhere inside the hop, HOP / 2 on average)
+ * plus 12 samples for the click's energy centroid (front-loaded decay), calibrated on the synthetic click
+ * tracks in tempo.test.ts, where the uncorrected offset came out a constant ~7 ms late.
  */
-const DELTA = 76;
+const DELTA = HOP / 2 + 12;
 
 /** Half-wave-rectified rise in RMS energy per hop. */
 export function onsetEnvelope(samples: Float32Array): Float32Array {
@@ -89,19 +89,19 @@ export function detectTempo(samples: Float32Array, sampleRate: number): Tempo {
     candidates.push({ bpm: b, v });
     if (v > best) best = v;
   }
-  // A pulse train also scores at its sub-multiples (60 for a 180 BPM click), so among the peaks
-  // that come close to the best one take the fastest, then fold into 80-160.
+  // A pulse train also scores at its sub-multiples (60 for a 180 BPM click), so take a faster near-best
+  // peak over the best one, but only an integer multiple of it (+/-2%): 3:2 peaks are shuffle/triplet
+  // subdivisions, not the beat. Then fold into 80-160.
   const isPeak = (i: number) => {
     for (let j = Math.max(0, i - 5); j <= Math.min(candidates.length - 1, i + 5); j++) if (candidates[j].v > candidates[i].v) return false;
     return true;
   };
-  let bpm = 120;
-  let top = -Infinity;
-  for (let i = 0; i < candidates.length; i++) {
-    if (candidates[i].v >= 0.85 * best && isPeak(i) && candidates[i].bpm > top) {
-      top = candidates[i].bpm;
-      bpm = top;
-    }
+  let bpm = candidates.reduce((a, c) => (c.v > a.v ? c : a)).bpm;
+  const base = bpm;
+  for (const [i, c] of candidates.entries()) {
+    if (c.v < 0.85 * best || c.bpm <= bpm || !isPeak(i)) continue;
+    const ratio = c.bpm / base;
+    if (Math.abs(ratio - Math.round(ratio)) <= 0.02 * Math.round(ratio)) bpm = c.bpm;
   }
   while (bpm < 80) bpm *= 2;
   while (bpm > 160) bpm /= 2;
@@ -121,13 +121,18 @@ export function detectTempo(samples: Float32Array, sampleRate: number): Tempo {
   }
   bpm = (hopRate * 60) / period;
 
+  // Periodicity: how much stronger the onsets on the beat comb are than the average onset. Beatless
+  // material (noise, sustained pads) sits near 1-2.5; clean beats are 9+. Map 2..8 onto 0..1.
+  const meanOnset = onset.reduce((a, v) => a + v, 0) / onset.length;
+  const confidence = Math.round(Math.max(0, Math.min(1, (combBest / meanOnset - 2) / 6)) * 1000) / 1000;
+
   // An onset at hop i means the click entered the window's end: time (i*HOP + WIN - DELTA) / sampleRate.
   const beat = 60 / bpm;
   const beatOffset = ((((offset * HOP + WIN - DELTA) / sampleRate) % beat) + beat) % beat;
   return {
     bpm: Math.round(bpm * 10) / 10,
     beatOffset: Math.round(beatOffset * 1000) / 1000,
-    confidence: Math.min(1, best / (energy / onset.length)),
+    confidence,
   };
 }
 

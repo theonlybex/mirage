@@ -59,6 +59,38 @@ describe('detectTempo', () => {
   });
 });
 
+describe('tempo robustness', () => {
+  const add = (x: Float32Array, t: number, a: number) => {
+    const s0 = Math.round(t * SR);
+    for (let j = 0; j < 220 && s0 + j < x.length; j++) x[s0 + j] += a * Math.sin(j * 0.6) * Math.exp(-j / 40);
+  };
+  it('keeps the beat of a 12/8 shuffle at 120 BPM (does not take the 3:2 triplet peak)', () => {
+    const x = new Float32Array(30 * SR);
+    const beat = 0.5;
+    for (let t = 0.1; t < 30; t += beat) {
+      add(x, t, 1);
+      add(x, t + beat / 3, 0.7);
+      add(x, t + (2 * beat) / 3, 0.7);
+    }
+    expect(Math.abs(detectTempo(x, SR).bpm - 120)).toBeLessThanOrEqual(1);
+  });
+  it('gives noise and a sustained pad a confidence below the analyze gate, and clean beats well above it', () => {
+    const noise = new Float32Array(30 * SR);
+    let seed = 1;
+    for (let i = 0; i < noise.length; i++) {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      noise[i] = (seed / 2 ** 32 - 0.5) * 0.5;
+    }
+    const pad = new Float32Array(30 * SR);
+    for (let i = 0; i < pad.length; i++) pad[i] = 0.3 * Math.sin(i * 0.1) + 0.2 * Math.sin(i * 0.037);
+    const beats = new Float32Array(30 * SR);
+    for (let t = 0.25; t < 30; t += 0.5) add(beats, t, 1);
+    expect(detectTempo(noise, SR).confidence).toBeLessThan(0.1);
+    expect(detectTempo(pad, SR).confidence).toBeLessThan(0.1);
+    expect(detectTempo(beats, SR).confidence).toBeGreaterThan(0.5);
+  });
+});
+
 describe('decodeMono', () => {
   it('removes the temp file when ffmpeg fails', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we decode '));
