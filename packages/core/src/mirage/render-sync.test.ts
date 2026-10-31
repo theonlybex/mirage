@@ -84,6 +84,23 @@ describe('item timing against the source clock (real ffmpeg)', () => {
     expect(await framesShown(out, [0, 14, 15, 20, 29])).toEqual([0, 0, 0, 5, 14]);
   }, 60_000);
 
+  it('keeps the sound before a late-starting video: the picture holds its first frame while the audio plays', async () => {
+    // The tone runs from 0 s; the video starts at 1.5 s (the catalog records that start).
+    const sources = new Map([['c001', { path: join(dir, 'video-late.mp4'), hasAudio: true, durationSec: 6, videoStartSec: 1.5 }]]);
+    const out = await render('video-late-sound', [
+      { id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 3 }, audio: 'keep' },
+      { id: 'b', beat: 'problem', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep' },
+      { id: 'c', beat: 'problem', clip: 'c001', src: { in: 2, out: 3 }, audio: 'keep' },
+    ], sources);
+    expect(await rmsDb(out, 0.05, 1.3)).toBeGreaterThan(-30);
+    expect(await rmsDb(out, 1.6, 1.3)).toBeGreaterThan(-30);
+    // Item b (output 3–5 s) starts at source 1 s, before the video: sound from its start too.
+    expect(await rmsDb(out, 3.05, 0.4)).toBeGreaterThan(-30);
+    // Item a holds frame 0 until 1.5 s; item b shows frame 0 until 1.5 s (output 3.5 s), then frame 5 at 2 s;
+    // item c (output 5–6 s, a seek past the video's start) starts at frame 5.
+    expect(await framesShown(out, [0, 14, 15, 20, 30, 34, 35, 40, 50])).toEqual([0, 0, 0, 5, 0, 0, 0, 5, 5]);
+  }, 60_000);
+
   it('keeps audio that starts after the video in sync: silence first, never shifted earlier', async () => {
     const sources = new Map([['c001', { path: join(dir, 'audio-late.mp4'), hasAudio: true, durationSec: 6 }]]);
     const out = await render('audio-late', [

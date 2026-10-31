@@ -13,6 +13,8 @@ export const ProbeInfoSchema = z.object({
   colorTransfer: z.string().nullable().default(null),
   /** How long the video stream runs, from the clip's start (catalogs before it was recorded: assume durationSec). */
   videoDurationSec: z.number().min(0).optional(),
+  /** When the video stream starts, from the clip's start, if later (its sound comes first). */
+  videoStartSec: z.number().min(0).optional(),
   /** The header promises more than the file holds (a copy or recording cut short); the durations are what is there. */
   truncated: z.boolean().optional(),
   /** How many audio streams the file has, when more than one. */

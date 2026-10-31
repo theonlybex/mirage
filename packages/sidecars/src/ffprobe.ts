@@ -106,6 +106,9 @@ export async function probe(file: string): Promise<ProbeInfo> {
   // A stream with no packets at all has nothing to show.
   const hasVideo = Boolean(v) && (!packets || packets.size === 0 || videoEnd !== null);
 
+  // A video stream that starts after the container (its sound first): render can't seek its audio before that.
+  const videoStart = v && hasVideo ? r3((num(v.start_time) ?? start) - start) : 0;
+
   const rotation = v ? (v.side_data_list?.find((d) => typeof d.rotation === 'number')?.rotation ?? num(v.tags?.rotate) ?? 0) : 0;
   const sideways = Math.abs(rotation) % 180 === 90;
   const [w, h] = [v?.width ?? 0, v?.height ?? 0];
@@ -120,6 +123,7 @@ export async function probe(file: string): Promise<ProbeInfo> {
     audioCodec: a?.codec_name ?? null,
     colorTransfer: hasVideo ? (v?.color_transfer ?? null) : null,
     ...(hasVideo && videoEnd !== null ? { videoDurationSec: r3(Math.max(0, videoEnd - start)) } : {}),
+    ...(videoStart > 0 ? { videoStartSec: videoStart } : {}),
     ...(truncated ? { truncated } : {}),
     ...(audioStreams > 1 ? { audioStreams } : {}),
   };

@@ -26,6 +26,8 @@ export interface ClipSource {
   durationSec: number;
   /** The audio stream with the clip's sound (default the first). */
   audioStream?: number;
+  /** When the video stream starts, if after the clip does (its sound comes first). */
+  videoStartSec?: number;
   /** Picture size as displayed (0 when unknown). */
   width?: number;
   height?: number;
@@ -48,7 +50,7 @@ export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSourc
     if (!existsSync(clip.path)) {
       throw new MirageError('BAD_ITEM', `item ${item.id}: clip file ${clip.path} is missing`, 'Reconnect the drive or re-ingest the folder it moved to');
     }
-    map.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec, audioStream: clip.probe.audioStream, width: clip.probe.width, height: clip.probe.height });
+    map.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec, audioStream: clip.probe.audioStream, videoStartSec: clip.probe.videoStartSec, width: clip.probe.width, height: clip.probe.height });
   }
   return map;
 }
@@ -86,7 +88,10 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     // Seek to the keyframe before src.in and keep the source clock (time 0 = src.in) instead of starting at the first
     // frame after the seek point: VFR screen recordings write no frames while the screen is still, and a video stream
     // can start after the container does.
-    inputs.push('-noaccurate_seek', '-ss', ffNum(item.src.in), '-i', src.path);
+    // Before a late-starting video stream there is no keyframe to seek to: the demuxer would move the audio up to the
+    // video's first frame too, losing the sound before it. Read from the start instead, on the same clock.
+    if (item.src.in < (src.videoStartSec ?? 0)) inputs.push(...(item.src.in > 0 ? ['-itsoffset', ffNum(-item.src.in)] : []), '-i', src.path);
+    else inputs.push('-noaccurate_seek', '-ss', ffNum(item.src.in), '-i', src.path);
     const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2,` : '';
     // fps (right after setpts, so it drops frames before any crop or scale touches them) shows at each output frame
     // the latest source frame at or before its time: it holds a frame across a gap, and the first frame until a late

@@ -94,6 +94,14 @@ describe('probe of awkward files', () => {
     expect(info.videoDurationSec).toBeCloseTo(6, 1);
   });
 
+  it('reports when a video stream starts after its sound', async () => {
+    await gen([...VIDEO(3), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(dir, 'v3.mp4')]);
+    const f = join(dir, 'video-late.mp4');
+    await gen(['-itsoffset', '1.5', '-i', join(dir, 'v3.mp4'), ...TONE(5), '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', f]);
+    expect((await probe(f)).videoStartSec).toBeCloseTo(1.5, 1);
+    expect((await probe(join(dir, 'v3.mp4'))).videoStartSec).toBeUndefined();
+  });
+
   it('reads the duration of a streamed recording whose container has none', async () => {
     const f = join(dir, 'streamed.webm');
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...VIDEO(4), ...TONE(4), '-c:v', 'libvpx', '-deadline', 'realtime', '-c:a', 'libopus', '-f', 'webm', '-live', '1', f]);
