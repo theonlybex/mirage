@@ -21,6 +21,7 @@ A `✖` line stops the command; its next line says what to do. `✖ episode <n> 
 - `⚠ <file>: its picture stops at … but its sound runs to …` — items can only use the seconds with picture (`probe.videoDurationSec`).
 - `⚠ <file>: its first audio track is silent, so its sound is taken from track …` — nothing to do; worth a mention if the user expected the other track.
 - `• <file>: moved, path updated` needs nothing: a clip found in a new folder keeps its id.
+- `✖ catalog.json: …` while it runs — an edit made to catalog.json meanwhile broke it (the line names the key): fix that, then run `ingest` again; clips already catalogued are kept.
 
 Then for each new clip in `<project>/catalog.json`:
 - Read 3–8 of its frames (`frames[].file`, relative to the project) and the transcript if any. A frame's `t` is the clip time it shows (a clip shorter than the frame interval has one frame, from its middle).
