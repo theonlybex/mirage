@@ -12,6 +12,8 @@ pnpm mirage ingest ~/Mirage/weather-app ~/Movies/weather-app/batch-1
 pnpm mirage music ~/Mirage/weather-app
 ```
 
+`music` writes `music/library.json` with each track's tempo. Set every track's `mood` (`punchy`, `light`, `tension`, `upbeat`, `riser`, `reveal`, `relaxed`) and `licence` there (Claude picks music by mood). Ingest extracts still frames from every clip into `frames/`, and Claude reads them (they are sent to Anthropic) to describe your footage: don't record screens showing secrets.
+
 Then ask Claude (in this repo) to make episode 1: it describes your clips, writes `episodes/1/episode.json`, and runs `pnpm mirage cut` so you can watch the rough cut. When the cut is right it writes the narration lines (`slots`) and renders `guide.mp4`. Play the guide, narrate along in one take, then:
 
 ```bash
@@ -19,7 +21,7 @@ pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/voiceover.m4a
 pnpm mirage render ~/Mirage/weather-app 1
 ```
 
-`episodes/1/final.mp4` and `final.srt` are ready to upload. The workflow Claude follows is in `.claude/skills/mirage-episode/SKILL.md`.
+If some lines were missing, record just those and add them with `pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/missing.m4a --add`. `episodes/1/final.mp4` and `final.srt` are ready to upload. The workflow Claude follows is in `.claude/skills/mirage-episode/SKILL.md`.
 
 Design spec: `docs/superpowers/specs/2026-09-28-wordedits-design.md`. Plans: `docs/superpowers/plans/`.
 
