@@ -8,3 +8,4 @@ export * from './render-episode.js';
 export * from './slots.js';
 export * from './voiceover.js';
 export * from './voiceover-files.js';
+export * from './check.js';

@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { TranscriptSchema, type Slot } from '@wordedits/shared';
+import type { Slot } from '@wordedits/shared';
 import {
-  analyzeLibrary, computeSlots, episodeDir, fitVoiceover, formatTime, ingestClips, layoutTimeline, loadCatalog, loadEpisode, loadLibrary,
-  mergeSlots, MirageError, realMediaTools, renderEpisode, saveEpisode, snapToBeats, sourcesFor, timelineDuration, writeJsonFile, type EpisodeMode,
+  analyzeLibrary, checkEpisode, computeSlots, fitRecording, formatTime, ingestClips, layoutTimeline, loadCatalog, loadEpisode,
+  mergeSlots, MirageError, realMediaTools, renderEpisode, saveEpisode, timelineDuration, type EpisodeMode,
 } from '@wordedits/core';
 
 const USAGE = `usage: pnpm mirage <command> ...
@@ -18,24 +18,16 @@ const USAGE = `usage: pnpm mirage <command> ...
   slots <project> <episode>            find narration slots and their word budgets
   guide <project> <episode>            render the guide video with lines on screen
   vo <project> <episode> <recording>   fit the voice-over you recorded
+       [--add [--slots n2,n5]]          ...or add a recording of just the missing (or listed) lines
   render <project> <episode>           render the final episode with captions
 `;
 
-const { positionals, values } = parseArgs({ allowPositionals: true, options: { title: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
-const [cmd, projectArg, third, fourth] = positionals;
-if (values.help || !cmd || !projectArg) {
-  console.log(USAGE);
-  process.exit(values.help ? 0 : 2);
-}
-const project = resolve(projectArg);
-const episodeNumber = () => {
-  const n = Number(third);
-  if (!Number.isInteger(n) || n < 1) {
-    console.error('episode must be a number like 1');
-    process.exit(2);
-  }
-  return n;
-};
+const OPTIONS = {
+  title: { type: 'string' },
+  add: { type: 'boolean' },
+  slots: { type: 'string' },
+  help: { type: 'boolean', short: 'h' },
+} as const;
 let last = -1;
 const progress = (f: number) => {
   const pct = Math.floor(f * 100);
@@ -62,22 +54,37 @@ function droppedLines(prev: Slot[], merged: Slot[]): Slot[] {
   });
 }
 
-async function check(n: number) {
-  const catalog = await loadCatalog(project);
-  let ep = await loadEpisode(project, n);
-  sourcesFor(ep, catalog);
-  const lib = await loadLibrary(join(project, 'music'));
-  if (lib.tracks.length) ep = snapToBeats(ep, catalog, lib);
-  await saveEpisode(project, ep);
+async function check(project: string, n: number) {
+  const { episode: ep, warnings, notes } = await checkEpisode(project, n);
   for (const l of layoutTimeline(ep)) {
     const it = l.item;
     console.log(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${it.clip}  ${it.src.in.toFixed(2)}–${it.src.out.toFixed(2)}  ×${it.speed}  ${l.start.toFixed(2)}–${l.end.toFixed(2)}${it.quiet ? '  quiet' : ''}`);
   }
   console.log(`total ${formatTime(timelineDuration(ep))} · ${ep.items.length} items · ${ep.overlays.length} overlays · ${ep.music.length} music cues`);
+  for (const m of notes) console.log(`• ${m}`);
+  for (const w of warnings) console.log(`⚠ ${w}`);
   return ep;
 }
 
 async function main() {
+  let parsed;
+  try {
+    parsed = parseArgs({ allowPositionals: true, options: OPTIONS });
+  } catch (e) {
+    throw Object.assign(new Error((e as Error).message), { hint: USAGE });
+  }
+  const { positionals, values } = parsed;
+  const [cmd, projectArg, third, fourth] = positionals;
+  if (values.help || !cmd || !projectArg) {
+    console.log(USAGE);
+    process.exit(values.help ? 0 : 2);
+  }
+  const project = resolve(projectArg);
+  const episodeNumber = () => {
+    const n = Number(third);
+    if (!Number.isInteger(n) || n < 1) throw Object.assign(new Error('episode must be a number like 1'), { hint: USAGE });
+    return n;
+  };
   const tools = await realMediaTools();
   switch (cmd) {
     case 'init': {
@@ -91,6 +98,7 @@ async function main() {
       if (!third) throw Object.assign(new Error('missing clips folder'), { hint: USAGE });
       const r = await ingestClips({ project, clipsDir: third, tools, onStep: (m) => console.log(`• ${m}`) });
       for (const s of r.skipped) console.log(s.reason === 'already in the catalog' ? `  skipped ${s.file}: ${s.reason}` : `⚠ skipped ${s.file}: ${s.reason}`);
+      for (const w of r.warnings) console.log(`⚠ ${w}`);
       console.log(`✓ ${r.added.length} clips added${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`);
       break;
     }
@@ -106,13 +114,13 @@ async function main() {
       break;
     }
     case 'check':
-      await check(episodeNumber());
+      await check(project, episodeNumber());
       break;
     case 'cut':
     case 'guide':
     case 'render': {
       const n = episodeNumber();
-      if (cmd === 'cut') await check(n);
+      if (cmd === 'cut') await check(project, n);
       const mode: EpisodeMode = cmd === 'cut' ? 'rough' : cmd === 'guide' ? 'guide' : 'final';
       const r = await renderEpisode({ project, episode: n, mode, tools, onProgress: progress });
       console.log(`\n✓ ${r.outputPath} (${formatTime(r.durationSec)})${r.srtPath ? `\n  captions: ${r.srtPath}` : ''}`);
@@ -137,29 +145,13 @@ async function main() {
     case 'vo': {
       const n = episodeNumber();
       if (!fourth) throw Object.assign(new Error('missing recording'), { hint: USAGE });
-      const rec = resolve(fourth);
-      if (!existsSync(rec)) throw Object.assign(new Error(`${rec} does not exist`), { hint: 'Pass the path of your voice-over recording.' });
-      // Fail before the (slow) transcription when fitVoiceover would refuse anyway.
-      if (!(await loadEpisode(project, n)).slots.some((s) => s.line.trim())) {
-        throw new MirageError('NOTHING_MATCHED', 'No narration lines are written yet', `Run pnpm mirage slots ${JSON.stringify(projectArg)} ${n} and write the lines first.`);
-      }
-      const dir = episodeDir(project, n);
-      const wav = join(dir, '.vo.wav');
-      console.log('• Transcribing your voice-over…');
-      await tools.extractWav(rec, wav);
-      let transcript;
-      try {
-        transcript = await tools.transcribe(wav);
-      } finally {
-        await rm(wav, { force: true });
-      }
-      await writeJsonFile(join(dir, 'voiceover.transcript.json'), TranscriptSchema, transcript);
-      const rel = relative(project, rec);
-      const recording = rel.startsWith('..') || isAbsolute(rel) ? rec : rel;
-      const { episode, report } = fitVoiceover({ episode: await loadEpisode(project, n), catalog: await loadCatalog(project), recording, transcript });
-      await saveEpisode(project, episode);
+      if (values.slots && !values.add) throw Object.assign(new Error('--slots only works with --add'), { hint: USAGE });
+      const slots = values.slots?.split(',').map((s) => s.trim()).filter(Boolean);
+      const { report } = await fitRecording({ project, episode: n, recording: fourth, tools, add: values.add, slots, onStep: (m) => console.log(`• ${m}`) });
       for (const l of report.lines) console.log(`  ${l.slot}  ${l.status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec ? `  held picture +${l.overrunSec}s` : ''}`);
+      const missing = report.lines.filter((l) => l.status === 'missing').map((l) => l.slot);
       console.log(`✓ voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ''}`);
+      if (missing.length) console.log(`⚠ not found: ${missing.join(', ')} — record just those lines, then: pnpm mirage vo <project> ${n} <new recording> --add`);
       break;
     }
     default:
