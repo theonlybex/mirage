@@ -11,6 +11,7 @@ import { acquireLock, clearLeftovers } from './lock.js';
 export const VIDEO_EXTENSIONS = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm']);
 const HDR_TRANSFERS = new Set(['arib-std-b67', 'smpte2084']);
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
+const s1 = (n: number) => n.toFixed(1);
 
 export function guessKind(probe: ProbeInfo, transcript: Transcript | null): ClipKind {
   const words = transcript?.words.length ?? 0;
@@ -157,11 +158,19 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
         result.warnings.push(`${name} is HDR (${probe.colorTransfer}); colours will look washed out — export it as SDR (e.g. Photos → Export → "Most Compatible")`);
       }
 
+      const videoSec = probe.videoDurationSec ?? probe.durationSec;
+      if (probe.truncated) {
+        result.warnings.push(`${name} looks cut short: its header promises more than the file holds, so only its first ${s1(probe.durationSec)} s can be used — copy or export it again if more was recorded`);
+      }
+      if (probe.durationSec - videoSec > Math.max(1, 0.1 * probe.durationSec)) {
+        result.warnings.push(`${name}: its picture stops at ${s1(videoSec)} s but its sound runs to ${s1(probe.durationSec)} s — items can use only the first ${s1(videoSec)} s`);
+      }
+
       await rm(framesDir, { recursive: true, force: true });
       await mkdir(framesDir, { recursive: true });
-      const interval = frameInterval(probe.durationSec);
+      const interval = frameInterval(videoSec);
       // A clip shorter than the interval gets one frame, from its middle.
-      const first = probe.durationSec < interval ? r3(probe.durationSec / 2) : 0;
+      const first = videoSec < interval ? r3(videoSec / 2) : 0;
       // Frame i shows the latest source frame at or before first + i × interval (start_time and round=up; plain fps
       // picks the nearest frame, up to half an interval late), on the clock render seeks by (see itemChunkArgs).
       // Run inside the frames folder with a bare pattern: a % in the project path would be read as part of it.

@@ -32,6 +32,12 @@ export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSourc
     if (item.src.out > clip.probe.durationSec + 0.05) {
       throw new MirageError('BAD_ITEM', `item ${item.id}: src.out ${item.src.out}s is past the end of ${item.clip} (${clip.probe.durationSec}s)`, 'Shorten the item.');
     }
+    // Audio can run on after the picture stops (or a cut-short file's header promise more): past the video there is
+    // no frame to show.
+    const videoEnd = clip.probe.videoDurationSec ?? clip.probe.durationSec;
+    if (item.src.out > videoEnd + 0.1) {
+      throw new MirageError('BAD_ITEM', `item ${item.id}: ${item.clip} has video only until ${videoEnd.toFixed(1)} s (src.out is ${item.src.out} s)`, `End the item by ${videoEnd.toFixed(1)} s; the rest of ${item.clip} is sound only.`);
+    }
     if (!existsSync(clip.path)) {
       throw new MirageError('BAD_ITEM', `item ${item.id}: clip file ${clip.path} is missing`, 'Reconnect the drive or re-ingest the folder it moved to');
     }
@@ -358,8 +364,14 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), onProgress: (f) => report(0.7 + 0.3 * f) },
     );
     const probe = await o.tools.probe(partial);
-    if (Math.abs(probe.durationSec - D) > Math.max(0.1, 1 / fps)) {
+    const tolerance = Math.max(0.1, 1 / fps);
+    if (Math.abs(probe.durationSec - D) > tolerance) {
       throw new MirageError('DURATION_MISMATCH', `Rendered ${probe.durationSec}s but the timeline is ${D}s`, 'A clip may be shorter than the catalog says; re-run ingest.');
+    }
+    // The audio alone can make the length right while the picture stops early.
+    const videoSec = probe.videoDurationSec ?? probe.durationSec;
+    if (!probe.hasVideo || Math.abs(videoSec - D) > tolerance) {
+      throw new MirageError('DURATION_MISMATCH', `Rendered ${probe.hasVideo ? videoSec : 0}s of picture but the timeline is ${D}s`, 'A clip may have less video than the catalog says; re-run ingest.');
     }
     await rename(partial, outputPath);
     let srtPath: string | null = null;

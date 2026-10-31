@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,6 +30,15 @@ describe('sourcesFor', () => {
   it('stops with BAD_ITEM for a missing clip or a range past the clip end', () => {
     expect(() => sourcesFor(ep([{ id: 'x', beat: 'problem', clip: 'c999', src: { in: 0, out: 1 } }]), cat)).toThrow(expect.objectContaining({ code: 'BAD_ITEM', message: expect.stringContaining('x') }));
     expect(() => sourcesFor(ep([{ id: 'y', beat: 'problem', clip: 'c001', src: { in: 5, out: 12 } }]), cat)).toThrow(expect.objectContaining({ code: 'BAD_ITEM' }));
+  });
+  it('stops with BAD_ITEM for a range past the end of the video, even when the audio runs on', () => {
+    const short: Catalog = { version: 1, clips: [{ ...clipOf('c001', 10, true), probe: { ...clipOf('c001', 10, true).probe, videoDurationSec: 3 } }] };
+    expect(() => sourcesFor(ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 2, out: 5 } }]), short)).toThrow(
+      expect.objectContaining({ code: 'BAD_ITEM', message: 'item v: c001 has video only until 3.0 s (src.out is 5 s)', hint: 'End the item by 3.0 s; the rest of c001 is sound only.' }),
+    );
+    expect(sourcesFor(ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 3 } }]), short).size).toBe(1);
+    // A catalog written before the video duration was recorded: the clip duration still applies.
+    expect(sourcesFor(ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 10 } }]), cat).size).toBe(1);
   });
   it('stops with BAD_ITEM when the clip file is gone', () => {
     const gone: Catalog = { version: 1, clips: [{ ...clipOf('c001', 10, true), path: join(CLIPS, 'moved.mp4') }] };
@@ -238,6 +247,16 @@ describe('renderEpisode (real ffmpeg)', () => {
     return { calls, tools: { ...tools, runFfmpeg: async (args: string[], opts?: object) => { calls.push(args); return tools.runFfmpeg(args, opts); } } };
   };
   const one = [{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }];
+
+  it('fails instead of finishing when the rendered picture is shorter than the timeline', async () => {
+    await saveEpisode(project, ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 }, audio: 'keep' }], { number: 9 }));
+    const shortPicture: MediaTools = { ...tools, probe: async (f) => {
+      const p = await tools.probe(f);
+      return f.includes('.partial-') ? { ...p, videoDurationSec: 0.5 } : p;
+    } };
+    await expect(renderEpisode({ project, episode: 9, mode: 'rough', tools: shortPicture })).rejects.toMatchObject({ code: 'DURATION_MISMATCH', message: 'Rendered 0.5s of picture but the timeline is 1s' });
+    expect(existsSync(join(project, 'episodes', '9', 'rough.mp4'))).toBe(false);
+  }, 60_000);
 
   it('stops before rendering anything when a music cue is not in the library or its file is gone', async () => {
     await saveEpisode(project, ep(one, { number: 4, music: [{ track: 'nope.wav', start: 0, end: 1 }] }));

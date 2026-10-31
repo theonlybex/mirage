@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, rename, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rename, stat, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeInfo, Transcript } from '@wordedits/shared';
@@ -311,5 +311,18 @@ describe('ingestClips against the source clock (real ffmpeg)', () => {
     const r = await ingestClips({ project, clipsDir: dir, tools: real });
     expect(r.added[0].frames.map((f) => f.t)).toEqual([0.4]);
     expect(await shown(join(project, r.added[0].frames[0].file))).toBe(4);
+  });
+
+  it('warns about a clip cut short and a clip whose picture stops before its sound', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-damaged-'));
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', join(dir, 'a-short-video.mp4')]);
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=6', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=6', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', join(dir, 'b-cut.mp4')]);
+    await truncate(join(dir, 'b-cut.mp4'), Math.round((await stat(join(dir, 'b-cut.mp4'))).size * 0.5));
+    const r = await ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: dir, tools: real });
+    expect(r.added.map((c) => c.probe.videoDurationSec! < 4.5)).toEqual([true, true]);
+    expect(r.warnings).toEqual([
+      expect.stringMatching(/^a-short-video\.mp4: its picture stops at 3\.0 s but its sound runs to 8\.0 s — items can use only the first 3\.0 s$/),
+      expect.stringMatching(/^b-cut\.mp4 looks cut short: its header promises more than the file holds, so only its first \d\.\d s can be used/),
+    ]);
   });
 });
