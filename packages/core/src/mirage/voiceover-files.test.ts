@@ -135,6 +135,32 @@ describe('fitRecording', () => {
   });
 });
 
+describe('fitRecording and recordings saved over', () => {
+  it('refuses to add lines from a recording saved over the one earlier lines were cut from, and records each recording\'s sha256', async () => {
+    const { project, tools } = await setup({
+      first: tx([...said('Open settings.', 0), ...said('Pick a nice accent colour.', 2)]),
+      second: tx(said('Then toggle dark mode on.', 0.5)),
+    });
+    const take = join(project, 'take.m4a');
+    await writeFile(take, 'first');
+    const first = await fitRecording({ project, episode: 1, recording: take, tools });
+    expect(first.episode.voiceover!.recordingSha256).toEqual({ 'take.m4a': await sha256File(take) });
+    const before = await readFile(join(project, 'episodes', '1', 'episode.json'), 'utf8');
+    await writeFile(take, 'second');
+    await expect(fitRecording({ project, episode: 1, recording: take, tools, add: true })).rejects.toMatchObject({
+      code: 'BAD_ITEM',
+      message: 'take.m4a is not the recording n1, n3 were cut from: it changed since vo fitted them',
+      hint: expect.stringContaining('under a new name'),
+    });
+    expect(await readFile(join(project, 'episodes', '1', 'episode.json'), 'utf8')).toBe(before);
+    // Saved under a new name it is added as a second recording.
+    await writeFile(take, 'first');
+    await writeFile(join(project, 'take-2.m4a'), 'second');
+    const added = await fitRecording({ project, episode: 1, recording: join(project, 'take-2.m4a'), tools, add: true });
+    expect(Object.keys(added.episode.voiceover!.recordingSha256!).sort()).toEqual(['take-2.m4a', 'take.m4a']);
+  });
+});
+
 describe('fitRecording and the slots', () => {
   it('refuses before transcribing when the cut changed since slots were written', async () => {
     const { project, tools, calls } = await setup({ 'vo.m4a': tx(said('Open settings.', 0)) });

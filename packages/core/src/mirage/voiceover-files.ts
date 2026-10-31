@@ -2,14 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { TranscriptSchema, type Episode, type Transcript } from '@wordedits/shared';
+import { TranscriptSchema, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';
 import { slotsStale, slotsStaleError } from './slots.js';
-import { cutChanged, cutChangedError, fitVoiceover, missingSlots, type FitReport } from './voiceover.js';
+import { cutChanged, cutChangedError, fitVoiceover, fittedRecordingSha, missingSlots, type FitReport } from './voiceover.js';
 
 /** A recording's transcript file in the episode folder, named by the recording's content so a re-fit can reuse it. */
 export const voTranscriptFile = (sha256: string) => `voiceover.${sha256.slice(0, 16)}.transcript.json`;
@@ -60,7 +60,12 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
   }
 
   const dir = episodeDir(project, n);
-  const file = voTranscriptFile(await sha256File(rec));
+  const sha = await sha256File(rec);
+  const rel = relative(project, rec);
+  const recording = rel.startsWith('..') || isAbsolute(rel) ? rec : rel;
+  // Lines kept by --add play their own recording: refuse when it is no longer the audio they were cut from.
+  if (only) await checkKeptRecordings(project, ep, (l) => !only!.includes(l.slot), recording, sha);
+  const file = voTranscriptFile(sha);
   let transcript: Transcript;
   const reused = existsSync(join(dir, file));
   if (reused) {
@@ -81,15 +86,46 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
     await writeJsonFile(join(dir, file), TranscriptSchema, transcript, `episodes/${n}/${file}`);
   }
 
-  const rel = relative(project, rec);
-  const recording = rel.startsWith('..') || isAbsolute(rel) ? rec : rel;
   const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only });
   const vo = fit.episode.voiceover!;
-  const episode: Episode = { ...fit.episode, voiceover: { ...vo, transcripts: { ...vo.transcripts, [recording]: file } } };
+  const placed = new Set(fit.report.lines.filter((l) => l.status === 'placed').map((l) => l.slot));
+  if (only) await checkKeptRecordings(project, fit.episode, (l) => !placed.has(l.slot), recording, sha);
+  const shas = { ...(only ? ep.voiceover?.recordingSha256 : {}), [recording]: sha };
+  const episode: Episode = { ...fit.episode, voiceover: { ...vo, transcripts: { ...vo.transcripts, [recording]: file }, recordingSha256: shas } };
   // Transcribing takes minutes: never save the fit over edits made to episode.json meanwhile.
   if (JSON.stringify(await loadEpisode(project, n)) !== JSON.stringify(ep)) {
     throw new MirageError('BUSY', 'episode.json changed while vo was running — run vo again', 'Your edits are kept, and the transcript is saved, so the re-run is quick.');
   }
   await saveEpisode(project, episode, n);
   return { episode, report: fit.report, reused };
+}
+
+/**
+ * Refuses when a line that `kept` selects was cut from a recording whose content changed since the fit (for `recording`,
+ * the file being fitted now, `sha` is its current hash). A missing recording is left to render to report.
+ */
+async function checkKeptRecordings(project: string, ep: Episode, kept: (l: VoiceLine) => boolean, recording: string, sha: string): Promise<void> {
+  const vo = ep.voiceover;
+  if (!vo) return;
+  const byRecording = new Map<string, string[]>();
+  for (const l of vo.lines.filter(kept)) {
+    const r = l.recording ?? vo.recording;
+    byRecording.set(r, [...(byRecording.get(r) ?? []), l.slot]);
+  }
+  for (const [r, slots] of byRecording) {
+    const was = fittedRecordingSha(vo, r);
+    const abs = resolve(project, r);
+    if (!was || (r !== recording && !existsSync(abs))) continue;
+    const now = r === recording ? sha : await sha256File(abs);
+    if (now.startsWith(was)) continue;
+    const them = slots.join(', ');
+    if (r === recording) {
+      throw new MirageError(
+        'BAD_ITEM',
+        `${r} is not the recording ${them} were cut from: it changed since vo fitted them`,
+        'Save each new take under a new name (like vo-2.m4a) and put the earlier recording back, then run vo --add again. If the earlier recording is gone, run vo without --add on a recording of every line.',
+      );
+    }
+    throw new MirageError('BAD_ITEM', `${r} changed since vo fitted ${them} from it`, `Put back the recording you fitted, or re-record those lines: vo <project> ${ep.number} <new recording> --add --slots ${slots.join(',')}`);
+  }
 }

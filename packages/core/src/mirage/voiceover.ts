@@ -22,6 +22,14 @@ export function cutChangedError(): MirageError {
   );
 }
 
+/**
+ * The sha256 `recording` had when the voice-over was fitted from it: the full hash, or for episodes from before
+ * recordingSha256, the 16-hex prefix in its transcript file's name. Undefined when unknown.
+ */
+export function fittedRecordingSha(vo: NonNullable<Episode['voiceover']>, recording: string): string | undefined {
+  return vo.recordingSha256?.[recording] ?? /^voiceover\.([0-9a-f]{16})\.transcript\.json$/.exec(vo.transcripts[recording] ?? '')?.[1];
+}
+
 /** Slots with a written line but no fitted voice-over line. */
 export function missingSlots(ep: Episode): string[] {
   const placed = new Set(ep.voiceover?.lines.map((l) => l.slot) ?? []);

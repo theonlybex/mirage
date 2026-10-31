@@ -7,13 +7,13 @@ import { encodeArgs, ffNum } from '../edl-compiler.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from '../project-store.js';
 import { MirageError } from './errors.js';
-import { loadCatalog } from './ingest.js';
+import { loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, clearLeftovers, type Lock } from './lock.js';
 import { checkCueFiles, cueTrack, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
-import { cutChanged, cutChangedError } from './voiceover.js';
+import { cutChanged, cutChangedError, fittedRecordingSha } from './voiceover.js';
 
 export const CHUNK_ITEMS = 30;
 /** Items per chunk when a source is larger than 1080p: every input of a chunk opens a decoder, and 4K ones are big. */
@@ -343,6 +343,11 @@ async function renderLocked(o: RenderOptions): Promise<{ outputPath: string; srt
   for (const rec of recordings) {
     const abs = resolve(project, rec);
     if (!existsSync(abs)) throw new MirageError('BAD_ITEM', `voice-over recording ${abs} is missing`, 'Reconnect the drive or put the recording back, then render again.');
+    // A recording saved over since the fit would play other words at the lines' times.
+    const was = fittedRecordingSha(ep.voiceover!, rec);
+    if (was && !(await sha256File(abs)).startsWith(was)) {
+      throw new MirageError('BAD_ITEM', `voice-over recording ${abs} changed since vo fitted it`, `Put back the recording you fitted, or run vo again with the new one: pnpm mirage vo <project> ${o.episode} <recording> (then --add for lines from other recordings).`);
+    }
   }
   const outputPath = join(dir, `${o.mode}.mp4`);
   const id = randomUUID();

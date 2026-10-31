@@ -93,6 +93,8 @@ export const EpisodeSchema = strictObject({
     lines: z.array(VoiceLineSchema),
     /** Recording path → its transcript file in the episode folder. Absent: voiceover.transcript.json (older episodes). */
     transcripts: z.record(z.string(), z.string()).default({}),
+    /** Recording path → its sha256 when it was fitted: a recording saved over is never used for lines cut from the old one. */
+    recordingSha256: z.record(z.string(), z.string()).optional(),
     /** Fingerprint of the cut the voice-over was fitted to (items before the fit's holds). */
     cutFingerprint: z.string().optional(),
     /** Fingerprint of the items right after the fit; any other value means the cut changed since. */

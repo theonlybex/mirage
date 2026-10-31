@@ -6,7 +6,7 @@ import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/share
 import { run } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
-import { ingestClips, loadCatalog } from './ingest.js';
+import { ingestClips, loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
@@ -318,6 +318,28 @@ describe('renderEpisode (real ffmpeg)', () => {
     await writeFile(join(project, 'episodes', '5', 'voiceover.transcript.json'), JSON.stringify({ words: [], segments: [], speech: [] }));
     const a = counting();
     await expect(renderEpisode({ project, episode: 5, mode: 'final', tools: a.tools })).rejects.toMatchObject({ code: 'BAD_ITEM', message: `voice-over recording ${join(project, 'gone.m4a')} is missing` });
+    expect(a.calls).toEqual([]);
+  }, 60_000);
+
+  it('stops before rendering a final cut whose recording was overwritten since vo fitted it', async () => {
+    await writeFile(join(project, 'take.m4a'), 'the take that was fitted');
+    const sha = await sha256File(join(project, 'take.m4a'));
+    const vo = { recording: 'take.m4a', transcripts: { 'take.m4a': 't.json' }, recordingSha256: { 'take.m4a': sha }, lines: [{ slot: 'n1', at: 0, src: { in: 0, out: 0.5 } }] };
+    await saveEpisode(project, ep(one, { number: 11, voiceover: vo }));
+    await mkdir(join(project, 'episodes', '11'), { recursive: true });
+    await writeFile(join(project, 'episodes', '11', 't.json'), JSON.stringify({ words: [], segments: [], speech: [] }));
+    await writeFile(join(project, 'take.m4a'), 'another take saved over it');
+    const a = counting();
+    await expect(renderEpisode({ project, episode: 11, mode: 'final', tools: a.tools })).rejects.toMatchObject({
+      code: 'BAD_ITEM',
+      message: `voice-over recording ${join(project, 'take.m4a')} changed since vo fitted it`,
+    });
+    expect(a.calls).toEqual([]);
+    // An episode from before recordingSha256 is checked against its transcript's name.
+    const older = { recording: 'take.m4a', transcripts: { 'take.m4a': `voiceover.${sha.slice(0, 16)}.transcript.json` }, lines: vo.lines };
+    await saveEpisode(project, ep(one, { number: 11, voiceover: older }));
+    await writeFile(join(project, 'episodes', '11', older.transcripts['take.m4a']), JSON.stringify({ words: [], segments: [], speech: [] }));
+    await expect(renderEpisode({ project, episode: 11, mode: 'final', tools: a.tools })).rejects.toMatchObject({ message: expect.stringContaining('changed since vo fitted it') });
     expect(a.calls).toEqual([]);
   }, 60_000);
 
