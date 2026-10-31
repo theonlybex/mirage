@@ -79,6 +79,7 @@ export async function probe(file: string): Promise<ProbeInfo> {
   // Cover art in an audio file is a one-picture "video" stream: not footage.
   const v = raw.streams?.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
   const a = raw.streams?.find((s) => s.codec_type === 'audio');
+  const audioStreams = raw.streams?.filter((s) => s.codec_type === 'audio').length ?? 0;
   const packets = await scanPackets(file);
   // Times are measured from the container's start, the zero ffmpeg seeks from (-ss) when rendering.
   const start = num(raw.format?.start_time) ?? 0;
@@ -120,6 +121,7 @@ export async function probe(file: string): Promise<ProbeInfo> {
     colorTransfer: hasVideo ? (v?.color_transfer ?? null) : null,
     ...(hasVideo && videoEnd !== null ? { videoDurationSec: r3(Math.max(0, videoEnd - start)) } : {}),
     ...(truncated ? { truncated } : {}),
+    ...(audioStreams > 1 ? { audioStreams } : {}),
   };
   return ProbeInfoSchema.parse(info);
 }

@@ -22,6 +22,8 @@ export interface ClipSource {
   path: string;
   hasAudio: boolean;
   durationSec: number;
+  /** The audio stream with the clip's sound (default the first). */
+  audioStream?: number;
 }
 
 export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSource> {
@@ -41,7 +43,7 @@ export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSourc
     if (!existsSync(clip.path)) {
       throw new MirageError('BAD_ITEM', `item ${item.id}: clip file ${clip.path} is missing`, 'Reconnect the drive or re-ingest the folder it moved to');
     }
-    map.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec });
+    map.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec, audioStream: clip.probe.audioStream });
   }
   return map;
 }
@@ -85,7 +87,7 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
       // aresample on the source clock drops what the seek read before src.in and pads silence before audio that
       // starts late (or across a gap), so sound stays with its picture. Cut at src.out before padding under a hold.
-      chains.push(`[${k}:a]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
+      chains.push(`[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
     } else {
       chains.push(`anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`);
     }

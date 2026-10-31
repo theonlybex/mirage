@@ -15,7 +15,9 @@ export const ProbeInfoSchema = z.object({
   videoDurationSec: z.number().min(0).optional(),
   /** The header promises more than the file holds (a copy or recording cut short); the durations are what is there. */
   truncated: z.boolean().optional(),
+  /** How many audio streams the file has, when more than one. */
+  audioStreams: z.number().int().min(2).optional(),
   /** Which audio stream (0 = first) has the clip's sound, when that is not the first (e.g. a silent system-audio track first). */
-  audioStream: z.number().int().min(0).optional(),
+  audioStream: z.number().int().min(1).optional(),
 });
 export type ProbeInfo = z.infer<typeof ProbeInfoSchema>;

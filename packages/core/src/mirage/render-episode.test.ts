@@ -66,7 +66,7 @@ describe('itemChunkArgs', () => {
     expect(graph).toContain('[1:v]setpts=PTS/20,fps=30:start_time=0:round=up,trim=end_frame=91,scale=960:540:');
   });
   it('keeps live audio only at real-time speed; sped-up items get silence', () => {
-    expect(graph).toContain('[0:a]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
+    expect(graph).toContain('[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]');
     expect(graph).toContain('anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=3,aformat=sample_fmts=fltp:channel_layouts=stereo[a1]');
     expect(graph).toContain('[v0][a0][v1][a1]concat=n=2:v=1:a=1[vcat][acat]');
     expect(args.at(-1)).toBe('/w/chunk-000.mov');

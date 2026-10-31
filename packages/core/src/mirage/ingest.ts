@@ -58,9 +58,9 @@ export interface IngestResult {
 }
 
 /** Transcribes a clip's audio. Returns null (and warns) when transcription fails; a clip with no speech gets an empty transcript. */
-async function transcribeClip(o: { tools: MediaTools; path: string; name: string; wav: string; durationSec: number; locale?: string; result: IngestResult; onStep?: (m: string) => void }): Promise<Transcript | null> {
+async function transcribeClip(o: { tools: MediaTools; path: string; name: string; wav: string; durationSec: number; audioStream?: number; locale?: string; result: IngestResult; onStep?: (m: string) => void }): Promise<Transcript | null> {
   try {
-    await o.tools.extractWav(o.path, o.wav, { timeoutMs: Math.max(10 * 60_000, o.durationSec * 500) });
+    await o.tools.extractWav(o.path, o.wav, { timeoutMs: Math.max(10 * 60_000, o.durationSec * 500), audioStream: o.audioStream });
     return await o.tools.transcribe(o.wav, { locale: o.locale, timeoutMs: Math.max(30 * 60_000, o.durationSec * 2000) });
   } catch (e) {
     o.onStep?.(`${o.name}: transcription failed, kept as silent footage`);
@@ -69,6 +69,19 @@ async function transcribeClip(o: { tools: MediaTools; path: string; name: string
   } finally {
     await rm(o.wav, { force: true }).catch(() => {});
   }
+}
+
+/**
+ * The audio stream with the clip's sound when it is not the first: the loudest, when the first is (near) silent and
+ * another is clearly louder (a screen recording's silent system-audio track before the microphone's).
+ */
+async function soundStream(tools: MediaTools, path: string, streams: number): Promise<number | undefined> {
+  const levels: number[] = [];
+  for (let i = 0; i < streams; i++) {
+    levels.push(await tools.measureLoudness(path, { audioStream: i }).then((l) => l.integratedLufs, () => -Infinity));
+  }
+  const loudest = levels.indexOf(Math.max(...levels));
+  return loudest > 0 && levels[0] <= -60 && levels[loudest] > levels[0] + 20 ? loudest : undefined;
 }
 
 /**
@@ -131,7 +144,7 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
         }
         if ((moved || prev.path === path) && prev.probe.hasAudio && prev.transcript === null) {
           // A transcription that failed last time: try again, keeping everything else about the clip.
-          transcript = await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, locale: o.locale, result, onStep: o.onStep });
+          transcript = await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, audioStream: prev.probe.audioStream, locale: o.locale, result, onStep: o.onStep });
           if (transcript) o.onStep?.(`${name}: transcribed`);
         }
         if (moved || transcript) {
@@ -144,7 +157,7 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
         } else result.skipped.push({ file: name, reason: 'already in the catalog' });
         continue;
       }
-      const probe = await o.tools.probe(path);
+      let probe = await o.tools.probe(path);
       if (!probe.hasVideo) {
         result.skipped.push({ file: name, reason: 'no video stream' });
         continue;
@@ -158,6 +171,13 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
         result.warnings.push(`${name} is HDR (${probe.colorTransfer}); colours will look washed out — export it as SDR (e.g. Photos → Export → "Most Compatible")`);
       }
 
+      if (probe.hasAudio && probe.audioStreams) {
+        const audioStream = await soundStream(o.tools, path, probe.audioStreams);
+        if (audioStream !== undefined) {
+          probe = { ...probe, audioStream };
+          result.warnings.push(`${name}: its first audio track is silent, so its sound is taken from track ${audioStream + 1}`);
+        }
+      }
       const videoSec = probe.videoDurationSec ?? probe.durationSec;
       if (probe.truncated) {
         result.warnings.push(`${name} looks cut short: its header promises more than the file holds, so only its first ${s1(probe.durationSec)} s can be used — copy or export it again if more was recorded`);
@@ -183,7 +203,7 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
 
       // null = no audio, or transcription failed (retried on the next ingest); no words = transcribed, nothing said.
       const transcript = probe.hasAudio
-        ? await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${id}.wav`), durationSec: probe.durationSec, locale: o.locale, result, onStep: o.onStep })
+        ? await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${id}.wav`), durationSec: probe.durationSec, audioStream: probe.audioStream, locale: o.locale, result, onStep: o.onStep })
         : null;
 
       let clip!: Clip;

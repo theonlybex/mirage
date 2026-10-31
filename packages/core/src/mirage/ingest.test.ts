@@ -325,4 +325,22 @@ describe('ingestClips against the source clock (real ffmpeg)', () => {
       expect.stringMatching(/^b-cut\.mp4 looks cut short: its header promises more than the file holds, so only its first \d\.\d s can be used/),
     ]);
   });
+
+  it('takes the sound from the loudest audio track when the first is silent, for the transcript and the kind', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-tracks-'));
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=4', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=4',
+      '-map', '0:v', '-map', '1:a', '-map', '2:a', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-t', '4', join(dir, 'screen.mov')]);
+    // "Transcribes" a WAV with sound as steady speech, and a silent one as nothing said.
+    const transcribe = async (wav: string) => {
+      const pcm = (await readFile(wav)).subarray(44);
+      let peak = 0;
+      for (let i = 0; i + 1 < pcm.length; i += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)));
+      return peak > 1000 ? words(20, 4) : words(0, 1);
+    };
+    const r = await ingestClips({ project: await mkdtemp(join(tmpdir(), 'we-proj-')), clipsDir: dir, tools: { ...real, transcribe } });
+    expect(r.added[0].probe).toMatchObject({ audioStreams: 2, audioStream: 1 });
+    expect(r.added[0].transcript?.words).toHaveLength(20);
+    expect(r.added[0].kind).toBe('talking');
+    expect(r.warnings).toEqual(['screen.mov: its first audio track is silent, so its sound is taken from track 2']);
+  });
 });

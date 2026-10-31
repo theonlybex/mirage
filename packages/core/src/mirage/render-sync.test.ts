@@ -87,4 +87,13 @@ describe('item timing against the source clock (real ffmpeg)', () => {
     expect(await rmsDb(out, 3.6, 1.3)).toBeGreaterThan(-30);
     expect(await framesShown(out, [0, 29, 30])).toEqual([0, 29, 10]);
   }, 60_000);
+
+  it('keeps the audio stream the catalog chose', async () => {
+    const f = join(dir, 'tracks.mov');
+    await gen(['-f', 'lavfi', '-i', NUMBERED(3), '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=3',
+      '-map', '0:v', '-map', '1:a', '-map', '2:a', '-c:v', 'libx264', '-c:a', 'aac', '-t', '3', f]);
+    const item = [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 2 }, audio: 'keep' }];
+    expect(await rmsDb(await render('track-1', item, new Map([['c001', { path: f, hasAudio: true, durationSec: 3 }]])), 0.2, 1.5)).toBeLessThan(-80);
+    expect(await rmsDb(await render('track-2', item, new Map([['c001', { path: f, hasAudio: true, durationSec: 3, audioStream: 1 }]])), 0.2, 1.5)).toBeGreaterThan(-30);
+  }, 60_000);
 });
