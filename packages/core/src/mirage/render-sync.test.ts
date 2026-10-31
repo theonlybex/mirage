@@ -28,7 +28,17 @@ async function rmsDb(file: string, ss: number, t: number): Promise<number> {
   return m && m[1] !== '-inf' ? Number(m[1]) : -Infinity;
 }
 
-const ep = (items: object[]) => EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 64, height: 36, fps: 10 }, items });
+/** 30 fps frames whose grey level rises with the frame number (one distinct level per frame for 5 s). */
+const NUMBERED30 = (d: number) => `color=black:s=64x36:r=30:d=${d},format=gray,geq=lum='16+1.5*N',format=yuv420p`;
+
+/** The grey level of every frame of `file`, in order. */
+async function levels(file: string): Promise<Buffer> {
+  const raw = `${file}.levels`;
+  await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map', '0:v', '-vf', 'scale=1:1:flags=area,format=gray', '-fps_mode', 'passthrough', '-f', 'rawvideo', raw]);
+  return readFile(raw);
+}
+
+const ep = (items: object[], fps = 10) => EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 64, height: 36, fps }, items });
 
 describe('item timing against the source clock (real ffmpeg)', () => {
   let tools: MediaTools;
@@ -86,6 +96,26 @@ describe('item timing against the source clock (real ffmpeg)', () => {
     expect(await rmsDb(out, 3.05, 0.4)).toBeLessThan(-80);
     expect(await rmsDb(out, 3.6, 1.3)).toBeGreaterThan(-30);
     expect(await framesShown(out, [0, 29, 30])).toEqual([0, 29, 10]);
+  }, 60_000);
+
+  it('shows every frame once of MKV and WebM footage, whose timestamps are rounded to the millisecond', async () => {
+    // 30 fps frame N is stored at N/30 rounded to the ms: frame 2 at 0.067 s, a little after its true 0.0667 s.
+    await gen(['-f', 'lavfi', '-i', NUMBERED30(3.5), '-c:v', 'libx264', '-qp', '0', join(dir, 'v30.mkv')]);
+    await gen(['-f', 'lavfi', '-i', NUMBERED30(5), '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=5', '-c:v', 'libvpx-vp9', '-lossless', '1', '-c:a', 'libopus', join(dir, 'v30.webm')]);
+    const sources = new Map([
+      ['c001', { path: join(dir, 'v30.mkv'), hasAudio: false, durationSec: 3.5 }],
+      ['c002', { path: join(dir, 'v30.webm'), hasAudio: true, durationSec: 5 }],
+    ]);
+    const out = join(dir, 'ms.mov');
+    const items = [
+      { id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 3 } },
+      { id: 'b', beat: 'problem', clip: 'c002', src: { in: 2.5, out: 4.5 }, audio: 'keep' },
+    ];
+    await tools.runFfmpeg(itemChunkArgs(layoutTimeline(ep(items, 30)), { width: 64, height: 36, fps: 30 }, sources, out));
+    // Output frame k of item a is source frame k, and of item b source frame 75 + k: no frame doubled, none dropped.
+    const [mkv, webm, rendered] = await Promise.all([levels(join(dir, 'v30.mkv')), levels(join(dir, 'v30.webm')), levels(out)]);
+    expect(rendered.subarray(0, 90)).toEqual(mkv.subarray(0, 90));
+    expect(rendered.subarray(90, 150)).toEqual(webm.subarray(75, 135));
   }, 60_000);
 
   it('keeps the audio stream the catalog chose', async () => {

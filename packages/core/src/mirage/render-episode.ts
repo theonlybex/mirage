@@ -70,6 +70,9 @@ const LOUDNORM_MIN_SEC = 3.1;
 /** loudnorm rejects targets outside [-70, -5] LUFS. */
 const lufs = (n: number) => ffNum(Math.min(-5, Math.max(-70, n)));
 
+/** Seconds a source frame may be stamped after the time it is picked for (a quarter of a frame at `fps`). */
+export const frameTolerance = (fps: number) => ffNum(1 / (4 * fps));
+
 export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: number; fps: number }, sources: Map<string, ClipSource>, output: string): string[] {
   const inputs: string[] = [];
   const chains: string[] = [];
@@ -87,9 +90,12 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2,` : '';
     // fps (right after setpts, so it drops frames before any crop or scale touches them) shows at each output frame
     // the latest source frame at or before its time: it holds a frame across a gap, and the first frame until a late
-    // video stream starts. The first trim keeps one frame past src.out for a hold and ends decoding there.
+    // video stream starts. A frame up to a quarter of an output frame late still counts as on time: MKV and WebM store
+    // times in milliseconds (30 fps frame 2 at 0.067 s, after its true 0.0667 s), and on-grid times would otherwise
+    // show every third frame twice and skip the next. The first trim keeps one frame past src.out for a hold and ends
+    // decoding there.
     chains.push(
-      `[${k}:v]setpts=PTS/${ffNum(item.speed)},fps=${ffNum(o.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}` +
+      `[${k}:v]setpts=(PTS-${frameTolerance(o.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}` +
         `scale=${o.width}:${o.height}:force_original_aspect_ratio=decrease,pad=${o.width}:${o.height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,` +
         `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`,
     );

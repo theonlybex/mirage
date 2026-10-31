@@ -211,9 +211,10 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
       // A clip shorter than the interval gets one frame, from its middle.
       const first = videoSec < interval ? r3(videoSec / 2) : 0;
       // Frame i shows the latest source frame at or before first + i × interval (start_time and round=up; plain fps
-      // picks the nearest frame, up to half an interval late), on the clock render seeks by (see itemChunkArgs).
+      // picks the nearest frame, up to half an interval late), on the clock render seeks by (see itemChunkArgs), with
+      // the same slack for frames stamped a few ms late (MKV and WebM round times to the ms).
       // Run inside the frames folder with a bare pattern: a % in the project path would be read as part of it.
-      await o.tools.runFfmpeg(['-noaccurate_seek', '-ss', String(first), '-i', path, '-vf', `fps=1/${interval}:start_time=0:round=up,scale=640:-2`, ...(first ? ['-frames:v', '1'] : []), '-q:v', '5', 'f%04d.jpg'], {
+      await o.tools.runFfmpeg(['-noaccurate_seek', '-ss', String(first), '-i', path, '-vf', `setpts=PTS-1/120/TB,fps=1/${interval}:start_time=0:round=up,scale=640:-2`, ...(first ? ['-frames:v', '1'] : []), '-q:v', '5', 'f%04d.jpg'], {
         cwd: framesDir,
         expectedDurationSec: probe.durationSec,
         timeoutMs: Math.max(120_000, probe.durationSec * 5000),
