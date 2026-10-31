@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeInfo, Transcript } from '@wordedits/shared';
@@ -60,5 +60,44 @@ describe('ingestClips', () => {
     const again = await ingestClips({ project, clipsDir: clips, tools });
     expect(again.added).toEqual([]);
     expect(again.skipped.map((s) => s.reason)).toEqual(['already in the catalog', 'already in the catalog']);
+  });
+});
+
+describe('ingestClips resilience', () => {
+  let real: MediaTools;
+  let good: string;
+  beforeAll(async () => {
+    real = await realMediaTools();
+    good = await mkdtemp(join(tmpdir(), 'we-good-'));
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=360x640:rate=30:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', join(good, 'phone.mov')]);
+  });
+
+  it('skips a corrupt file with a failed reason, cleans its frames, and still ingests later clips', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-bad-'));
+    await writeFile(join(dir, 'bad.mp4'), Buffer.alloc(2048, 7));
+    await copyFile(join(good, 'phone.mov'), join(dir, 'zgood.mov'));
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const tools: MediaTools = { ...real, transcribe: async () => words(10, 3) };
+    const r = await ingestClips({ project, clipsDir: dir, tools });
+    expect(r.added.map((c) => c.id)).toEqual(['c001']);
+    expect(r.added[0].path).toBe(join(dir, 'zgood.mov'));
+    expect(r.skipped).toHaveLength(1);
+    expect(r.skipped[0].file).toBe('bad.mp4');
+    expect(r.skipped[0].reason.startsWith('failed:')).toBe(true);
+    const cat = await loadCatalog(project);
+    expect(cat.clips.map((c) => c.id)).toEqual(['c001']);
+    expect(existsSync(join(project, 'frames', 'c001'))).toBe(true);
+    expect(cat.clips[0].frames.every((f) => !f.file.includes('\\'))).toBe(true);
+  });
+
+  it('keeps a clip as silent footage when transcription throws', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const steps: string[] = [];
+    const tools: MediaTools = { ...real, transcribe: async () => { throw new Error('no speech model'); } };
+    const r = await ingestClips({ project, clipsDir: good, tools, onStep: (m) => steps.push(m) });
+    expect(r.skipped).toEqual([]);
+    expect(r.added).toHaveLength(1);
+    expect(r.added[0].transcript).toBeNull();
+    expect(steps.some((m) => m.includes('transcription failed, kept as silent footage'))).toBe(true);
   });
 });
