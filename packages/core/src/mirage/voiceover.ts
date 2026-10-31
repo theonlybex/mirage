@@ -130,6 +130,25 @@ function mergeCuts(cuts: [number, number][]): [number, number][] {
   return out;
 }
 
+/** A run of sentences [from, to] that reads a line: `matched` of the line's words, in order. */
+type Cand = { from: number; to: number; score: number; matched: number };
+
+/**
+ * The separate readings of a line among its candidate spans, in recording order. Overlapping spans are one reading: the
+ * one covering most of the line wins (then the best score), so a later sub-span never drops the line's opening. A reading
+ * counts as a take only when it covers about as much of the line as the best one (a re-read of just its second half
+ * does not replace a full read).
+ */
+function takesOf(pool: Cand[], lineLength: number): Cand[] {
+  const best = Math.max(...pool.map((c) => c.score));
+  const ranked = pool.filter((c) => c.score >= best - 0.15).sort((a, b) => b.matched - a.matched || b.score - a.score || b.from - a.from);
+  const picked: Cand[] = [];
+  for (const c of ranked) if (!picked.some((p) => c.from <= p.to && p.from <= c.to)) picked.push(c);
+  const most = Math.max(...picked.map((c) => c.matched));
+  const slack = Math.max(1, Math.floor(0.1 * lineLength));
+  return picked.filter((c) => c.matched >= most - slack).sort((a, b) => a.from - b.from);
+}
+
 /**
  * Fits the lines read in `recording` into their slots. With `only`, fits just those slots (lines re-recorded in a new
  * take) and keeps every other placed line; without it, replaces the whole voice-over.
@@ -145,7 +164,6 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const written = targets ? allWritten.filter((s) => targets.has(s.id)) : allWritten;
   const fps = o.episode.output.fps;
 
-  type Cand = { from: number; to: number; score: number };
   const cands: Cand[][] = written.map((slot) => {
     const lineTokens = textTokens(slot.line);
     // A span must start and end on sentences that belong to the line (at least half of the sentence's words appear in
@@ -159,7 +177,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
         tokens = tokens.concat(sTokens[j]);
         if (!belongs[j]) continue;
         const score = similarity(tokens, lineTokens);
-        if (score >= 0.6) out.push({ from: i, to: j, score });
+        if (score >= 0.6) out.push({ from: i, to: j, score, matched: lcsLength(tokens, lineTokens) });
       }
     }
     return out;
@@ -187,11 +205,20 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const report: FitReport = { lines: [], extendedSec: 0 };
   let prevEnd = -1;
 
+  const lineKeys = written.map((s) => textTokens(s.line).join(' '));
   for (let k = 0; k < written.length; k++) {
     const after = cands[k].filter((c) => c.from > prevEnd);
     // The earliest first match of any later line caps this line, so a skipped line cannot let a retake land after a later one.
+    // A later slot with the same words is read later in the recording, so it caps nothing: it takes a later reading.
     let nextFirst = Infinity;
-    for (let m = k + 1; m < written.length; m++) for (const c of cands[m]) if (c.from > prevEnd && c.from < nextFirst) nextFirst = c.from;
+    let sameLater = 0;
+    for (let m = k + 1; m < written.length; m++) {
+      if (lineKeys[m] === lineKeys[k]) {
+        sameLater++;
+        continue;
+      }
+      for (const c of cands[m]) if (c.from > prevEnd && c.from < nextFirst) nextFirst = c.from;
+    }
     let pool = after.filter((c) => c.to < nextFirst);
     // Only takes past a later line's first read: a line re-read at the end. Place it (placement is by slot), but keep
     // the recording cursor where it was so the later lines it jumped over can still be found.
@@ -201,10 +228,11 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       report.lines.push({ slot: written[k].id, status: 'missing', takes: 0, overrunSec: 0 });
       continue;
     }
-    const best = Math.max(...pool.map((c) => c.score));
-    const good = pool.filter((c) => c.score >= best - 0.15);
-    const chosen = good.reduce((a, b) => (b.from > a.from ? b : a));
-    const takes = new Set(good.map((c) => c.from)).size;
+    const readings = takesOf(pool, textTokens(written[k].line).length);
+    // Leave one reading for each later slot with the same words: this slot gets the last take before those.
+    const own = Math.max(1, readings.length - sameLater);
+    const chosen = readings[own - 1];
+    const takes = own;
     if (!reReadLate) prevEnd = chosen.to;
 
     const span = words.slice(sentences[chosen.from].from, sentences[chosen.to].to + 1);

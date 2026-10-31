@@ -157,6 +157,50 @@ describe('fitVoiceover sentence containment', () => {
   });
 });
 
+describe('fitVoiceover span choice', () => {
+  const slotsOf = (...s: [string, number, number, string][]) => s.map(([id, start, end, line]) => ({ id, start, end, maxWords: 20, line }));
+
+  it('keeps a line\'s short opening sentence instead of a later sub-span that scores nearly as well', () => {
+    const line = 'Seven days. Last week I tried to ship a brand new weather app on iOS and Android.';
+    const rec = tx(said(line, 1));
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slotsOf(['n1', 0, 8, line])), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(ep.voiceover!.lines[0].src.in).toBeCloseTo(0.95);
+    expect(report.lines[0]).toMatchObject({ status: 'placed', takes: 1 });
+  });
+
+  it('counts one take when a single read splits into sentences, and two when the whole line is read twice', () => {
+    const line = 'I spent. A whole week rewriting the backend in Rust for nothing at all, honestly.';
+    const once = fitVoiceover({ episode: episode(slotsOf(['n1', 0, 8, line])), catalog: catalog(20), recording: 'vo.m4a', transcript: tx(said(line, 0)) });
+    expect(once.report.lines[0]).toMatchObject({ status: 'placed', takes: 1 });
+    expect(once.episode.voiceover!.lines[0].src.in).toBe(0);
+    const twice = fitVoiceover({ episode: episode(slotsOf(['n1', 0, 8, line])), catalog: catalog(20), recording: 'vo.m4a', transcript: tx([...said(line, 0), ...said(line, 6)]) });
+    expect(twice.report.lines[0]).toMatchObject({ status: 'placed', takes: 2 });
+    expect(twice.episode.voiceover!.lines[0].src.in).toBeCloseTo(5.95);
+  });
+
+  it('uses a full re-read, not a later re-read of only the line\'s second half', () => {
+    const line = 'Seven days. Last week I tried to ship a brand new weather app on iOS and Android.';
+    const rec = tx([...said(line, 0), ...said('Last week I tried to ship a brand new weather app on iOS and Android.', 6)]);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slotsOf(['n1', 0, 8, line])), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(ep.voiceover!.lines[0].src.in).toBe(0);
+    expect(report.lines[0]).toMatchObject({ status: 'placed', takes: 1 });
+  });
+});
+
+describe('fitVoiceover with the same line in two slots', () => {
+  it('gives each slot its own reading, in order', () => {
+    const slots = [
+      { id: 'n1', start: 0, end: 3, maxWords: 8, line: 'Ship it today.' },
+      { id: 'n2', start: 5, end: 8, maxWords: 8, line: 'Then it broke.' },
+      { id: 'n3', start: 10, end: 13, maxWords: 8, line: 'Ship it today.' },
+    ];
+    const rec = tx([...said('Ship it today.', 0), ...said('Then it broke.', 2), ...said('Ship it today.', 4)]);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: rec });
+    expect(ep.voiceover!.lines.map((l) => [l.slot, l.src.in])).toEqual([['n1', 0], ['n2', 1.95], ['n3', 3.95]]);
+    expect(report.lines.map((l) => l.takes)).toEqual([1, 1, 1]);
+  });
+});
+
 describe('holdAt in the frozen tail', () => {
   const held = (extra: object) => EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, overlays: [{ kind: 'label', text: 'x', start: 6.5, end: 7 }], ...extra });
   it('adds hold only when the point is inside an existing hold', () => {
