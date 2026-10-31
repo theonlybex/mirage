@@ -1,6 +1,6 @@
 import type { Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { detectRetakes, isFiller, normalizeWord, sentenceTokens, similarity, splitScript, splitSentences, textTokens } from './takes.js';
+import { detectRetakes, isFiller, joinCompounds, normalizeWord, sentenceTokens, similarity, splitScript, splitSentences, textTokens } from './takes.js';
 
 /** Words from text, 0.3 s each, back to back. */
 function words(text: string): Word[] {
@@ -100,5 +100,13 @@ describe('matching tokens (textTokens / sentenceTokens)', () => {
     expect(textTokens('v2 is 10x faster, a twenty-one-step fix')).toEqual(['v', 'two', 'is', 'ten', 'times', 'faster', 'a', 'twenty', 'one', 'step', 'fix']);
     // A lone "s" or "x" is a word, not a unit.
     expect(textTokens('x marks the s')).toEqual(['x', 'marks', 'the', 's']);
+  });
+});
+
+describe('joinCompounds', () => {
+  it('joins a split pair that the other side writes as one word', () => {
+    expect(joinCompounds(textTokens('We re-cut the intro'), new Set(['we', 'recut', 'the', 'intro']))).toEqual(['we', 'recut', 'the', 'intro']);
+    expect(joinCompounds(['a', 'speed', 'up'], new Set(['speedup']))).toEqual(['a', 'speedup']);
+    expect(joinCompounds(['real', 'time'], new Set(['real', 'time']))).toEqual(['real', 'time']);
   });
 });

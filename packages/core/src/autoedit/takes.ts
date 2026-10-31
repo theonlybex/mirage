@@ -141,6 +141,19 @@ export function textTokens(text: string): string[] {
   return text.split(/\s+/).flatMap(matchTokens).filter((t) => !FILLERS.has(t));
 }
 
+/**
+ * Joins each pair of neighbouring tokens that `vocab` (the other side's words) has as one word: a line's "re-cut" ([re,
+ * cut]) then matches a transcript's "recut", and a transcript's "speed up" a line's "speedup".
+ */
+export function joinCompounds(tokens: string[], vocab: Set<string>): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (i + 1 < tokens.length && vocab.has(tokens[i] + tokens[i + 1])) out.push(tokens[i] + tokens[++i]);
+    else out.push(tokens[i]);
+  }
+  return out;
+}
+
 /** Longest-common-subsequence length divided by the longer sequence's length. */
 export function similarity(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0;

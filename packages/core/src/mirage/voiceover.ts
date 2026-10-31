@@ -1,5 +1,5 @@
 import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
-import { isFiller, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
+import { isFiller, joinCompounds, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
 import { MirageError } from './errors.js';
 import { keptSegments } from './overlays.js';
 import { cutOf, slotsStale, slotsStaleError } from './slots.js';
@@ -278,17 +278,21 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
   const written = targets ? allWritten.filter((s) => targets.has(s.id)) : allWritten;
   const fps = start.output.fps;
 
-  const cands: Cand[][] = written.map((slot) => {
-    const lineTokens = textTokens(slot.line);
+  const spokenVocab = new Set(sTokens.flat());
+  const lineTokensOf = written.map((slot) => joinCompounds(textTokens(slot.line), spokenVocab));
+  const cands: Cand[][] = written.map((slot, k) => {
+    const lineTokens = lineTokensOf[k];
+    const lineVocab = new Set(lineTokens);
+    const spans = sTokens.map((t) => joinCompounds(t, lineVocab));
     // A span must start and end on sentences that belong to the line (at least half of the sentence's words appear in
     // order in the line), so retakes of a neighbour or "Um." never edge a span, even when neighbours share a word like "the".
-    const belongs = sTokens.map((t) => t.length > 0 && lcsLength(t, lineTokens) / t.length >= 0.5);
+    const belongs = spans.map((t) => t.length > 0 && lcsLength(t, lineTokens) / t.length >= 0.5);
     const out: Cand[] = [];
     for (let i = 0; i < sentences.length; i++) {
       if (!belongs[i]) continue;
       let tokens: string[] = [];
       for (let j = i; j < Math.min(sentences.length, i + 4); j++) {
-        tokens = tokens.concat(sTokens[j]);
+        tokens = tokens.concat(spans[j]);
         if (!belongs[j]) continue;
         const score = similarity(tokens, lineTokens);
         if (score >= 0.6) out.push({ from: i, to: j, score, matched: lcsLength(tokens, lineTokens), length: tokens.length });
@@ -351,7 +355,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       report.lines.push({ slot: written[k].id, status: kept ? 'kept' : 'missing', takes: 0, overrunSec: 0 });
       continue;
     }
-    const readings = takesOf(pool, textTokens(written[k].line).length);
+    const readings = takesOf(pool, lineTokensOf[k].length);
     // Leave one reading for each later slot with the same words: this slot gets the last take before those.
     const own = Math.max(1, readings.length - sameLater);
     const chosen = readings[own - 1];

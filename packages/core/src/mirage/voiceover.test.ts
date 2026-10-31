@@ -488,3 +488,13 @@ describe('lines not in English', () => {
     );
   });
 });
+
+describe('hyphenated words', () => {
+  it('match a transcript that writes them closed or split', () => {
+    const slots = [{ id: 'n1', start: 0, end: 5, maxWords: 8, line: 'We re-cut it.' }];
+    for (const spoken of ['We recut it.', 'We re cut it.']) {
+      const { report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: tx(said(spoken, 0)) });
+      expect(report.lines[0].status).toBe('placed');
+    }
+  });
+});
