@@ -9,3 +9,4 @@ export * from './slots.js';
 export * from './voiceover.js';
 export * from './voiceover-files.js';
 export * from './check.js';
+export * from './project.js';
