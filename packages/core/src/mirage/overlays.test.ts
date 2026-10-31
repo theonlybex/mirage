@@ -127,6 +127,14 @@ describe('speechWords with the written line', () => {
     }
   });
 
+  it('never captions written words the kept audio does not have', () => {
+    // The take stops at "the back." — the written line goes on to "backend in one long night".
+    const vo = tx(said('So I cashed the forecast and rewrote the back.', 20));
+    const words = speechWords(withLine('So I cached the forecast and rewrote the backend in one long night.', { in: 19.95, out: 23.95 }), catalog, vo);
+    expect(words.map((x) => x.w)).toEqual(['So', 'I', 'cached', 'the', 'forecast', 'and', 'rewrote', 'the', 'back.']);
+    expect(words[words.length - 1].end).toBeCloseTo(1 + 0.05 + 3.5, 3);
+  });
+
   it('keeps extra spoken words and drops written words that were never said', () => {
     const vo = tx(said('So the build really kept failing.', 20));
     const words = speechWords(withLine('So the build kept failing badly.', { in: 19.95, out: 23 }), catalog, vo);

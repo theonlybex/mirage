@@ -35,7 +35,8 @@ export function keptSegments(line: VoiceLine): { in: number; out: number; offset
 /**
  * Re-spells transcribed words (already on the output timeline) with the written line: tokens are aligned by LCS on
  * normalized words. Matches take the written spelling with the spoken timing; a differing run between matches becomes
- * the written run spread over the spoken run's time; extra spoken words stay; written words never spoken are dropped.
+ * the written run spread over the spoken run's time (unless it is much longer than the spoken run: then the spoken words
+ * stay); extra spoken words stay; written words never spoken are dropped.
  */
 export function alignWritten(spoken: Word[], text: string): Word[] {
   const written: string[] = [];
@@ -59,8 +60,10 @@ export function alignWritten(spoken: Word[], text: string): Word[] {
   const out: Word[] = [];
   const gap = (i0: number, i1: number, j0: number, j1: number) => {
     if (i1 <= i0) return; // written words never spoken
-    if (j1 <= j0) {
-      out.push(...spoken.slice(i0, i1)); // extra spoken words
+    // Extra spoken words; or a written run much longer than what was spoken there (the take stops short of the line):
+    // the spoken words stay as transcribed, so a caption never shows words the audio doesn't have.
+    if (j1 <= j0 || j1 - j0 > i1 - i0 + 1) {
+      out.push(...spoken.slice(i0, i1));
       return;
     }
     const t0 = spoken[i0].start;
