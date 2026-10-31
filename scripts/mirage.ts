@@ -147,7 +147,10 @@ async function main() {
     case 'vo': {
       const slots = values.slots?.split(',').map((s) => s.trim()).filter(Boolean);
       const { report } = await fitRecording({ project, episode: n, recording: resolveUserPath(fourth), tools, add: values.add, slots, onStep: (m) => console.log(`• ${m}`) });
-      for (const l of report.lines) console.log(`  ${l.slot}  ${l.status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec ? `  held picture +${l.overrunSec}s` : ''}`);
+      for (const l of report.lines) {
+        const status = l.status === 'kept' ? 'kept the earlier take (not found in this recording)' : l.status;
+        console.log(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec ? `  held picture +${l.overrunSec}s` : ''}`);
+      }
       const missing = report.lines.filter((l) => l.status === 'missing').map((l) => l.slot);
       console.log(`✓ voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ''}`);
       if (missing.length) console.log(`⚠ not found: ${missing.join(', ')} — record just those lines, then: pnpm mirage vo <project> ${n} <new recording> --add`);

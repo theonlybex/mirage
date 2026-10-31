@@ -52,7 +52,8 @@ function checkHold(item: Episode['items'][number]): typeof item {
 
 export interface FitLine {
   slot: string;
-  status: 'placed' | 'missing';
+  /** kept: re-recording was asked for (--add --slots) but the new recording lacks it, so the earlier take stays. */
+  status: 'placed' | 'missing' | 'kept';
   takes: number;
   overrunSec: number;
 }
@@ -230,7 +231,8 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     ...start,
     voiceover: {
       recording,
-      lines: prev ? prev.lines.filter((l) => !targets!.has(l.slot)) : [],
+      // Every earlier line stays until its slot gets a new take: a listed line the new recording lacks keeps its old one.
+      lines: prev ? prev.lines : [],
       transcripts: prev ? prev.transcripts : {},
       cutFingerprint: prev?.cutFingerprint ?? itemsFingerprint(start.items),
       baseItems: prev ? prev.baseItems : start.items,
@@ -259,7 +261,8 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     const reReadLate = pool.length === 0;
     if (reReadLate) pool = after;
     if (pool.length === 0) {
-      report.lines.push({ slot: written[k].id, status: 'missing', takes: 0, overrunSec: 0 });
+      const kept = ep.voiceover!.lines.some((l) => l.slot === written[k].id);
+      report.lines.push({ slot: written[k].id, status: kept ? 'kept' : 'missing', takes: 0, overrunSec: 0 });
       continue;
     }
     const readings = takesOf(pool, textTokens(written[k].line).length);
@@ -283,6 +286,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     const draft: VoiceLine = { slot: written[k].id, at: 0, src: { in: r3(srcIn), out: r3(srcOut) }, cuts: mergeCuts(cuts), ...lineRecording, text: written[k].line };
     const duration = keptSegments(draft).reduce((s, g) => s + g.out - g.in, 0);
 
+    ep = { ...ep, voiceover: { ...ep.voiceover!, lines: ep.voiceover!.lines.filter((l) => l.slot !== written[k].id) } };
     const slot = ep.slots.find((s) => s.id === written[k].id)!;
     const at = r3(slot.start + 0.15);
     let overrun = at + duration - (slot.end + 0.2);

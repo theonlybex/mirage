@@ -290,6 +290,16 @@ describe('fitVoiceover adding re-recorded lines', () => {
     expect(vo.fittedItemsFingerprint).toBe(itemsFingerprint(second.episode.items));
   });
 
+  it('keeps the earlier take of a listed line that the new recording does not have', () => {
+    const all = tx([...said('Open settings.', 0), ...said('Then toggle dark mode on and wait for it.', 2), ...said('Pick a nice accent colour.', 6)]);
+    const first = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: all });
+    const second = fitVoiceover({ episode: first.episode, catalog: catalog(20), recording: 'n2.m4a', transcript: retake, only: ['n1', 'n2'] });
+    expect(second.report.lines.map((l) => [l.slot, l.status])).toEqual([['n1', 'kept'], ['n2', 'placed']]);
+    const n1 = second.episode.voiceover!.lines.find((l) => l.slot === 'n1')!;
+    expect(n1).toEqual(first.episode.voiceover!.lines.find((l) => l.slot === 'n1'));
+    expect(second.episode.voiceover!.lines.map((l) => l.slot)).toEqual(['n1', 'n2', 'n3']);
+  });
+
   it('refuses to add lines once the cut has changed', () => {
     const first = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: full });
     const recut = { ...first.episode, items: [{ ...first.episode.items[0], src: { in: 1, out: 20 } }] };
