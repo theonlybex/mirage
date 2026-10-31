@@ -1,7 +1,7 @@
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { cutOf } from './slots.js';
-import { cutChanged, fitVoiceover, holdAt, missingSlots } from './voiceover.js';
+import { cutChanged, fitVoiceover, hasWords, holdAt, missingSlots } from './voiceover.js';
 import { itemsFingerprint, layoutTimeline, timelineDuration } from './timeline.js';
 
 function said(text: string, t0: number, per = 0.3): Word[] {
@@ -364,5 +364,17 @@ describe('fitVoiceover from the cut before the voice-over', () => {
     const refit = fitVoiceover({ episode: ep, catalog: catalog(20), recording: 'short.m4a', transcript: short });
     expect(refit.episode.items).toEqual(recut.items);
     expect(refit.episode.voiceover!.cutFingerprint).toBe(itemsFingerprint(recut.items));
+  });
+});
+
+describe('lines with no words', () => {
+  it('count as unwritten: not missing, not fitted', () => {
+    const slots = [SLOTS[0], { id: 'n2', start: 10, end: 12, maxWords: 4, line: '🚀🚀 …' }, { id: 'n3', start: 14, end: 18, maxWords: 4, line: 'Um.' }];
+    expect(hasWords('🚀🚀 …')).toBe(false);
+    expect(hasWords('Ship it 🚀')).toBe(true);
+    const { episode: ep, report } = fitVoiceover({ episode: episode(slots), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING });
+    expect(report.lines.map((l) => l.slot)).toEqual(['n1']);
+    expect(missingSlots(ep)).toEqual([]);
+    expect(() => fitVoiceover({ episode: episode(slots.slice(1)), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING })).toThrow(expect.objectContaining({ message: 'No narration lines are written yet' }));
   });
 });

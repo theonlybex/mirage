@@ -30,11 +30,14 @@ export function fittedRecordingSha(vo: NonNullable<Episode['voiceover']>, record
   return vo.recordingSha256?.[recording] ?? /^voiceover\.([0-9a-f]{16})\.transcript\.json$/.exec(vo.transcripts[recording] ?? '')?.[1];
 }
 
+/** True when a line has words to read: a line of only punctuation, emoji or "um" counts as not written. */
+export const hasWords = (line: string): boolean => textTokens(line).length > 0;
+
 /** Slots with a written line but no fitted voice-over line. */
 export function missingSlots(ep: Episode): string[] {
   const placed = new Set(ep.voiceover?.lines.map((l) => l.slot) ?? []);
   return ep.slots
-    .filter((s) => s.line.trim() && !placed.has(s.id))
+    .filter((s) => hasWords(s.line) && !placed.has(s.id))
     .sort((a, b) => a.start - b.start)
     .map((s) => s.id);
 }
@@ -193,7 +196,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
     start = reverted.episode;
     for (const d of reverted.dropped) report.warnings.push(`${d} was inside a frozen frame the earlier fit added, so it was dropped — place it again`);
   }
-  const allWritten = start.slots.filter((s) => s.line.trim()).sort((a, b) => a.start - b.start);
+  const allWritten = start.slots.filter((s) => hasWords(s.line)).sort((a, b) => a.start - b.start);
   const targets = o.only ? new Set(o.only) : null;
   const written = targets ? allWritten.filter((s) => targets.has(s.id)) : allWritten;
   const fps = start.output.fps;
