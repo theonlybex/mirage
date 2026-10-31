@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { TranscriptSchema, type Episode, type Transcript } from '@wordedits/shared';
@@ -30,6 +30,7 @@ export async function fitRecording(o: {
   const n = o.episode;
   const rec = resolve(o.recording);
   if (!existsSync(rec)) throw new MirageError('BAD_ITEM', `${rec} does not exist`, 'Pass the path of your voice-over recording.');
+  if (statSync(rec).isDirectory()) throw new MirageError('BAD_INPUT', `${rec} is a folder, not a recording`, 'Pass the path of your voice-over recording file.');
   const lock = await lockEpisode(project, n, 'vo');
   try {
     return await fitLocked(o, project, rec);
@@ -73,6 +74,9 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
     } finally {
       await rm(wav, { force: true });
     }
+    // Saved straight away, under the recording's content: a fit that fails (or is refused below) re-runs without
+    // transcribing again, and no other recording's lines point at this file.
+    await writeJsonFile(join(dir, file), TranscriptSchema, transcript, `episodes/${n}/${file}`);
   }
 
   const rel = relative(project, rec);
@@ -80,8 +84,10 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
   const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only });
   const vo = fit.episode.voiceover!;
   const episode: Episode = { ...fit.episode, voiceover: { ...vo, transcripts: { ...vo.transcripts, [recording]: file } } };
-  // Only after a successful fit: a failed fit must never leave a new transcript beside the old lines.
-  if (!reused) await writeJsonFile(join(dir, file), TranscriptSchema, transcript, `episodes/${n}/${file}`);
+  // Transcribing takes minutes: never save the fit over edits made to episode.json meanwhile.
+  if (JSON.stringify(await loadEpisode(project, n)) !== JSON.stringify(ep)) {
+    throw new MirageError('BUSY', 'episode.json changed while vo was running — run vo again', 'Your edits are kept, and the transcript is saved, so the re-run is quick.');
+  }
   await saveEpisode(project, episode, n);
   return { episode, report: fit.report, reused };
 }

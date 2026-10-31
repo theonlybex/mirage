@@ -54,12 +54,42 @@ describe('fitRecording', () => {
     expect(second.report.lines.map((l) => l.status)).toEqual(['placed', 'placed', 'placed']);
   });
 
-  it('writes no transcript when the fit fails, so it never pairs with the old lines', async () => {
-    const { project, tools } = await setup({ 'vo.m4a': tx(said('Totally unrelated speech.', 0)) });
+  it('leaves episode.json alone when the fit fails, but keeps the transcript (under its content name) so a re-run is quick', async () => {
+    const { project, tools, calls } = await setup({ 'vo.m4a': tx(said('Totally unrelated speech.', 0)) });
     const before = await readFile(join(project, 'episodes', '1', 'episode.json'), 'utf8');
     await expect(fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools })).rejects.toMatchObject({ code: 'NOTHING_MATCHED' });
-    expect((await readdir(join(project, 'episodes', '1'))).sort()).toEqual(['episode.json']);
+    const file = voTranscriptFile(await sha256File(join(project, 'vo.m4a')));
+    expect((await readdir(join(project, 'episodes', '1'))).sort()).toEqual(['episode.json', file]);
     expect(await readFile(join(project, 'episodes', '1', 'episode.json'), 'utf8')).toBe(before);
+    await expect(fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools })).rejects.toMatchObject({ code: 'NOTHING_MATCHED' });
+    expect(calls).toEqual(['vo.m4a']);
+  });
+
+  it('refuses to save over edits made to episode.json while it was transcribing, keeping the transcript for the re-run', async () => {
+    const full = tx([...said('Open settings.', 0), ...said('Then toggle dark mode on.', 2), ...said('Pick a nice accent colour.', 4)]);
+    const { project, tools, calls } = await setup({ 'vo.m4a': full });
+    const epFile = join(project, 'episodes', '1', 'episode.json');
+    const slow = {
+      ...tools,
+      transcribe: async (wav: string) => {
+        const ep = JSON.parse(await readFile(epFile, 'utf8'));
+        ep.slots[2].line = 'Pick a nicer accent colour.';
+        await writeFile(epFile, JSON.stringify(ep));
+        return tools.transcribe(wav);
+      },
+    } as MediaTools;
+    await expect(fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools: slow })).rejects.toMatchObject({ message: 'episode.json changed while vo was running — run vo again' });
+    const ep = await loadEpisode(project, 1);
+    expect(ep.slots[2].line).toBe('Pick a nicer accent colour.');
+    expect(ep.voiceover).toBeNull();
+    const again = await fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools });
+    expect(again.reused).toBe(true);
+    expect(calls).toEqual(['vo.m4a']);
+  });
+
+  it('says so when the recording is a folder', async () => {
+    const { project, tools } = await setup({});
+    await expect(fitRecording({ project, episode: 1, recording: join(project, 'episodes'), tools })).rejects.toMatchObject({ code: 'BAD_INPUT', message: `${join(project, 'episodes')} is a folder, not a recording` });
   });
 
   it('adds a recording of just the missing lines, keeping the placed ones and both transcripts', async () => {
