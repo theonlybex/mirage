@@ -3,8 +3,8 @@ packages:
 
 allowBuilds:
   esbuild: true
-  # Nothing bundles ffmpeg now; the package stays as a dev fallback (see packages/sidecars/src/locate.ts), without its download script.
-  ffmpeg-static: false
+  ffmpeg-static: true
 
 onlyBuiltDependencies:
+  - ffmpeg-static
   - esbuild

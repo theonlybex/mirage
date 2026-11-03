@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, expect, it } from 'vitest';
 import type { Encoder } from '../media-tools.js';
 import { bitrateFor, encodeArgs, ffNum } from './encode.js';

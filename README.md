@@ -36,7 +36,7 @@ pnpm test             # unit + integration (uses fixtures/)
 pnpm typecheck
 ```
 
-`pnpm install` runs the `esbuild` postinstall script because `pnpm-workspace.yaml` allows builds for it (pnpm 12 blocks postinstall scripts otherwise).
+`pnpm install` runs the `ffmpeg-static` postinstall script because `pnpm-workspace.yaml` allows builds for `ffmpeg-static` and `esbuild` (pnpm 12 blocks postinstall scripts otherwise).
 
 FFmpeg resolution order: `WORDEDITS_FFMPEG_DIR`, then PATH, then the `ffmpeg-static` package.
 
