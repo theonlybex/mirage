@@ -10,3 +10,4 @@ fixtures/tmp/
 packages/sidecars/bin/
 .worktrees/
 .superpowers/
+packages/viewer/dist-ui/

@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import '@fontsource-variable/google-sans-flex';
+import 'material-symbols/rounded.css';
+import './theme/tokens.css';
+import './theme/base.css';
+import './components/components.css';
+import './shell/shell.css';
+import './edit/edit.css';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { App } from './App.js';
+import { installMotion } from './theme/motion.js';
+import { applyTheme, savedTheme } from './shell/theme.js';
+
+applyTheme(savedTheme());
+installMotion();
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);

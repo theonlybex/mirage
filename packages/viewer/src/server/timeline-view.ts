@@ -2,19 +2,10 @@
 import { join, resolve } from 'node:path';
 import { layoutTimeline, timelineDuration } from '@wordedits/core';
 import { CatalogSchema, EpisodeSchema, type Catalog } from '@wordedits/shared';
+import type { TimelineView } from '../view-types.js';
 import { mediaPath } from './media.js';
 
-/** What the page draws of episode.json: the lanes with times in output seconds. `thumb` is a media path (the page adds the key). */
-export type TimelineView = {
-  status: 'empty' | 'ok' | 'editing';
-  title: string;
-  durationSec: number;
-  items: { id: string; beat: string; clip: string; start: number; end: number; thumb: string | null; quiet: boolean; speed: number }[];
-  overlays: { kind: string; text: string; tone: string; start: number; end: number }[];
-  music: { track: string; start: number; end: number }[];
-  slots: { id: string; start: number; end: number; line: string; maxWords: number }[];
-  voice: { slot: string; start: number; end: number }[];
-};
+export type { TimelineView };
 
 const emptyView = (status: TimelineView['status']): TimelineView => ({ status, title: '', durationSec: 0, items: [], overlays: [], music: [], slots: [], voice: [] });
 

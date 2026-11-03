@@ -10,6 +10,7 @@ import {
 import { SidecarError } from '@wordedits/sidecars';
 import { z } from 'zod';
 import { noteStillUrl, noteViews } from './events.js';
+import type { VideoSummary } from '../view-types.js';
 
 /** An error that becomes this HTTP status and `{ error }`. */
 export class HttpError extends Error {
@@ -105,7 +106,7 @@ export async function videoNumbers(project: string): Promise<number[]> {
   return names.filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a, b) => a - b);
 }
 
-async function listVideos(project: string) {
+async function listVideos(project: string): Promise<VideoSummary[]> {
   return Promise.all(
     (await videoNumbers(project)).map(async (number) => {
       const title = (await readVideo(project, number).catch(() => null))?.title ?? `Video ${number}`;

@@ -7,26 +7,16 @@ import {
   episodeDir, listVersions, noteStatuses, readControl, readNotes, readProgress, readSteps,
   type NoteStatus,
 } from '@wordedits/core';
-import type { Control, Note, Progress, StepLine, VersionMeta } from '@wordedits/shared';
+import type { Control, Note, Progress, StepLine } from '@wordedits/shared';
 import { mediaPath } from './media.js';
-import { buildTimelineView, type TimelineView } from './timeline-view.js';
+import { buildTimelineView } from './timeline-view.js';
+import type { EventType, NoteStatusView, NoteView, TimelineView, VersionView, VideoEvents } from '../view-types.js';
 
-/** A note with what Claude did with it, when it did something, and where its still is (a media path; the page adds the key). */
-export type NoteView = Note & Partial<NoteStatus> & { stillUrl: string };
-/** A version, with where its video is (a media path) when it has one. */
-export type VersionView = VersionMeta & { videoUrl?: string };
+export type { EventType, NoteView, VersionView, VideoEvents };
 
-/** The seven kinds of event the page gets for one video, each as the JSON of its `data:` line. */
-export type VideoEvents = {
-  timeline: TimelineView;
-  steps: StepLine[];
-  progress: Progress | null;
-  versions: VersionView[];
-  notes: NoteView[];
-  control: Control;
-  report: string | null;
-};
-export type EventType = keyof VideoEvents;
+// The page's copy of a note's status must take what core gives (a compile-time check).
+type Holds<T extends true> = T;
+export type NoteStatusFits = Holds<NoteStatus extends NoteStatusView ? true : false>;
 
 export const STEP_LIMIT = 200;
 export const DEBOUNCE_MS = 100;

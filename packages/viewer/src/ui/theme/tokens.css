@@ -1,0 +1,218 @@
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/*
+ * Mirage's Material 3 tokens (old spec §15). Colour: static TonalSpot scheme from seed #3B6EA8, standard contrast.
+ * Dark is the default; light is `data-theme="light"` on <html>. `--mirage-color-*` are Mirage's own extended colours
+ * (beats on the timeline, a success tone), defined for both themes like the system roles.
+ */
+
+/* Type, shape, state, elevation and motion: the same in both themes. */
+:root {
+  --md-ref-typeface-brand: 'Google Sans Flex Variable', 'Google Sans Flex', 'Roboto Flex', system-ui, sans-serif;
+  --md-ref-typeface-plain: 'Google Sans Flex Variable', 'Google Sans Flex', 'Roboto Flex', system-ui, sans-serif;
+
+  --md-sys-typescale-headline-small-font: var(--md-ref-typeface-brand);
+  --md-sys-typescale-headline-small-size: 24px;
+  --md-sys-typescale-headline-small-line-height: 32px;
+  --md-sys-typescale-headline-small-weight: 400;
+  --md-sys-typescale-headline-small-tracking: 0px;
+  --md-sys-typescale-title-large-font: var(--md-ref-typeface-brand);
+  --md-sys-typescale-title-large-size: 22px;
+  --md-sys-typescale-title-large-line-height: 28px;
+  --md-sys-typescale-title-large-weight: 400;
+  --md-sys-typescale-title-large-tracking: 0px;
+  --md-sys-typescale-title-medium-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-title-medium-size: 16px;
+  --md-sys-typescale-title-medium-line-height: 24px;
+  --md-sys-typescale-title-medium-weight: 500;
+  --md-sys-typescale-title-medium-tracking: 0.15px;
+  --md-sys-typescale-title-small-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-title-small-size: 14px;
+  --md-sys-typescale-title-small-line-height: 20px;
+  --md-sys-typescale-title-small-weight: 500;
+  --md-sys-typescale-title-small-tracking: 0.1px;
+  --md-sys-typescale-body-large-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-body-large-size: 16px;
+  --md-sys-typescale-body-large-line-height: 24px;
+  --md-sys-typescale-body-large-weight: 400;
+  --md-sys-typescale-body-large-tracking: 0.5px;
+  --md-sys-typescale-body-medium-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-body-medium-size: 14px;
+  --md-sys-typescale-body-medium-line-height: 20px;
+  --md-sys-typescale-body-medium-weight: 400;
+  --md-sys-typescale-body-medium-tracking: 0.25px;
+  --md-sys-typescale-body-small-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-body-small-size: 12px;
+  --md-sys-typescale-body-small-line-height: 16px;
+  --md-sys-typescale-body-small-weight: 400;
+  --md-sys-typescale-body-small-tracking: 0.4px;
+  --md-sys-typescale-label-large-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-label-large-size: 14px;
+  --md-sys-typescale-label-large-line-height: 20px;
+  --md-sys-typescale-label-large-weight: 500;
+  --md-sys-typescale-label-large-tracking: 0.1px;
+  --md-sys-typescale-label-medium-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-label-medium-size: 12px;
+  --md-sys-typescale-label-medium-line-height: 16px;
+  --md-sys-typescale-label-medium-weight: 500;
+  --md-sys-typescale-label-medium-tracking: 0.5px;
+  --md-sys-typescale-label-small-font: var(--md-ref-typeface-plain);
+  --md-sys-typescale-label-small-size: 11px;
+  --md-sys-typescale-label-small-line-height: 16px;
+  --md-sys-typescale-label-small-weight: 500;
+  --md-sys-typescale-label-small-tracking: 0.5px;
+  /* Selected states use the emphasized weight: one step heavier. */
+  --md-sys-typescale-emphasized-weight-step: 200;
+
+  --md-sys-shape-corner-none: 0px;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-large-increased: 20px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-extra-large-increased: 32px;
+  --md-sys-shape-corner-extra-extra-large: 48px;
+  --md-sys-shape-corner-full: 9999px;
+
+  --md-sys-state-hover-opacity: 0.08;
+  --md-sys-state-focus-opacity: 0.1;
+  --md-sys-state-pressed-opacity: 0.1;
+  --md-sys-state-dragged-opacity: 0.16;
+  --md-sys-state-disabled-content-opacity: 0.38;
+  --md-sys-state-disabled-container-opacity: 0.12;
+
+  /* Shadows only on floating toolbars, menus, sheets and dialogs: panels are separated by surface tone. */
+  --md-sys-elevation-level1: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+  --md-sys-elevation-level2: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 2px 6px 2px rgb(0 0 0 / 0.15);
+  --md-sys-elevation-level3: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 4px 8px 3px rgb(0 0 0 / 0.15);
+
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --md-sys-motion-easing-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --md-sys-motion-duration-short4: 200ms;
+  --md-sys-motion-duration-medium2: 300ms;
+  /*
+   * Springs (spatial: position and size; effects: colour and opacity). These cubic curves are the fallback;
+   * motion.ts replaces them with `linear()` curves sampled from the real springs when the browser has `linear()`.
+   */
+  --md-sys-motion-spring-default-spatial: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-spring-default-spatial-duration: 300ms;
+  --md-sys-motion-spring-fast-spatial: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-spring-fast-spatial-duration: 200ms;
+  --md-sys-motion-spring-default-effects: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-spring-default-effects-duration: 200ms;
+  --md-sys-motion-spring-fast-effects: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-spring-fast-effects-duration: 150ms;
+}
+
+/* Dark: the default (video work). */
+:root,
+:root[data-theme='dark'] {
+  --md-sys-color-primary: #A3C9FE;
+  --md-sys-color-on-primary: #00315B;
+  --md-sys-color-primary-container: #1E4875;
+  --md-sys-color-on-primary-container: #D3E4FF;
+  --md-sys-color-secondary: #BBC7DB;
+  --md-sys-color-on-secondary: #263141;
+  --md-sys-color-secondary-container: #3C4758;
+  --md-sys-color-on-secondary-container: #D7E3F8;
+  --md-sys-color-tertiary: #D8BDE3;
+  --md-sys-color-on-tertiary: #3C2947;
+  --md-sys-color-tertiary-container: #533F5E;
+  --md-sys-color-on-tertiary-container: #F5D9FF;
+  --md-sys-color-error: #FFB4AB;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000A;
+  --md-sys-color-on-error-container: #FFDAD6;
+  --md-sys-color-surface: #111418;
+  --md-sys-color-surface-container-lowest: #0C0E13;
+  --md-sys-color-surface-container-low: #191C20;
+  --md-sys-color-surface-container: #1D2024;
+  --md-sys-color-surface-container-high: #272A2F;
+  --md-sys-color-surface-container-highest: #32353A;
+  --md-sys-color-on-surface: #E1E2E8;
+  --md-sys-color-on-surface-variant: #C3C6CF;
+  --md-sys-color-outline: #8D9199;
+  --md-sys-color-outline-variant: #43474E;
+  --md-sys-color-inverse-surface: #E1E2E8;
+  --md-sys-color-inverse-on-surface: #2E3035;
+  --md-sys-color-inverse-primary: #39608F;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  --mirage-color-success: #A0D49B;
+  --mirage-color-on-success: #053911;
+  --mirage-color-success-container: #1F5125;
+  --mirage-color-on-success-container: #BCF0B5;
+  --mirage-color-beat-amber: #F1C048;
+  --mirage-color-beat-blue: #A3C9FE;
+  --mirage-color-beat-slate: #BBC7DB;
+  --mirage-color-beat-teal: #80D4DC;
+  --mirage-color-beat-coral: #FFB4AB;
+  --mirage-color-beat-violet: #D8BDE3;
+  --mirage-color-beat-pink: #FFB0CB;
+  --mirage-color-beat-green: #A0D49B;
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --md-sys-color-primary: #39608F;
+  --md-sys-color-on-primary: #FFFFFF;
+  --md-sys-color-primary-container: #D3E4FF;
+  --md-sys-color-on-primary-container: #1E4875;
+  --md-sys-color-secondary: #545F70;
+  --md-sys-color-on-secondary: #FFFFFF;
+  --md-sys-color-secondary-container: #D7E3F8;
+  --md-sys-color-on-secondary-container: #3C4758;
+  --md-sys-color-tertiary: #6C5677;
+  --md-sys-color-on-tertiary: #FFFFFF;
+  --md-sys-color-tertiary-container: #F5D9FF;
+  --md-sys-color-on-tertiary-container: #533F5E;
+  --md-sys-color-error: #BA1A1A;
+  --md-sys-color-on-error: #FFFFFF;
+  --md-sys-color-error-container: #FFDAD6;
+  --md-sys-color-on-error-container: #93000A;
+  --md-sys-color-surface: #F8F9FF;
+  --md-sys-color-surface-container-lowest: #FFFFFF;
+  --md-sys-color-surface-container-low: #F2F3FA;
+  --md-sys-color-surface-container: #ECEDF4;
+  --md-sys-color-surface-container-high: #E7E8EE;
+  --md-sys-color-surface-container-highest: #E1E2E8;
+  --md-sys-color-on-surface: #191C20;
+  --md-sys-color-on-surface-variant: #43474E;
+  --md-sys-color-outline: #73777F;
+  --md-sys-color-outline-variant: #C3C6CF;
+  --md-sys-color-inverse-surface: #2E3035;
+  --md-sys-color-inverse-on-surface: #EFF0F7;
+  --md-sys-color-inverse-primary: #A3C9FE;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  --mirage-color-success: #36693A;
+  --mirage-color-on-success: #FFFFFF;
+  --mirage-color-success-container: #BCF0B5;
+  --mirage-color-on-success-container: #1F5125;
+  --mirage-color-beat-amber: #775A00;
+  --mirage-color-beat-blue: #39608F;
+  --mirage-color-beat-slate: #545F70;
+  --mirage-color-beat-teal: #006A6F;
+  --mirage-color-beat-coral: #BA1A1A;
+  --mirage-color-beat-violet: #6C5677;
+  --mirage-color-beat-pink: #8E4A62;
+  --mirage-color-beat-green: #36693A;
+
+  color-scheme: light;
+}
+
+/* Reduced motion: spatial springs become effects springs (no overshoot, no travel). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --md-sys-motion-spring-default-spatial: var(--md-sys-motion-spring-default-effects);
+    --md-sys-motion-spring-default-spatial-duration: var(--md-sys-motion-spring-default-effects-duration);
+    --md-sys-motion-spring-fast-spatial: var(--md-sys-motion-spring-fast-effects);
+    --md-sys-motion-spring-fast-spatial-duration: var(--md-sys-motion-spring-fast-effects-duration);
+  }
+}
