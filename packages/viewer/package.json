@@ -1,0 +1,19 @@
+{
+  "name": "@wordedits/viewer",
+  "version": "0.0.1",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/server/server.ts",
+      "default": "./src/server/server.ts"
+    }
+  },
+  "dependencies": {
+    "@wordedits/core": "workspace:*",
+    "@wordedits/shared": "workspace:*",
+    "@wordedits/sidecars": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

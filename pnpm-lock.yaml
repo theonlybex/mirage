@@ -91,6 +91,21 @@ importers:
         specifier: ^3.1.0
         version: 3.1.0
 
+  packages/viewer:
+    dependencies:
+      '@wordedits/core':
+        specifier: workspace:*
+        version: link:../core
+      '@wordedits/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@wordedits/sidecars':
+        specifier: workspace:*
+        version: link:../sidecars
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
 packages:
 
   '@derhuerst/http-basic@8.2.4':
