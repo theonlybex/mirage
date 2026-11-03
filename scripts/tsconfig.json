@@ -2,5 +2,5 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": { "composite": false, "declaration": false, "sourceMap": false, "noEmit": true },
   "include": ["*.ts"],
-  "references": [{ "path": "../packages/shared" }, { "path": "../packages/sidecars" }, { "path": "../packages/core" }]
+  "references": [{ "path": "../packages/shared" }, { "path": "../packages/sidecars" }, { "path": "../packages/core" }, { "path": "../packages/mcp" }]
 }
