@@ -11,3 +11,4 @@ packages/sidecars/bin/
 .worktrees/
 .superpowers/
 packages/viewer/dist-ui/
+!plugin/dist/

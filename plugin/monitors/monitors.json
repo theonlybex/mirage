@@ -1,0 +1,7 @@
+[
+  {
+    "name": "viewer",
+    "description": "Mirage's live viewer",
+    "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/node\" \"${CLAUDE_PLUGIN_ROOT}/dist/viewer.mjs\" --project \"${CLAUDE_PROJECT_DIR}\" --ui \"${CLAUDE_PLUGIN_ROOT}/dist/viewer-ui\" --data \"${CLAUDE_PLUGIN_DATA}\""
+  }
+]

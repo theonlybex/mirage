@@ -1,0 +1,47 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Runs the Node.js 22 or later it can find, with all the arguments given: Mirage's hooks, engine and viewer start through
+# this, so they work whether or not Node is on the PATH Claude Code was started with.
+# Looked at in order: PATH, /opt/homebrew/bin/node, /usr/local/bin/node, the newest ~/.nvm/versions/node/*/bin/node, ~/.volta/bin/node.
+# MIRAGE_NODE_FIXED replaces the two fixed locations (a space-separated list); the tests use it.
+
+# Whether $1 is a Node of version 22 or later.
+usable() {
+  [ -n "$1" ] && [ -x "$1" ] || return 1
+  v=$("$1" --version 2>/dev/null) || return 1
+  v=${v#v}
+  major=${v%%.*}
+  case $major in '' | *[!0-9]*) return 1 ;; esac
+  [ "$major" -ge 22 ]
+}
+
+find_node() {
+  p=$(command -v node 2>/dev/null)
+  if usable "$p"; then NODE=$p; return 0; fi
+  for p in ${MIRAGE_NODE_FIXED-/opt/homebrew/bin/node /usr/local/bin/node}; do
+    if usable "$p"; then NODE=$p; return 0; fi
+  done
+  home=${HOME:-}
+  if [ -n "$home" ]; then
+    # Newest first, versions compared as numbers: "major minor patch path" lines, sorted on the first three columns.
+    p=$(
+      for d in "$home"/.nvm/versions/node/v*/bin/node; do
+        [ -x "$d" ] || continue
+        ver=${d#"$home"/.nvm/versions/node/v}
+        ver=${ver%%/*}
+        printf '%s %s\n' "$(printf '%s' "$ver" | tr . ' ')" "$d"
+      done | sort -k1,1nr -k2,2nr -k3,3nr | while read -r _ _ _ path; do
+        if usable "$path"; then printf '%s\n' "$path"; break; fi
+      done
+    )
+    if [ -n "$p" ]; then NODE=$p; return 0; fi
+    if usable "$home/.volta/bin/node"; then NODE=$home/.volta/bin/node; return 0; fi
+  fi
+  return 1
+}
+
+if find_node; then
+  exec "$NODE" "$@"
+fi
+echo 'Mirage needs Node.js 22 or later. Run /mirage:setup.' >&2
+exit 1

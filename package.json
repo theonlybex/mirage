@@ -13,12 +13,15 @@
     "fixtures": "tsx scripts/make-fixtures.ts",
     "mirage": "tsx scripts/mirage.ts",
     "build:native": "tsx scripts/build-native.ts",
-    "fixtures:speech": "tsx scripts/make-speech-fixture.ts"
+    "fixtures:speech": "tsx scripts/make-speech-fixture.ts",
+    "build:plugin": "tsx scripts/build-plugin.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
+    "vite": "^8.3.5",
     "vitest": "^5.0.2"
   },
   "dependencies": {

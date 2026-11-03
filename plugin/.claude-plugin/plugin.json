@@ -1,0 +1,9 @@
+{
+  "name": "mirage",
+  "displayName": "Mirage",
+  "version": "0.1.0",
+  "description": "Edit build-story videos: drop footage, watch the edit live, leave notes on the video.",
+  "author": { "name": "Mirage contributors" },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["video", "editing", "youtube"]
+}

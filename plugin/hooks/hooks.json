@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs",
+              "session-start"
+            ]
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs",
+              "pre"
+            ],
+            "timeout": 86400
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs",
+              "post"
+            ]
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs",
+              "post"
+            ]
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs",
+              "stop"
+            ],
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

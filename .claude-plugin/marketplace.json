@@ -1,0 +1,8 @@
+{
+  "name": "mirage",
+  "description": "Mirage: edit build-story videos in Claude Code.",
+  "owner": { "name": "Mirage contributors" },
+  "plugins": [
+    { "name": "mirage", "source": "./plugin", "description": "Edit build-story videos in Claude Code" }
+  ]
+}

@@ -1,4 +1,5 @@
 import type { ProbeInfo, Transcript } from '@wordedits/shared';
+import * as s from '@wordedits/sidecars';
 
 export type EncoderName = 'h264_videotoolbox' | 'h264_nvenc' | 'libx264';
 export interface Encoder {
@@ -25,8 +26,9 @@ export interface MediaTools {
   transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number; signal?: AbortSignal; transcriber?: string }): Promise<Transcript>;
 }
 
+// A static import, not import(): the plugin's bundler turns a dynamic import into lazily started modules, and that breaks the
+// order the MCP SDK's schemas need. Loading the sidecars costs little: they start no process and read no file until used.
 export async function realMediaTools(): Promise<MediaTools> {
-  const s = await import('@wordedits/sidecars');
   return {
     probe: s.probe,
     runFfmpeg: s.runFfmpeg,

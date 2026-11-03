@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "engine": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/engine.mjs"],
+      "env": {
+        "MIRAGE_PROJECT": "${CLAUDE_PROJECT_DIR}",
+        "WORDEDITS_TRANSCRIBER": "${CLAUDE_PLUGIN_DATA}/bin/wordedits-transcribe"
+      }
+    }
+  }
+}
