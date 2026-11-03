@@ -1,3 +1,5 @@
+> **Superseded (2026-11-02):** Mirage became a Claude Code plugin. See `2026-11-02-mirage-plugin-phase-1.md`.
+
 # Mirage Phase 1 (The App) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
