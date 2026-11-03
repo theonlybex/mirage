@@ -28199,8 +28199,11 @@ async function claimedControl(project2, n2) {
   }
   return best ? { ...best.control, correction: null } : null;
 }
+async function readWrittenControl(project2, n2) {
+  return await readControlFile(controlPath(project2, n2)) ?? await claimedControl(project2, n2);
+}
 async function readControl(project2, n2) {
-  return await readControlFile(controlPath(project2, n2)) ?? await claimedControl(project2, n2) ?? defaultControl();
+  return await readWrittenControl(project2, n2) ?? defaultControl();
 }
 async function writeControl(project2, n2, patch) {
   const next = ControlSchema.parse({ ...await readControl(project2, n2), ...patch, version: 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
@@ -28544,10 +28547,7 @@ async function sessionDirs(project2, n2) {
 var atOf = (s) => Date.parse(s.at) || 0;
 var NEVER2 = (/* @__PURE__ */ new Date(0)).toISOString();
 async function controlView(project2, n2) {
-  const c3 = await readControl(project2, n2);
-  if (c3.paused || c3.pauseNow || c3.stop || c3.correction !== null) return c3;
-  const written = await stat5(join10(episodeDir(project2, n2), "control.json")).then(() => true, () => false);
-  return written ? c3 : { ...c3, updatedAt: NEVER2 };
+  return await readWrittenControl(project2, n2) ?? { version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: NEVER2 };
 }
 var EventHub = class {
   constructor(project2) {

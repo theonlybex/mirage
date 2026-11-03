@@ -399,6 +399,18 @@ describe('events', () => {
     expect(ev.events.filter((e) => e.type === 'control')).toHaveLength(1);
   });
 
+  it('treats a broken control.json like a missing one: all off, dated never, sent once', async () => {
+    await writeFile(join(t.project, 'episodes', '1', 'control.json'), '{"paused": tru');
+    await start();
+    const ev = await openEvents();
+    expect(await ev.waitFor('control')).toMatchObject({ paused: false, stop: null, updatedAt: new Date(0).toISOString() });
+    await appendStep(sessionDir(t.project, 1, 's1'), { at: '2026-11-02T10:00:00.000Z', id: 'a', tool: 'Read', label: 'Reading x', status: 'done' });
+    await ev.waitFor('steps', (s) => s.length === 1);
+    await appendStep(sessionDir(t.project, 1, 's1'), { at: '2026-11-02T10:00:01.000Z', id: 'b', tool: 'Read', label: 'Reading y', status: 'done' });
+    await ev.waitFor('steps', (s) => s.length === 2);
+    expect(ev.events.filter((e) => e.type === 'control')).toHaveLength(1);
+  });
+
   it('gives versions with a video a videoUrl and notes a stillUrl, and the page can fetch both', async () => {
     await start();
     const id = await deliverRough();

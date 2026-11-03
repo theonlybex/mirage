@@ -30,6 +30,11 @@ async function clipId(d: Driver, name: string): Promise<string> {
   return clip.id;
 }
 
+/** What a stopped or cancelled command must not leave in a video's folder: work folders, half-written renders, its lock. */
+async function leftovers(dir: string): Promise<string[]> {
+  return (await readdir(dir)).filter((f) => f.startsWith('.work-') || f.includes('.partial-') || f === '.mirage.lock');
+}
+
 const episode = (items: unknown[], output = { width: 1280, height: 720, fps: 30 }) =>
   `${JSON.stringify({ version: 2, number: 1, title: 'The first cut', output, items }, null, 2)}\n`;
 
@@ -133,17 +138,21 @@ test('pause now, a correction on resume, then stop goes back to the last finishe
 
   // Pause now while the cut runs: the cut stops.
   const cutting = d.tool('cut', { video: 1 });
+  void cutting.catch(() => {}); // awaited below; a test that fails first mustn't also report it unhandled
   await expect(page.locator('.runbar__progress')).toBeVisible();
   await page.getByRole('button', { name: 'Pause', exact: true }).click();
   await page.getByRole('button', { name: /Pause now/ }).click();
   const cut = await cutting;
   expect(cut.isError).toBe(true);
   expect(cut.text).toContain('Stopped by the person');
+  const ep = join(d.project, 'episodes', '1');
+  expect(await leftovers(ep), 'nothing half-made after Pause now').toEqual([]);
   await expect(page.locator('.runbar')).toHaveAttribute('data-state', 'paused');
 
   // The next step is held while paused.
   let settled = false;
   const next = d.tool('cut', { video: 1 }).finally(() => (settled = true));
+  void next.catch(() => {}); // as above: close() ends a hook still held when the test fails
   await page.waitForTimeout(2000);
   expect(settled, 'the PreToolUse hook holds the next step while paused').toBe(false);
 
@@ -155,7 +164,6 @@ test('pause now, a correction on resume, then stop goes back to the last finishe
 
   // Stop: the page asks, then the Stop hook goes back to the last finished step when Claude's turn ends.
   const lastCheckpoint = await lastFinished(d);
-  const ep = join(d.project, 'episodes', '1');
   const checkpointed = await readFile(join(ep, 'versions', lastCheckpoint.id, 'episode.json'), 'utf8');
   // Before Stop, episode.json is the 60 s one, not the checkpoint's.
   expect(await readFile(join(ep, 'episode.json'), 'utf8')).not.toBe(checkpointed);
@@ -166,7 +174,7 @@ test('pause now, a correction on resume, then stop goes back to the last finishe
 
   expect(await readFile(join(ep, 'episode.json'), 'utf8')).toBe(checkpointed);
   expect(lastCheckpoint.label).toBe('Timeline checked');
-  expect((await readdir(ep)).filter((f) => f.startsWith('.work-'))).toEqual([]);
+  expect(await leftovers(ep), 'nothing half-made after Stop').toEqual([]);
   // The stop is cleared, so the person isn't locked out.
   await expect(page.locator('.runbar')).not.toHaveAttribute('data-state', 'stopping');
 });

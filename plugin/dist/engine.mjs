@@ -39141,8 +39141,11 @@ async function claimedControl(project2, n2) {
   }
   return best ? { ...best.control, correction: null } : null;
 }
+async function readWrittenControl(project2, n2) {
+  return await readControlFile(controlPath(project2, n2)) ?? await claimedControl(project2, n2);
+}
 async function readControl(project2, n2) {
-  return await readControlFile(controlPath(project2, n2)) ?? await claimedControl(project2, n2) ?? defaultControl();
+  return await readWrittenControl(project2, n2) ?? defaultControl();
 }
 var sessionStatePath = (project2, sessionId) => join10(resolve7(project2), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
 var emptySession = () => ({ video: null, overnight: null, awakePid: null });

@@ -32524,8 +32524,11 @@ async function claimedControl(project, n2) {
   }
   return best ? { ...best.control, correction: null } : null;
 }
+async function readWrittenControl(project, n2) {
+  return await readControlFile(controlPath(project, n2)) ?? await claimedControl(project, n2);
+}
 async function readControl(project, n2) {
-  return await readControlFile(controlPath(project, n2)) ?? await claimedControl(project, n2) ?? defaultControl();
+  return await readWrittenControl(project, n2) ?? defaultControl();
 }
 async function writeControl(project, n2, patch) {
   const next = ControlSchema.parse({ ...await readControl(project, n2), ...patch, version: 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
@@ -32993,6 +32996,7 @@ __export(src_exports2, {
   readSteps: () => readSteps,
   readVideo: () => readVideo,
   readWavMono: () => readWavMono,
+  readWrittenControl: () => readWrittenControl,
   realMediaTools: () => realMediaTools,
   refineTranscript: () => refineTranscript,
   refineWordTimes: () => refineWordTimes,

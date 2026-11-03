@@ -4,7 +4,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, resolve } from 'node:path';
 import {
-  episodeDir, listVersions, noteStatuses, readControl, readNotes, readProgress, readSteps,
+  episodeDir, listVersions, noteStatuses, readNotes, readWrittenControl, readProgress, readSteps,
   type NoteStatus,
 } from '@wordedits/core';
 import type { Control, Note, Progress, StepLine } from '@wordedits/shared';
@@ -51,19 +51,17 @@ async function sessionDirs(project: string, n: number): Promise<string[]> {
 
 const atOf = (s: StepLine) => Date.parse(s.at) || 0;
 
-/** When the control of a video without control.json was last changed: never. */
+/** When the control of a video that has no usable control.json was last changed: never. */
 const NEVER = new Date(0).toISOString();
 
 /**
- * The control of video `n`. Without control.json, readControl gives "all off, updated now"; the page gets it dated never
- * instead, so it reads the same every time. Every written control.json keeps its own date, so each write is a change the
- * page hears, even an "all off" one: the page keeps its own POST's answer until the stream sends something newer.
+ * The control of video `n`. With no usable control.json (none, a broken one, and no correction being taken), readControl
+ * gives "all off, updated now"; the page gets it dated never instead, so it reads the same every time and never looks newer
+ * than the page's own POST answer. Every written control keeps its own date, so each write is a change the page hears, even
+ * an "all off" one: the page keeps its own POST's answer until the stream sends something newer.
  */
 async function controlView(project: string, n: number): Promise<Control> {
-  const c = await readControl(project, n);
-  if (c.paused || c.pauseNow || c.stop || c.correction !== null) return c;
-  const written = await stat(join(episodeDir(project, n), 'control.json')).then(() => true, () => false);
-  return written ? c : { ...c, updatedAt: NEVER };
+  return (await readWrittenControl(project, n)) ?? { version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: NEVER };
 }
 
 /** Reads the state of videos for the page and keeps the timeline of each video's last good episode. */

@@ -110,9 +110,17 @@ async function claimedControl(project: string, n: number): Promise<Control | nul
   return best ? { ...best.control, correction: null } : null;
 }
 
+/**
+ * The control of video `n` as somebody wrote it: control.json, or a claimed one while a correction is being taken. Null when
+ * there is none or it is broken, i.e. when readControl falls back to "all off".
+ */
+export async function readWrittenControl(project: string, n: number): Promise<Control | null> {
+  return (await readControlFile(controlPath(project, n))) ?? (await claimedControl(project, n));
+}
+
 /** The user's control of video `n`. All off when the file is missing or broken: a bad file must never stop or pause a video. */
 export async function readControl(project: string, n: number): Promise<Control> {
-  return (await readControlFile(controlPath(project, n))) ?? (await claimedControl(project, n)) ?? defaultControl();
+  return (await readWrittenControl(project, n)) ?? defaultControl();
 }
 
 /** Merges `patch` into the control of video `n` and writes it atomically, setting `updatedAt`. */

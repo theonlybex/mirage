@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  appendLog, appendStep, clearProgress, readControl, readLog, readProgress, readSessionState, readSteps, sessionDir, takeCorrection, writeControl,
+  appendLog, appendStep, clearProgress, readControl, readLog, readWrittenControl, readProgress, readSessionState, readSteps, sessionDir, takeCorrection, writeControl,
   writeProgress, writeSessionState,
 } from './session-files.js';
 
@@ -85,6 +85,18 @@ describe('control', () => {
     expect(await readControl(dir, 1)).toMatchObject({ paused: false, pauseNow: false, stop: null, correction: null });
     await writeFile(join(dir, 'episodes', '1', 'control.json'), '{"version":1,"paused":"yes"}');
     expect((await readControl(dir, 1)).paused).toBe(false);
+  });
+
+  it('readWrittenControl is null without a usable file, the file when there is one, and a claimed one mid-take', async () => {
+    const dir = await project();
+    expect(await readWrittenControl(dir, 1)).toBeNull();
+    await writeFile(join(dir, 'episodes', '1', 'control.json'), '{"paused": tru');
+    expect(await readWrittenControl(dir, 1)).toBeNull();
+    const written = await writeControl(dir, 1, { paused: true, correction: 'x' });
+    expect(await readWrittenControl(dir, 1)).toEqual(written);
+    const { rename } = await import('node:fs/promises');
+    await rename(join(dir, 'episodes', '1', 'control.json'), join(dir, 'episodes', '1', 'control.json.take-dead'));
+    expect(await readWrittenControl(dir, 1)).toMatchObject({ paused: true, correction: null, updatedAt: written.updatedAt });
   });
 
   it('merges a patch, sets updatedAt and writes it atomically', async () => {

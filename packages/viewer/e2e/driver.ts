@@ -3,7 +3,7 @@
 // on stdin, as hooks/hooks.json says), talks to the engine over MCP stdio (as .mcp.json says), writes files itself for
 // Write, and starts the viewer the way monitors/monitors.json does, reading its stdout lines. Everything runs from plugin/,
 // the built plugin, on a temp project.
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
@@ -66,6 +66,18 @@ function run(cmd: string, args: string[], o: { cwd?: string } = {}): Promise<voi
   });
 }
 
+/** Ends a child process: SIGTERM, then SIGKILL if it is still there after 5 s. */
+async function end(p: ChildProcess): Promise<void> {
+  if (p.exitCode !== null || p.signalCode !== null) return;
+  const gone = new Promise<void>((ok) => p.once('exit', () => ok()));
+  p.kill('SIGTERM');
+  await Promise.race([gone, new Promise((ok) => setTimeout(ok, 5000))]);
+  if (p.exitCode === null && p.signalCode === null) {
+    p.kill('SIGKILL');
+    await Promise.race([gone, new Promise((ok) => setTimeout(ok, 1000))]);
+  }
+}
+
 export class Driver {
   readonly sessionId = randomUUID();
   /** Every line the viewer printed to stdout, in order: what Claude Code would hear from the monitor. */
@@ -75,6 +87,8 @@ export class Driver {
   private viewerStderr = '';
   private lineWaiters: (() => void)[] = [];
   private toolIds = 0;
+  /** Hook processes still running (a PreToolUse held by a pause can wait for a day): close() ends them. */
+  private readonly hooks = new Set<ChildProcess>();
 
   private constructor(
     readonly root: string,
@@ -95,29 +109,35 @@ export class Driver {
     }
     if (process.platform === 'darwin' && !existsSync(BUILT_TRANSCRIBER)) await run('pnpm', ['build:native'], { cwd: ROOT });
     const root = await mkdtemp(join(tmpdir(), 'mirage-e2e-'));
-    const project = join(root, 'project');
-    const clips = join(root, CLIPS_FOLDER);
-    const pluginData = join(root, 'plugin data');
-    await mkdir(project, { recursive: true });
-    await mkdir(clips, { recursive: true });
-    for (const f of ['tone-6s.mp4', 'silent-6s.mp4']) await copyFile(join(ROOT, 'fixtures', f), join(clips, f));
-    // The speech helper where the SessionStart hook would compile it (a fresh copy is newer than its source, so the hook
-    // doesn't start swiftc), and where .mcp.json points WORDEDITS_TRANSCRIBER.
-    if (existsSync(BUILT_TRANSCRIBER)) {
-      await mkdir(join(pluginData, 'bin'), { recursive: true });
-      await copyFile(BUILT_TRANSCRIBER, join(pluginData, 'bin', 'wordedits-transcribe'));
+    // Anything failing from here on leaves no temp folder behind.
+    try {
+      const project = join(root, 'project');
+      const clips = join(root, CLIPS_FOLDER);
+      const pluginData = join(root, 'plugin data');
+      await mkdir(project, { recursive: true });
+      await mkdir(clips, { recursive: true });
+      for (const f of ['tone-6s.mp4', 'silent-6s.mp4']) await copyFile(join(ROOT, 'fixtures', f), join(clips, f));
+      // The speech helper where the SessionStart hook would compile it (a fresh copy is newer than its source, so the hook
+      // doesn't start swiftc), and where .mcp.json points WORDEDITS_TRANSCRIBER.
+      if (existsSync(BUILT_TRANSCRIBER)) {
+        await mkdir(join(pluginData, 'bin'), { recursive: true });
+        await copyFile(BUILT_TRANSCRIBER, join(pluginData, 'bin', 'wordedits-transcribe'));
+      }
+      const env: Record<string, string> = {
+        ...(process.env as Record<string, string>),
+        CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        CLAUDE_PROJECT_DIR: project,
+        WORDEDITS_FFMPEG_DIR: await ffmpegDir(root),
+      };
+      // Nothing of the test runner's own settings may reach the plugin's processes.
+      for (const k of ['MIRAGE_PROJECT', 'WORDEDITS_TRANSCRIBER', 'NODE_OPTIONS']) delete env[k];
+      await o.extraClips?.(clips, env);
+      return new Driver(root, project, clips, pluginData, env);
+    } catch (e) {
+      await rm(root, { recursive: true, force: true });
+      throw e;
     }
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
-      CLAUDE_PLUGIN_DATA: pluginData,
-      CLAUDE_PROJECT_DIR: project,
-      WORDEDITS_FFMPEG_DIR: await ffmpegDir(root),
-    };
-    // Nothing of the test runner's own settings may reach the plugin's processes.
-    for (const k of ['MIRAGE_PROJECT', 'WORDEDITS_TRANSCRIBER', 'NODE_OPTIONS']) delete env[k];
-    await o.extraClips?.(clips, env);
-    return new Driver(root, project, clips, pluginData, env);
   }
 
   // ---- the engine (MCP over stdio, as .mcp.json starts it) ----
@@ -165,6 +185,8 @@ export class Driver {
     };
     const stdout = await new Promise<string>((ok, fail) => {
       const p = spawn(expand(entry.command, this.env), entry.args.map((a) => expand(a, this.env)), { cwd: this.project, env: this.env });
+      this.hooks.add(p);
+      p.on('exit', () => this.hooks.delete(p));
       let out = '';
       let err = '';
       p.stdout.on('data', (c: Buffer) => (out += c.toString('utf8')));
@@ -276,13 +298,9 @@ export class Driver {
 
   /** Ends the viewer and the engine; removes the temp folders unless `keep` (a failed test keeps them to look at). */
   async close(keep = false): Promise<void> {
-    const viewer = this.viewer;
-    if (viewer && viewer.exitCode === null) {
-      const gone = new Promise<void>((ok) => viewer.once('exit', () => ok()));
-      viewer.kill('SIGTERM');
-      await Promise.race([gone, new Promise((ok) => setTimeout(ok, 5000))]);
-      if (viewer.exitCode === null) viewer.kill('SIGKILL');
-    }
+    // Hooks still running (one held by a pause polls for up to a day) and the viewer: SIGTERM, then SIGKILL after 5 s.
+    await Promise.all([...this.hooks, ...(this.viewer ? [this.viewer] : [])].map(end));
+    this.hooks.clear();
     await this.client?.close().catch(() => {});
     if (!keep) await rm(this.root, { recursive: true, force: true });
   }
