@@ -8,3 +8,5 @@ packages/*/dist/
 *.tsbuildinfo
 fixtures/tmp/
 packages/sidecars/bin/
+.worktrees/
+.superpowers/
