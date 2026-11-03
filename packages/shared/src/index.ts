@@ -6,3 +6,4 @@ export * from './schemas/catalog.js';
 export * from './schemas/episode.js';
 export * from './schemas/library.js';
 export * from './schemas/strict.js';
+export * from './schemas/version.js';

@@ -14,3 +14,5 @@ export * from './word-timing.js';
 export * from './encode.js';
 export * from './json-file.js';
 export * from './cancel.js';
+export * from './versions.js';
+export * from './labels.js';
