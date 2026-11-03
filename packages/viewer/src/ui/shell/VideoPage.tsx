@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useEvents } from '../api.js';
 import { Chip } from '../components/Chip.js';
 import { Icon } from '../components/Icon.js';
 import { Spinner } from '../components/Spinner.js';
 import { EditTab } from '../edit/EditTab.js';
 import { hrefFor, replaceRoute, type Tab } from '../route.js';
-import { ReportTab, ReviewTab, VersionsTab } from './LaterTabs.js';
+import { Report } from '../report/Report.js';
+import { ReviewTab } from '../review/ReviewTab.js';
+import { VersionsList } from '../versions/VersionsList.js';
 import { TopAppBar } from './TopAppBar.js';
 import { useVideos } from './videos.js';
 
@@ -17,6 +19,12 @@ export function VideoPage({ video, tab, trailing }: { video: number; tab: Tab; t
   const live = useEvents(video);
   const { videos } = useVideos();
   const title = videos?.find((v) => v.number === video)?.title ?? live.timeline?.title ?? `Video ${video}`;
+  // The version Review plays, when the person picked one (in Review, or with Play in Versions); null is the newest delivery.
+  const [reviewChoice, setReviewChoice] = useState<string | null>(null);
+  const watch = (id: string | null) => {
+    setReviewChoice(id);
+    window.location.hash = hrefFor({ page: 'video', video, tab: 'review' });
+  };
   const tabs: Tab[] = live.report !== null ? ['edit', 'review', 'versions', 'report'] : ['edit', 'review', 'versions'];
 
   useEffect(() => {
@@ -69,11 +77,17 @@ export function VideoPage({ video, tab, trailing }: { video: number; tab: Tab; t
         ) : tab === 'edit' ? (
           <EditTab video={video} live={live} />
         ) : tab === 'review' ? (
-          <ReviewTab versions={live.versions ?? []} />
+          <ReviewTab video={video} live={live} chosen={reviewChoice} onChoose={setReviewChoice} />
         ) : tab === 'versions' ? (
-          <VersionsTab versions={live.versions ?? []} />
+          live.versions === null ? (
+            <div className="versions" aria-busy="true" aria-label="Loading the versions">
+              <div className="skeleton" style={{ height: 240 }} />
+            </div>
+          ) : (
+            <VersionsList video={video} versions={live.versions} onPlay={watch} />
+          )
         ) : live.report !== null ? (
-          <ReportTab report={live.report} />
+          <Report report={live.report} onOpenVideo={() => watch(null)} />
         ) : null}
       </main>
     </>

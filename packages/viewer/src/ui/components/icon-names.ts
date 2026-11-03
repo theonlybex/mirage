@@ -3,15 +3,20 @@
 // which writes its outlined and filled paths into icon-paths.generated.ts. A name used but not listed is a type error.
 
 export const ICONS = [
+  'add_comment',
+  'alt_route',
   'arrow_back',
   'bedtime',
+  'block',
   'check',
   'chevron_right',
   'cloud_off',
   'dark_mode',
+  'delete',
   'error',
   'history',
   'image',
+  'keyboard_arrow_down',
   'light_mode',
   'link_off',
   'list',
@@ -21,6 +26,8 @@ export const ICONS = [
   'pause',
   'pause_circle',
   'play_arrow',
+  'rate_review',
+  'record_voice_over',
   'refresh',
   'send',
   'smart_display',
@@ -28,6 +35,7 @@ export const ICONS = [
   'stop_circle',
   'title',
   'undo',
+  'upload_file',
   'video_library',
   'warning',
 ] as const;

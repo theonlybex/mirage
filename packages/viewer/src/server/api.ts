@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { randomUUID } from 'node:crypto';
-import { access, constants, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { access, constants, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
-import { isAbsolute, join } from 'node:path';
+import { extname, isAbsolute, join } from 'node:path';
 import {
   addNote, deleteNote, describeError, episodeDir, listVersions, MirageError, readNotes, readVideo, restoreVersion, sendNotes,
   updateNote, videoStage, writeControl, readControl, JsonFileError, type MediaTools,
@@ -10,14 +10,11 @@ import {
 import { SidecarError } from '@wordedits/sidecars';
 import { z } from 'zod';
 import { noteStillUrl, noteViews } from './events.js';
+import { HttpError } from './http-error.js';
+import { multipartBoundary, readMultipart } from './multipart.js';
 import type { VideoSummary } from '../view-types.js';
 
-/** An error that becomes this HTTP status and `{ error }`. */
-export class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
+export { HttpError };
 
 export type ApiContext = {
   project: string;
@@ -75,6 +72,16 @@ async function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
   }
   if (over) throw tooLarge();
   return Buffer.concat(chunks);
+}
+
+/** Reads and drops what is left of a body (up to the same bound) so the answer reaches a sender that is still sending. */
+async function drain(req: IncomingMessage): Promise<void> {
+  let size = 0;
+  const giveUp = Date.now() + DRAIN_MS;
+  for await (const c of req) {
+    size += (c as Buffer).length;
+    if (size > DRAIN_BYTES || Date.now() > giveUp) break;
+  }
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -187,13 +194,101 @@ async function voiceNote(ctx: ApiContext, req: IncomingMessage, url: URL): Promi
   }
 }
 
+const sayVoiceover = (ctx: ApiContext, video: number, path: string) =>
+  ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${video}: ${path}. Use the mirage:voiceover skill.`);
+
+/** `/api/voiceover`: the path of a recording (JSON, for Claude's side), or the recording itself (form data, from the page). */
 async function voiceover(ctx: ApiContext, req: IncomingMessage): Promise<ApiResult> {
+  const boundary = multipartBoundary(req.headers['content-type']);
+  if (boundary !== null) return voiceoverUpload(ctx, req, boundary);
   const b = z.object({ video: VideoNumber, path: z.string().min(1) }).parse(await readJson(req));
   await requireVideo(ctx.project, b.video);
   if (!isAbsolute(b.path) || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(b.path)) throw new HttpError(400, 'Give the full path of the recording.');
   if (!(await stat(b.path).then((s) => s.isFile(), () => false))) throw new HttpError(400, `There is no recording at ${b.path}.`);
-  ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${b.video}: ${b.path}. Use the mirage:voiceover skill.`);
+  sayVoiceover(ctx, b.video, b.path);
   return { status: 200, body: { ok: true } };
+}
+
+/** The most a dropped recording may be (a long phone video still fits). */
+export const VOICEOVER_LIMIT = 4 * 1024 ** 3;
+/** What a voice-over recording can be: the audio and video files ffmpeg reads that people record with. */
+export const RECORDING_EXTENSIONS = ['aac', 'aif', 'aiff', 'caf', 'flac', 'm4a', 'm4v', 'mov', 'mp3', 'mp4', 'ogg', 'opus', 'wav', 'webm'];
+const NAME_LIMIT = 120;
+
+/**
+ * A file name from the browser made safe to save: its last path part, without control and format characters or the
+ * characters other systems refuse, never hidden (no leading dot), at most 120 characters with its extension kept.
+ */
+export function safeFileName(name: string): string {
+  let s = (name.split(/[/\\]/).pop() ?? '').normalize('NFC');
+  s = s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').replace(/[<>:"|?*]/g, '_').replace(/\s+/g, ' ').trim().replace(/^[.\s]+/, '');
+  if (s.length > NAME_LIMIT) {
+    const ext = extname(s).slice(0, 16);
+    s = s.slice(0, NAME_LIMIT - ext.length).trimEnd() + ext;
+  }
+  return s || 'recording';
+}
+
+/** Takes the name `name` in `dir` (or `name (2)`, `name (3)`, …) by creating it empty, so two uploads never share one. */
+async function claimName(dir: string, name: string): Promise<string> {
+  const ext = extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let i = 1; i < 1000; i++) {
+    const path = join(dir, i === 1 ? name : `${stem} (${i})${ext}`);
+    try {
+      await writeFile(path, '', { flag: 'wx' });
+      return path;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    }
+  }
+  throw new HttpError(409, 'There are too many recordings with that name. Rename the file and drop it again.');
+}
+
+/**
+ * The recording's bytes, as form data with the field `video` before the file: saved under
+ * episodes/<n>/voiceover/<its name> (a new name if that is taken), then said to Claude like a path.
+ */
+async function voiceoverUpload(ctx: ApiContext, req: IncomingMessage, boundary: string): Promise<ApiResult> {
+  if (Number(req.headers['content-length']) > VOICEOVER_LIMIT + 64 * 1024) throw new HttpError(413, 'That is too large.');
+  let video = 0;
+  let dir = '';
+  let name = '';
+  // Read without ending the request on a refusal: what is left is drained below, so the browser gets the answer.
+  const read = readMultipart(req.iterator({ destroyOnReturn: false }), boundary, {
+    fileLimit: VOICEOVER_LIMIT,
+    open: async (fields, filename) => {
+      if (fields.video === undefined) throw new HttpError(400, 'Say which video before the file: the form field “video”.');
+      video = VideoNumber.parse(Number(fields.video));
+      await requireVideo(ctx.project, video);
+      name = safeFileName(filename);
+      if (!RECORDING_EXTENSIONS.includes(extname(name).slice(1).toLowerCase())) {
+        throw new HttpError(400, 'That doesn’t look like a recording. Drop an audio or video file, such as .m4a, .mp3, .wav or .mov.');
+      }
+      dir = join(episodeDir(ctx.project, video), 'voiceover');
+      await mkdir(dir, { recursive: true });
+      return join(dir, `.upload-${randomUUID()}`);
+    },
+  });
+  const { file } = await read.catch(async (e: unknown) => {
+    await drain(req).catch(() => {});
+    throw e;
+  });
+  if (!file) throw new HttpError(400, 'There is no recording in the upload.');
+  if (file.size === 0) {
+    await rm(file.path, { force: true });
+    throw new HttpError(400, 'The recording is empty.');
+  }
+  let path: string;
+  try {
+    path = await claimName(dir, name);
+    await rename(file.path, path);
+  } catch (e) {
+    await rm(file.path, { force: true });
+    throw e;
+  }
+  sayVoiceover(ctx, video, path);
+  return { status: 200, body: { ok: true, path } };
 }
 
 async function overnight(ctx: ApiContext, req: IncomingMessage): Promise<ApiResult> {

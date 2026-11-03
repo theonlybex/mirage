@@ -642,6 +642,44 @@ describe('API', () => {
     expect(lines).toHaveLength(2);
   });
 
+  it('voiceover upload saves the file and says the line', async () => {
+    await start();
+    const bytes = Buffer.from(Array.from({ length: 300_000 }, (_, i) => (i * 31) % 256));
+    const upload = (name: string, o: { video?: string; key?: string; body?: Blob } = {}) => {
+      const form = new FormData();
+      if (o.video !== '') form.append('video', o.video ?? '1');
+      form.append('file', o.body ?? new Blob([bytes], { type: 'audio/mp4' }), name);
+      return fetch(`${base()}/api/voiceover`, { method: 'POST', headers: { 'x-mirage-key': o.key ?? viewer.key }, body: form });
+    };
+    const dir = join(t.project, 'episodes', '1', 'voiceover');
+
+    const r = await upload('../My take: 1.m4a');
+    expect(r.status).toBe(200);
+    const saved = join(dir, 'My take_ 1.m4a');
+    expect(await r.json()).toEqual({ ok: true, path: saved });
+    expect((await readFile(saved)).equals(bytes)).toBe(true);
+    expect(lines[1]).toBe(`Mirage viewer: the person dropped a voice-over recording for video 1: ${saved}. Use the mirage:voiceover skill.`);
+
+    // The same name again keeps the first recording.
+    const again = await upload('My take: 1.m4a', { body: new Blob(['second']) });
+    expect(await again.json()).toEqual({ ok: true, path: join(dir, 'My take_ 1 (2).m4a') });
+    expect(await readFile(join(dir, 'My take_ 1 (2).m4a'), 'utf8')).toBe('second');
+    expect((await readFile(saved)).equals(bytes)).toBe(true);
+    expect(lines).toHaveLength(3);
+
+    // Refused: no key, a video that does not exist, no video, not a recording, an empty file. Nothing is kept or said.
+    expect((await upload('a.m4a', { key: 'wrong' })).status).toBe(403);
+    expect((await upload('a.m4a', { video: '9' })).status).toBe(404);
+    expect((await upload('a.m4a', { video: '' })).status).toBe(400);
+    const notAudio = await upload('notes.txt');
+    expect(notAudio.status).toBe(400);
+    expect((await notAudio.json()).error).toMatch(/recording/);
+    expect((await upload('empty.m4a', { body: new Blob([]) })).status).toBe(400);
+    expect((await readdir(dir)).sort()).toEqual(['My take_ 1 (2).m4a', 'My take_ 1.m4a']);
+    expect(existsSync(join(t.project, 'episodes', '9'))).toBe(false);
+    expect(lines).toHaveLength(3);
+  });
+
   it('says which videos the person wants edited overnight', async () => {
     await start();
     await mkdir(join(t.project, 'episodes', '2'));

@@ -49,6 +49,17 @@ export const get = <T>(path: string): Promise<T> => call<T>(path, { method: 'GET
 export const post = <T>(path: string, body: unknown): Promise<T> =>
   call<T>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
+export const del = <T>(path: string): Promise<T> => call<T>(path, { method: 'DELETE' });
+
+/** Sends raw bytes (a voice note) with their type. */
+export const postBytes = <T>(path: string, body: Blob, type: string): Promise<T> => call<T>(path, { method: 'POST', headers: { 'content-type': type }, body });
+
+/** Sends form data; the browser writes the multipart boundary itself. */
+export const postForm = <T>(path: string, form: FormData): Promise<T> => call<T>(path, { method: 'POST', body: form });
+
+/** How a component calls the server with JSON: `post`, or a stand-in in tests. */
+export type Post = (path: string, body: unknown) => Promise<unknown>;
+
 /**
  * What the page knows of a video: each part null until the server first sends it (progress and report can also be null
  * from the server). `loaded` is true once every part has come at least once; `connected` while the stream is up;
