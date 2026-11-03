@@ -13,6 +13,8 @@ Mirage viewer: the person wants videos 2, 3 edited overnight. Use the mirage:ove
 
 With no such line, ask which videos (`mcp__plugin_mirage_engine__status` lists them). Each needs to have been started with its footage folders (the edit skill's step 0).
 
+First load the `mirage:edit` skill with the Skill tool, then follow its rules throughout: the `episode.json` fields, how to read `⚠` and `✖` lines, and what to do when the person pauses, corrects or stops you.
+
 ## 1. Check the Mac
 Call `mcp__plugin_mirage_engine__overnight` with `{ videos: [2, 3] }`. It checks that the Mac is plugged in, that the disk has room for tonight's renders and that the tools are installed, then keeps the Mac awake until this session ends.
 
@@ -35,7 +37,7 @@ Never ask the person anything; nobody is there to answer. Instead, write it down
 - What only the person can answer (a number for a counter, what went wrong off screen, how long something took) goes in with kind `question`. Leave that thing out of the video meanwhile: never invent footage, numbers or events.
 - Doubts about your own choices go in with kind `concern`: "The montage may be too long for how little happens in it."
 
-Write each in plain words, one point per entry. The `⚠` lines the engine prints are already kept for the morning report; act on them where you can and don't log them again.
+Write each in plain words, one point per entry. The `⚠` lines of the tools that take a video (`check`, `cut`, `slots`, `guide` …) are already kept for that video's morning report; act on them where you can and don't log them again. The `⚠` lines of `ingest` and `music` may not land on the right video when several are edited in one night: log each one that matters for a video with kind `concern` for that video.
 
 ## 4. When a step fails
 A step that fails with a `✖` is tried once more, after fixing what its message says if you can. If it fails again, log a `concern` saying what failed, and move on to the next video.

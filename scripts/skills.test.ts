@@ -39,7 +39,7 @@ const toolsNamed = (text: string) => [...new Set([...text.matchAll(/mcp__plugin_
 /**
  * The old CLI skill's rule lines in their tool spelling. Only command spellings change: `pnpm mirage <cmd> <project> <n>`
  * becomes the tool `<cmd>`, the `--add`/`--slots` flags become the tool's `add`/`slots`, and paths lose their `<project>/` (the project is
- * the folder Claude Code runs in). Every other word stays.
+ * the folder Claude Code runs in). One more: Claude can't send the guide file, the viewer shows it. Every other word stays.
  */
 function toolSpelling(line: string): string {
   return line
@@ -49,7 +49,8 @@ function toolSpelling(line: string): string {
     .replace(/`pnpm mirage (\w+) <project> <n>`/g, '`$1`')
     .replace(/`--add --slots (\w+)`/g, '`add: true, slots: ["$1"]`')
     .replaceAll('`--add`', '`add: true`')
-    .replaceAll('`<project>/', '`');
+    .replaceAll('`<project>/', '`')
+    .replaceAll('Then `guide` and send `guide.mp4`.', 'Then `guide`.');
 }
 
 describe('the plugin skills', () => {
@@ -113,6 +114,10 @@ describe('the plugin skills', () => {
 
   it('the skills that run on engine output say to use the tool when a message suggests a command', () => {
     for (const name of ['edit', 'voiceover'] as const) expect(read(name)).toMatch(/never run `pnpm`/i);
+  });
+
+  it.each(['notes', 'voiceover', 'overnight'] as const)('%s loads the edit skill first, whose rules it relies on', (name) => {
+    expect(read(name)).toContain('First load the `mirage:edit` skill with the Skill tool, then ');
   });
 
   it('the old CLI skill and setup file are gone, so there is one source', () => {

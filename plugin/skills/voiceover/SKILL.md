@@ -13,7 +13,7 @@ Mirage viewer: the person dropped a voice-over recording for video 2: “/Users/
 
 Use the path between “ and ” exactly as it is. With no such line, ask the person which video and where the recording is (`mcp__plugin_mirage_engine__status` lists the videos).
 
-Follow the rules of the mirage:edit skill throughout: how to read `⚠` and `✖` lines, what to do when the person pauses, corrects or stops you, and never inventing anything. Engine messages here often carry a command-line hint, such as `… vo … --add` or `Run: … slots <project> 2`: call the matching engine tool instead (`--add` is `add: true`, `--slots n2,n5` is `slots: ["n2", "n5"]`). Never run `pnpm` or any other command for Mirage's steps.
+First load the `mirage:edit` skill with the Skill tool, then follow its rules throughout: how to read `⚠` and `✖` lines, what to do when the person pauses, corrects or stops you, and never inventing anything. Engine messages here often carry a command-line hint, such as `… vo … --add` or `Run: … slots <project> 2`: call the matching engine tool instead (`--add` is `add: true`, `--slots n2,n5` is `slots: ["n2", "n5"]`). Never run `pnpm` or any other command for Mirage's steps.
 
 ## 1. Fit it
 Call `mcp__plugin_mirage_engine__vo` with `{ video: n, recording: "<path>" }`.

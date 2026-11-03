@@ -214,7 +214,7 @@ Only for people who record screen tutorials in Tella. Everyone else can skip thi
 
 **Check:** `claude mcp list` shows `tella` connected.
 
-**If sign-in gets stuck:** run `rm -rf ~/.mcp-auth` and connect again.
+**If sign-in gets stuck:** removing `~/.mcp-auth` clears the saved sign-ins and lets them connect again, but it signs them out of every other connected tool too. Ask the person first and say so; only on a yes, run `rm -rf ~/.mcp-auth` and connect again.
 
 ### Epidemic Sound (the sound designer, Phase 4)
 

@@ -13,7 +13,7 @@ Mirage viewer: the person sent 3 note(s) on video 2 (V1 · Rough cut). Use the m
 
 The part in brackets names the version they watched. With no such line (they typed `/mirage:notes`), ask which video, or call `mcp__plugin_mirage_engine__status` to list the videos.
 
-Follow the rules of the mirage:edit skill throughout: how to read `⚠` and `✖` lines, what to do when the person pauses, corrects or stops you, never writing inside footage folders, and never inventing footage, numbers or events. When an engine message carries a command-line hint, call the matching engine tool instead; never run `pnpm`.
+First load the `mirage:edit` skill with the Skill tool, then follow its rules throughout: how to read `⚠` and `✖` lines, what to do when the person pauses, corrects or stops you, never writing inside footage folders, and never inventing footage, numbers or events. When an engine message carries a command-line hint, call the matching engine tool instead; never run `pnpm`.
 
 ## 1. Read the notes
 Call `mcp__plugin_mirage_engine__get_notes` with `{ video: n }`. It gives the newest round of notes, each as:
