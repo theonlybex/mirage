@@ -34,10 +34,9 @@ npm i -g pnpm
 pnpm install          # also downloads ffmpeg/ffprobe static builds for dev
 pnpm test             # unit + integration (uses fixtures/)
 pnpm typecheck
-pnpm render <edl.json> <input.mp4> [preview|final]
 ```
 
-`pnpm install` runs the `ffmpeg-static` postinstall script because `pnpm-workspace.yaml` allows builds for `ffmpeg-static` and `esbuild` (pnpm 12 blocks postinstall scripts otherwise).
+`pnpm install` runs the `esbuild` postinstall script because `pnpm-workspace.yaml` allows builds for it (pnpm 12 blocks postinstall scripts otherwise).
 
 FFmpeg resolution order: `WORDEDITS_FFMPEG_DIR`, then PATH, then the `ffmpeg-static` package.
 
@@ -45,5 +44,5 @@ FFmpeg resolution order: `WORDEDITS_FFMPEG_DIR`, then PATH, then the `ffmpeg-sta
 
 - `packages/shared` – zod schemas and types for every project file
 - `packages/sidecars` – ffmpeg/ffprobe location, spawning, parsing
-- `packages/core` – project store, EDL compiler, render orchestrator (no Electron)
+- `packages/core` – the Mirage engine: catalog, timeline, render, voice-over (no Electron)
 - `fixtures/` – tiny generated MP4s for tests (`pnpm fixtures` regenerates)

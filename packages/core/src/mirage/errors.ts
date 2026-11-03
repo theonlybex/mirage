@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ZodError } from 'zod';
-import { describeZodError } from '../project-store.js';
+import { describeZodError } from './json-file.js';
 
 export class MirageError extends Error {
   override name = 'MirageError';

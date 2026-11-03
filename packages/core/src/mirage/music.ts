@@ -4,7 +4,7 @@ import { readdir } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { MusicLibrarySchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type MusicTrack, type TimelineItem } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
-import { readJsonFile, writeJsonFile } from '../project-store.js';
+import { readJsonFile, writeJsonFile } from './json-file.js';
 import { errorReason, MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
 import { decodeMono, detectTempo } from './tempo.js';

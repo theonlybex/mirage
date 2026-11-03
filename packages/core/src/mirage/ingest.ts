@@ -4,7 +4,7 @@ import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { CatalogSchema, type Catalog, type Clip, type ClipKind, type ProbeInfo, type Transcript } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
-import { JsonFileError, readJsonFile, writeJsonFile } from '../project-store.js';
+import { JsonFileError, readJsonFile, writeJsonFile } from './json-file.js';
 import { errorReason, MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
 import { refineTranscript } from './word-timing.js';

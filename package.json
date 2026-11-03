@@ -1,6 +1,7 @@
 {
   "name": "wordedits",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -10,7 +11,6 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b packages/shared packages/sidecars packages/core scripts",
     "fixtures": "tsx scripts/make-fixtures.ts",
-    "render": "tsx scripts/render.ts",
     "mirage": "tsx scripts/mirage.ts",
     "build:native": "tsx scripts/build-native.ts",
     "fixtures:speech": "tsx scripts/make-speech-fixture.ts"

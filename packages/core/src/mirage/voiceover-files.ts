@@ -4,7 +4,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { TranscriptSchema, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
-import { readJsonFile, writeJsonFile } from '../project-store.js';
+import { readJsonFile, writeJsonFile } from './json-file.js';
 import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';

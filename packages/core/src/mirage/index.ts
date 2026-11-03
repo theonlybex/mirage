@@ -11,3 +11,5 @@ export * from './voiceover-files.js';
 export * from './check.js';
 export * from './project.js';
 export * from './word-timing.js';
+export * from './encode.js';
+export * from './json-file.js';
