@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { EpisodeSchema, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import type { MediaTools } from '../media-tools.js';
+import { SidecarError } from '@wordedits/sidecars';
 import { sha256File } from './ingest.js';
 import { acquireLock } from './lock.js';
 import { loadEpisode, loadVoiceoverTranscripts, saveEpisode } from './render-episode.js';
@@ -64,6 +65,24 @@ describe('fitRecording', () => {
     expect(await readFile(join(project, 'episodes', '1', 'episode.json'), 'utf8')).toBe(before);
     await expect(fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools })).rejects.toMatchObject({ code: 'NOTHING_MATCHED' });
     expect(calls).toEqual(['vo.m4a']);
+  });
+
+  it('a cancelled fit leaves episode.json unchanged', async () => {
+    const full = tx([...said('Open settings.', 0), ...said('Then toggle dark mode on.', 2), ...said('Pick a nice accent colour.', 4)]);
+    const { project, tools } = await setup({ 'vo.m4a': full });
+    const dir = join(project, 'episodes', '1');
+    const before = await readFile(join(dir, 'episode.json'));
+    const ac = new AbortController();
+    const stopped = {
+      ...tools,
+      transcribe: async () => {
+        ac.abort();
+        throw new SidecarError('transcriber', 'CANCELLED', 'transcriber was stopped', 'Stopped on request.');
+      },
+    } as MediaTools;
+    await expect(fitRecording({ project, episode: 1, recording: join(project, 'vo.m4a'), tools: stopped, signal: ac.signal })).rejects.toMatchObject({ code: 'CANCELLED', name: 'MirageError' });
+    expect((await readFile(join(dir, 'episode.json'))).equals(before)).toBe(true);
+    expect(await readdir(dir)).toEqual(['episode.json']);
   });
 
   it('refuses to save over edits made to episode.json while it was transcribing, keeping the transcript for the re-run', async () => {

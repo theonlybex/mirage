@@ -6,7 +6,7 @@ import { describeZodError } from './json-file.js';
 export class MirageError extends Error {
   override name = 'MirageError';
   constructor(
-    public code: 'BAD_ITEM' | 'BAD_INPUT' | 'BUSY' | 'NO_PROJECT' | 'NO_CATALOG' | 'NO_EPISODE' | 'NO_MUSIC_TRACK' | 'NOTHING_MATCHED' | 'DURATION_MISMATCH',
+    public code: 'BAD_ITEM' | 'BAD_INPUT' | 'BUSY' | 'NO_PROJECT' | 'NO_CATALOG' | 'NO_EPISODE' | 'NO_MUSIC_TRACK' | 'NOTHING_MATCHED' | 'DURATION_MISMATCH' | 'CANCELLED',
     message: string,
     public hint: string,
   ) {

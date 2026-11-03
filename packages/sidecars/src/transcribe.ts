@@ -41,7 +41,7 @@ interface RawWord {
   conf?: unknown;
 }
 
-export async function transcribeAudio(audioPath: string, opts: { locale?: string; timeoutMs?: number } = {}): Promise<Transcript> {
+export async function transcribeAudio(audioPath: string, opts: { locale?: string; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Transcript> {
   if (process.platform !== 'darwin') {
     throw new SidecarError(NAME, 'NOT_FOUND', 'On-device transcription is only available on macOS for now', 'Use a Mac with macOS 26 or later.');
   }
@@ -54,6 +54,7 @@ export async function transcribeAudio(audioPath: string, opts: { locale?: string
   const { stdout } = await runPath(NAME, bin, [audioPath, '--locale', opts.locale ?? 'en-US'], {
     timeoutMs: opts.timeoutMs ?? 30 * 60_000,
     notFoundHint: 'Run: pnpm build:native',
+    signal: opts.signal,
   });
 
   let raw: { words?: RawWord[] };

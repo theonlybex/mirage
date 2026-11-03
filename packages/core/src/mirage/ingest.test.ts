@@ -3,7 +3,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rename, stat, truncate, writeFile }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProbeInfo, Transcript } from '@wordedits/shared';
-import { run } from '@wordedits/sidecars';
+import { run, SidecarError } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { frameInterval, guessKind, ingestClips, loadCatalog } from './ingest.js';
@@ -44,6 +44,16 @@ describe('ingestClips', () => {
     await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=360x640:rate=30:duration=3', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', join(clips, 'phone.mov')]);
     await writeFile(join(clips, 'notes.txt'), 'not a clip');
     await writeFile(join(clips, '.hidden.mp4'), 'not a clip');
+  });
+
+  it('stops on an abort signal during transcription: throws CANCELLED, keeps no half-catalogued clip and releases the lock', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    const ac = new AbortController();
+    const stopped = { ...tools, transcribe: async () => { ac.abort(); throw new SidecarError('transcriber', 'CANCELLED', 'transcriber was stopped', 'Stopped on request.'); } } as MediaTools;
+    await expect(ingestClips({ project, clipsDir: clips, tools: stopped, signal: ac.signal })).rejects.toMatchObject({ code: 'CANCELLED', name: 'MirageError' });
+    expect((await loadCatalog(project)).clips).toEqual([]);
+    expect(existsSync(join(project, LOCK_FILE))).toBe(false);
+    expect(existsSync(join(project, 'frames', 'c001'))).toBe(false);
   });
 
   it('catalogs new clips with frames and transcripts, and skips known ones on re-run', async () => {

@@ -45,6 +45,16 @@ describe('run', () => {
   });
 });
 
+describe('runPath with a signal', () => {
+  it.skipIf(process.platform === 'win32')('stops the child and throws CANCELLED when the signal aborts', async () => {
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 50);
+    const started = Date.now();
+    await expect(runPath('sleep', '/bin/sleep', ['10'], { signal: ac.signal })).rejects.toMatchObject({ name: 'SidecarError', code: 'CANCELLED', message: 'sleep was stopped', hint: 'Stopped on request.' });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+});
+
 describe('run with a binary that cannot start', () => {
   const savedDir = process.env.WORDEDITS_FFMPEG_DIR;
   afterEach(() => {

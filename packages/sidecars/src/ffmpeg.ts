@@ -7,6 +7,7 @@ export interface FfmpegOptions {
   timeoutMs?: number;
   onProgress?: (fraction: number) => void;
   cwd?: string;
+  signal?: AbortSignal;
 }
 
 /** Runs ffmpeg with progress reporting. Callers pass everything except -progress/-nostats/-y. */
@@ -15,6 +16,7 @@ export async function runFfmpeg(args: string[], opts: FfmpegOptions = {}): Promi
   await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-nostats', '-y', ...args], {
     timeoutMs: opts.timeoutMs,
     cwd: opts.cwd,
+    signal: opts.signal,
     onStdoutLine: (line) => {
       if (!opts.onProgress) return;
       if (line.startsWith('out_time_us=')) {
@@ -33,11 +35,11 @@ export async function runFfmpeg(args: string[], opts: FfmpegOptions = {}): Promi
  * 16 kHz mono 16-bit WAV, the input the transcriber expects. WAV time is clip time: audio that starts after the clip
  * does (or has gaps) is padded with silence, so word times line up with the picture.
  */
-export async function extractWav(src: string, out: string, opts: { timeoutMs?: number; audioStream?: number } = {}): Promise<void> {
+export async function extractWav(src: string, out: string, opts: { timeoutMs?: number; audioStream?: number; signal?: AbortSignal } = {}): Promise<void> {
   await run('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y', '-i', src,
     '-map', `0:a:${opts.audioStream ?? 0}`, '-af', 'aresample=async=1:first_pts=0', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', out,
-  ], { timeoutMs: opts.timeoutMs ?? 10 * 60_000 });
+  ], { timeoutMs: opts.timeoutMs ?? 10 * 60_000, signal: opts.signal });
 }
 
 export type EncoderName = 'h264_videotoolbox' | 'h264_nvenc' | 'libx264';

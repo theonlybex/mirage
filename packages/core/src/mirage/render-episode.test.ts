@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
-import { run } from '@wordedits/sidecars';
+import { run, SidecarError } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog, sha256File } from './ingest.js';
@@ -449,6 +449,40 @@ describe('renderEpisode (real ffmpeg)', () => {
     } finally {
       await lock.release();
     }
+  }, 60_000);
+
+  it('a cancelled render leaves no work files, keeps the previous output and releases the lock', async () => {
+    const dir = join(project, 'episodes', '13');
+    const items = Array.from({ length: 31 }, (_, i) => ({ id: `m${i}`, beat: 'montage', clip: 'c001', src: { in: 0, out: 0.3 } }));
+    await saveEpisode(project, ep(items, { number: 13 }));
+    await writeFile(join(dir, 'rough.mp4'), 'old');
+    const ac = new AbortController();
+    let calls = 0;
+    const stub = {
+      ...tools,
+      runFfmpeg: async (_args: string[], o?: { signal?: AbortSignal }) => {
+        if (++calls === 1) return;
+        setTimeout(() => ac.abort(), 20);
+        await new Promise<void>((_, reject) => o!.signal!.addEventListener('abort', () => reject(new SidecarError('ffmpeg', 'CANCELLED', 'ffmpeg was stopped', 'Stopped on request.'))));
+      },
+    } as MediaTools;
+    await expect(renderEpisode({ project, episode: 13, mode: 'rough', tools: stub, signal: ac.signal })).rejects.toMatchObject({ code: 'CANCELLED', name: 'MirageError' });
+    expect(calls).toBe(2);
+    expect((await readdir(dir)).sort()).toEqual(['episode.json', 'rough.mp4']);
+    expect(await readFile(join(dir, 'rough.mp4'), 'utf8')).toBe('old');
+  }, 60_000);
+
+  it('stops between chunks when the signal aborted while a chunk was rendering', async () => {
+    const dir = join(project, 'episodes', '14');
+    const items = Array.from({ length: 31 }, (_, i) => ({ id: `m${i}`, beat: 'montage', clip: 'c001', src: { in: 0, out: 0.3 } }));
+    await saveEpisode(project, ep(items, { number: 14 }));
+    const ac = new AbortController();
+    let calls = 0;
+    // A tool that finishes its chunk even though the signal aborted meanwhile: the render must not start the next one.
+    const stub = { ...tools, runFfmpeg: async () => { calls++; ac.abort(); } } as MediaTools;
+    await expect(renderEpisode({ project, episode: 14, mode: 'rough', tools: stub, signal: ac.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(calls).toBe(1);
+    expect((await readdir(dir)).sort()).toEqual(['episode.json']);
   }, 60_000);
 
   it('stops with NO_EPISODE before rendering when a final cut has a voice-over but no voice-over transcript', async () => {

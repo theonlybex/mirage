@@ -6,6 +6,7 @@ import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type Music
 import { encodeArgs, ffNum } from './encode.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
+import { asCancelled } from './cancel.js';
 import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, clearLeftovers, type Lock } from './lock.js';
@@ -319,6 +320,8 @@ type RenderOptions = {
   tools: MediaTools;
   musicDir?: string;
   onProgress?: (f: number) => void;
+  /** Aborting stops the render: the work folder and partial file are removed, and it throws CANCELLED. */
+  signal?: AbortSignal;
   /** Runs once the lock is held, before rendering (cut's check, which may save episode.json). */
   beforeRender?: () => Promise<unknown>;
 };
@@ -335,8 +338,11 @@ type RenderResult = {
 export async function renderEpisode(o: RenderOptions): Promise<RenderResult> {
   const lock = await lockEpisode(resolve(o.project), o.episode, COMMAND[o.mode]);
   try {
+    o.signal?.throwIfAborted();
     await o.beforeRender?.();
     return await renderLocked(o);
+  } catch (e) {
+    throw asCancelled(e, o.signal);
   } finally {
     await lock.release();
   }
@@ -382,30 +388,36 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     const chunks = chunkItems(laid, chunkSize(sources));
     let done = 0;
     for (const [i, chunk] of chunks.entries()) {
+      o.signal?.throwIfAborted();
       const dur = chunk.reduce((s, l) => s + l.frames / fps, 0);
       await o.tools.runFfmpeg(itemChunkArgs(chunk, { width: W, height: H, fps }, sources, join(work, `chunk-${pad3(i)}.mov`)), {
         expectedDurationSec: dur,
         timeoutMs: chunkTimeoutMs(chunk, fps),
+        signal: o.signal,
         onProgress: (f) => report((0.6 * (done + f * dur)) / D),
       });
       done += dur;
     }
+    o.signal?.throwIfAborted();
     await writeFile(join(work, 'chunks.txt'), chunks.map((_, i) => `file 'chunk-${pad3(i)}.mov'`).join('\n') + '\n');
 
     let musicWav: string | undefined;
     if (ep.music.length) {
+      o.signal?.throwIfAborted();
       await o.tools.runFfmpeg(musicTrackArgs(ep.music, lib!, musicDir, D, ep.loudnessLufs, join(work, 'music.wav')), {
         expectedDurationSec: D,
         timeoutMs: Math.max(120_000, D * 10 * 1000),
+        signal: o.signal,
       });
       musicWav = 'music.wav';
     }
     report(0.7);
+    o.signal?.throwIfAborted();
 
     let voiceRaw: string | undefined;
     if (final && ep.voiceover) {
       const pcm = new Map<string, Float32Array>();
-      for (const [i, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve(project, rec), join(work, `rec-${i}.f32`), o.tools, { sampleRate: 48000, clipTime: true }));
+      for (const [i, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve(project, rec), join(work, `rec-${i}.f32`), o.tools, { sampleRate: 48000, clipTime: true, signal: o.signal }));
       const track = buildVoiceTrack({ recording: pcm, defaultRecording: ep.voiceover.recording, sampleRate: 48000, lines: ep.voiceover.lines, durationSec: D });
       await writeFile(join(work, 'vo.f32'), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
       voiceRaw = 'vo.f32';
@@ -414,6 +426,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     const cues = o.mode === 'guide' ? [] : groupCaptions(speechWords(ep, catalog, voTranscripts), { durationSec: D });
     await writeFile(join(work, 'overlays.ass'), buildAss({ width: W, height: H, captions: cues, overlays: ep.overlays, prompts: o.mode === 'guide' ? ep.slots : [] }));
 
+    o.signal?.throwIfAborted();
     const encoder = final ? await o.tools.pickEncoder() : { name: 'libx264' as const, extraArgs: [] };
     await o.tools.runFfmpeg(
       episodeFinalArgs({
@@ -423,7 +436,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
         loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', musicWav, voiceRaw,
         liveAudio: laid.some((l) => l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
       }),
-      { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), onProgress: (f) => report(0.7 + 0.3 * f) },
+      { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), signal: o.signal, onProgress: (f) => report(0.7 + 0.3 * f) },
     );
     const probe = await o.tools.probe(partial);
     const tolerance = Math.max(0.1, 1 / fps);
@@ -435,6 +448,8 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     if (!probe.hasVideo || Math.abs(videoSec - D) > tolerance) {
       throw new MirageError('DURATION_MISMATCH', `Rendered ${probe.hasVideo ? videoSec : 0}s of picture but the timeline is ${D}s`, 'A clip may have less video than the catalog says; re-run ingest.');
     }
+    // The last point to stop at: the output is replaced only when the render finished and was not cancelled.
+    o.signal?.throwIfAborted();
     await rename(partial, outputPath);
     let srtPath: string | null = null;
     if (final) {

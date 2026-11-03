@@ -11,6 +11,7 @@ export interface FfmpegRunOptions {
   timeoutMs?: number;
   onProgress?: (fraction: number) => void;
   cwd?: string;
+  signal?: AbortSignal;
 }
 
 /** Everything core needs from the sidecars. Tests pass a stub; the app passes realMediaTools(). */
@@ -20,8 +21,8 @@ export interface MediaTools {
   pickEncoder(): Promise<Encoder>;
   makeProxy(src: string, out: string, opts?: { height?: number; onProgress?: (f: number) => void }): Promise<void>;
   measureLoudness(file: string, opts?: { audioStream?: number; maxSec?: number }): Promise<{ integratedLufs: number; truePeakDb: number }>;
-  extractWav(src: string, out: string, opts?: { timeoutMs?: number; audioStream?: number }): Promise<void>;
-  transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number }): Promise<Transcript>;
+  extractWav(src: string, out: string, opts?: { timeoutMs?: number; audioStream?: number; signal?: AbortSignal }): Promise<void>;
+  transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<Transcript>;
 }
 
 export async function realMediaTools(): Promise<MediaTools> {

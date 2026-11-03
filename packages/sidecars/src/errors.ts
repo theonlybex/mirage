@@ -2,7 +2,7 @@ export class SidecarError extends Error {
   override name = 'SidecarError';
   constructor(
     public tool: string,
-    public code: 'NOT_FOUND' | 'EXIT' | 'TIMEOUT' | 'PARSE',
+    public code: 'NOT_FOUND' | 'EXIT' | 'TIMEOUT' | 'PARSE' | 'CANCELLED',
     message: string,
     public hint: string,
     public stderr = '',

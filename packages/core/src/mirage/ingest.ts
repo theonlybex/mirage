@@ -5,6 +5,7 @@ import { extname, join, resolve } from 'node:path';
 import { CatalogSchema, type Catalog, type Clip, type ClipKind, type ProbeInfo, type Transcript } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { JsonFileError, readJsonFile, writeJsonFile } from './json-file.js';
+import { asCancelled } from './cancel.js';
 import { errorReason, MirageError } from './errors.js';
 import { acquireLock, clearLeftovers } from './lock.js';
 import { refineTranscript } from './word-timing.js';
@@ -59,13 +60,16 @@ export interface IngestResult {
 }
 
 /** Transcribes a clip's audio. Returns null (and warns) when transcription fails; a clip with no speech gets an empty transcript. */
-async function transcribeClip(o: { tools: MediaTools; path: string; name: string; wav: string; durationSec: number; audioStream?: number; locale?: string; result: IngestResult; onStep?: (m: string) => void }): Promise<Transcript | null> {
+async function transcribeClip(o: { tools: MediaTools; path: string; name: string; wav: string; durationSec: number; audioStream?: number; locale?: string; result: IngestResult; signal?: AbortSignal; onStep?: (m: string) => void }): Promise<Transcript | null> {
   try {
-    await o.tools.extractWav(o.path, o.wav, { timeoutMs: Math.max(10 * 60_000, o.durationSec * 500), audioStream: o.audioStream });
-    const transcript = await o.tools.transcribe(o.wav, { locale: o.locale, timeoutMs: Math.max(30 * 60_000, o.durationSec * 2000) });
+    await o.tools.extractWav(o.path, o.wav, { timeoutMs: Math.max(10 * 60_000, o.durationSec * 500), audioStream: o.audioStream, signal: o.signal });
+    const transcript = await o.tools.transcribe(o.wav, { locale: o.locale, timeoutMs: Math.max(30 * 60_000, o.durationSec * 2000), signal: o.signal });
     // The transcriber's word times are checked against the sound, so slots and captions see when words really start and end.
     return await refineTranscript(transcript, o.wav);
   } catch (e) {
+    // Stopped on request is not a failed transcription: the clip is not kept as silent footage.
+    const stopped = asCancelled(e, o.signal);
+    if (stopped !== e) throw stopped;
     o.onStep?.(`${o.name}: transcription failed, kept as silent footage`);
     o.result.warnings.push(`${o.name}: transcription failed (${errorReason(e)}); its speech is invisible to slots and captions — run ingest again to retry`);
     return null;
@@ -131,13 +135,18 @@ async function clipFiles(dir: string, result: IngestResult): Promise<string[]> {
   return files;
 }
 
-export async function ingestClips(o: { project: string; clipsDir: string; tools: MediaTools; locale?: string; onStep?: (m: string) => void }): Promise<IngestResult> {
+export async function ingestClips(o: { project: string; clipsDir: string; tools: MediaTools; locale?: string; onStep?: (m: string) => void;
+  /** Aborting stops the ingest between steps: it throws CANCELLED, and clips catalogued so far are kept. */
+  signal?: AbortSignal }): Promise<IngestResult> {
   const project = resolve(o.project);
   await mkdir(project, { recursive: true });
   const lock = await acquireLock(project, 'ingest', 'the project');
   try {
     await clearLeftovers(project, lock, (f) => /^\.tmp-c\d+\.wav$/.test(f));
+    o.signal?.throwIfAborted();
     return await ingestLocked(o, project);
+  } catch (e) {
+    throw asCancelled(e, o.signal);
   } finally {
     await lock.release();
   }
@@ -150,6 +159,7 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
   let catalog: Catalog;
 
   for (const name of files) {
+    o.signal?.throwIfAborted();
     const path = join(dir, name);
     // Read before each clip's slow work: catalog.json edited into an invalid file stops the run here, not after it.
     catalog = await loadCatalogOrStop(project);
@@ -167,10 +177,11 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
         }
         if ((moved || prev.path === path) && prev.probe.hasAudio && prev.transcript === null) {
           // A transcription that failed last time: try again, keeping everything else about the clip.
-          transcript = await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, audioStream: prev.probe.audioStream, locale: o.locale, result, onStep: o.onStep });
+          transcript = await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, audioStream: prev.probe.audioStream, locale: o.locale, result, signal: o.signal, onStep: o.onStep });
           if (transcript) o.onStep?.(`${name}: transcribed`);
         }
         if (moved || transcript) {
+          o.signal?.throwIfAborted();
           catalog = await updateCatalog(project, (cat) => {
             const clip = cat.clips.find((c) => c.id === prev.id);
             if (!clip) return;
@@ -223,6 +234,7 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
       // Run inside the frames folder with a bare pattern: a % in the project path would be read as part of it.
       await o.tools.runFfmpeg(['-noaccurate_seek', '-ss', String(first), '-i', path, '-vf', `setpts=PTS-1/120/TB,fps=1/${interval}:start_time=0:round=up,scale=640:-2`, ...(first ? ['-frames:v', '1'] : []), '-q:v', '5', 'f%04d.jpg'], {
         cwd: framesDir,
+        signal: o.signal,
         expectedDurationSec: probe.durationSec,
         timeoutMs: Math.max(120_000, probe.durationSec * 5000),
       });
@@ -230,9 +242,10 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
 
       // null = no audio, or transcription failed (retried on the next ingest); no words = transcribed, nothing said.
       const transcript = probe.hasAudio
-        ? await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${id}.wav`), durationSec: probe.durationSec, audioStream: probe.audioStream, locale: o.locale, result, onStep: o.onStep })
+        ? await transcribeClip({ tools: o.tools, path, name, wav: join(project, `.tmp-${id}.wav`), durationSec: probe.durationSec, audioStream: probe.audioStream, locale: o.locale, result, signal: o.signal, onStep: o.onStep })
         : null;
 
+      o.signal?.throwIfAborted();
       let clip!: Clip;
       catalog = await updateCatalog(project, (cat) => {
         if (cat.clips.some((c) => c.id === id)) {
@@ -254,6 +267,9 @@ async function ingestLocked(o: Parameters<typeof ingestClips>[0], project: strin
       if (!catalog.clips.some((c) => c.id === id)) await rm(framesDir, { recursive: true, force: true }).catch(() => {});
       // A broken catalog.json would fail every remaining clip after all its work: stop instead.
       if (e instanceof JsonFileError) throw stopIngest(e);
+      // Stopped on request: end the run instead of skipping this clip and starting the next.
+      const stopped = asCancelled(e, o.signal);
+      if (stopped !== e) throw stopped;
       result.skipped.push({ file: name, reason: `failed: ${errorReason(e)}` });
     }
   }

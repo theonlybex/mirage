@@ -13,3 +13,4 @@ export * from './project.js';
 export * from './word-timing.js';
 export * from './encode.js';
 export * from './json-file.js';
+export * from './cancel.js';

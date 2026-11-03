@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { TranscriptSchema, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
+import { asCancelled } from './cancel.js';
 import { MirageError } from './errors.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { episodeDir, loadEpisode, lockEpisode, saveEpisode } from './render-episode.js';
@@ -27,6 +28,8 @@ export async function fitRecording(o: {
   add?: boolean;
   slots?: string[];
   onStep?: (m: string) => void;
+  /** Aborting stops the fit before anything is saved: it throws CANCELLED and episode.json is untouched. */
+  signal?: AbortSignal;
 }): Promise<{ episode: Episode; report: FitReport; reused: boolean }> {
   const project = resolve(o.project);
   const n = o.episode;
@@ -35,7 +38,10 @@ export async function fitRecording(o: {
   if (statSync(rec).isDirectory()) throw new MirageError('BAD_INPUT', `${rec} is a folder, not a recording`, 'Pass the path of your voice-over recording file.');
   const lock = await lockEpisode(project, n, 'vo');
   try {
+    o.signal?.throwIfAborted();
     return await fitLocked(o, project, rec);
+  } catch (e) {
+    throw asCancelled(e, o.signal);
   } finally {
     await lock.release();
   }
@@ -79,21 +85,24 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
     await mkdir(dir, { recursive: true });
     const wav = join(dir, `.vo-${randomUUID()}.wav`);
     try {
-      await o.tools.extractWav(rec, wav).catch(async (e: unknown) => {
+      await o.tools.extractWav(rec, wav, { signal: o.signal }).catch(async (e: unknown) => {
         // ffmpeg's own words for a video without sound ("does not contain any stream") help nobody.
+        o.signal?.throwIfAborted();
         const probe = await o.tools.probe(rec).catch(() => null);
         if (probe && !probe.hasAudio) throw new MirageError('BAD_INPUT', `${rec} has no audio track`, 'Pass the recording of your voice-over: a sound file, or a video with sound.');
         throw e;
       });
-      transcript = await refineTranscript(await o.tools.transcribe(wav), wav);
+      transcript = await refineTranscript(await o.tools.transcribe(wav, { signal: o.signal }), wav);
     } finally {
       await rm(wav, { force: true });
     }
     // Saved straight away, under the recording's content: a fit that fails (or is refused below) re-runs without
     // transcribing again, and no other recording's lines point at this file.
+    o.signal?.throwIfAborted();
     await writeJsonFile(join(dir, file), TranscriptSchema, transcript, `episodes/${n}/${file}`);
   }
 
+  o.signal?.throwIfAborted();
   const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only });
   const vo = fit.episode.voiceover!;
   const placed = new Set(fit.report.lines.filter((l) => placedStatus(l.status)).map((l) => l.slot));
@@ -104,6 +113,7 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
   if (JSON.stringify(await loadEpisode(project, n)) !== JSON.stringify(ep)) {
     throw new MirageError('BUSY', 'episode.json changed while vo was running — run vo again', 'Your edits are kept, and the transcript is saved, so the re-run is quick.');
   }
+  o.signal?.throwIfAborted();
   await saveEpisode(project, episode, n);
   return { episode, report: fit.report, reused };
 }
