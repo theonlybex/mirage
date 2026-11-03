@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { access, constants, readdir, readFile } from 'node:fs/promises';
+import { access, constants, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZodRawShape } from 'zod';
 import { z } from 'zod';
+import { ViewerInfoSchema } from '@wordedits/shared';
 import {
   analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, ingestClips, ingestReport, initProject, listVersions,
-  MirageError, musicReport, newVideo, readNotes, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
+  MirageError, musicReport, newVideo, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
   sessionDir, slotsReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
 import { transcriberPath } from '@wordedits/sidecars';
@@ -64,11 +65,13 @@ export function newestSessionId(project: string): string | null {
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
 const ok = (lines: string | string[]): Result => ({ content: [{ type: 'text', text: Array.isArray(lines) ? lines.join('\n') : lines }] });
 const STOPPED = '✖ Stopped by the person before it finished. Nothing was changed.';
+/** Ingest keeps the clips it catalogued before it was stopped. */
+const STOPPED_INGEST = '✖ Stopped by the person before it finished. Clips catalogued so far are kept.';
+const isStopped = (e: unknown) => (e instanceof MirageError && e.code === 'CANCELLED') || (e as { name?: unknown } | null)?.name === 'AbortError';
 
 /** An error as the person would read it: the message with its hint indented under it. */
-function failed(e: unknown): Result {
-  const stopped = (e instanceof MirageError && e.code === 'CANCELLED') || (e as { name?: unknown } | null)?.name === 'AbortError';
-  if (stopped) return { content: [{ type: 'text', text: STOPPED }], isError: true };
+function failed(e: unknown, stoppedText: string = STOPPED): Result {
+  if (isStopped(e)) return { content: [{ type: 'text', text: stoppedText }], isError: true };
   const { message, hint } = describeError(e);
   return { content: [{ type: 'text', text: `✖ ${message}${hint ? `\n  ${hint}` : ''}` }], isError: true };
 }
@@ -119,12 +122,22 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     }) as never);
   }
 
-  /** Writes every ⚠ line of a report into the session log of `n` as a warning, then returns the report. */
+  /** The newest video of the project (the highest number): where warnings of a command that belongs to no video are logged. */
+  async function newestVideo(): Promise<number | null> {
+    const numbers = (await readdir(join(project, 'episodes')).catch(() => [] as string[])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+    return numbers.length ? Math.max(...numbers) : null;
+  }
+
+  /**
+   * Writes every ⚠ warning of a report into the session log as a warning (the text from the marker on), then returns the
+   * report. With no video (ingest or music before the session has one) they go to the newest video's session folder; a
+   * project with no video yet has nowhere to log them, so they are dropped (the report still shows them).
+   */
   async function report(n: number | null, lines: string[]): Promise<Result> {
-    if (n !== null) {
-      for (const l of lines) {
-        if (l.startsWith('⚠ ')) await appendLog(sessionDir(project, n, sid()), { at: new Date().toISOString(), kind: 'warning', text: l.slice(2) });
-      }
+    const warnings = lines.flatMap((l) => (l.includes('⚠ ') ? [l.slice(l.indexOf('⚠ ') + 2)] : []));
+    const target = warnings.length ? (n ?? (await newestVideo())) : null;
+    if (target !== null) {
+      for (const text of warnings) await appendLog(sessionDir(project, target, sid()), { at: new Date().toISOString(), kind: 'warning', text });
     }
     return ok(lines);
   }
@@ -136,11 +149,8 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   const sessionVideo = async () => (await readSessionState(project, sid())).video;
 
   tool('new_project', 'Start a Mirage project in this folder. Does nothing if there already is one.', { title: z.string().min(1).describe('What the series is called') }, async ({ title }) => {
-    const file = join(project, 'mirage.json');
-    if (existsSync(file)) {
-      const existing = await readFile(file, 'utf8').then((t) => (JSON.parse(t) as { title?: unknown }).title, () => undefined);
-      return ok(`already a Mirage project: ${typeof existing === 'string' ? existing : 'untitled'}`);
-    }
+    const existing = await readProject(project);
+    if (existing) return ok(`already a Mirage project: ${existing.title}`);
     await initProject(project, title);
     return ok(`created ${project}`);
   }, false);
@@ -168,8 +178,12 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   tool('ingest', 'Catalog a folder of clips: probe, transcribe and add them to the project.', { folder: z.string().describe('The folder with the clips') }, async ({ folder }, { signal }) => {
     const n = await sessionVideo();
     const steps: string[] = [];
-    const r = await long('ingest', n, signal, (h) => ingestClips({ project, clipsDir: resolveUserPath(folder, project), tools, onStep: (m) => steps.push(`• ${m}`), signal: h.signal }));
-    return report(n, [...steps, ...ingestReport(r)]);
+    try {
+      const r = await long('ingest', n, signal, (h) => ingestClips({ project, clipsDir: resolveUserPath(folder, project), tools, onStep: (m) => steps.push(`• ${m}`), signal: h.signal }));
+      return await report(n, [...steps, ...ingestReport(r)]);
+    } catch (e) {
+      return failed(e, STOPPED_INGEST);
+    }
   });
 
   tool('music', 'Find the tempo and mood of the tracks in the project\'s music folder.', {}, async () => {
@@ -270,25 +284,30 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   tool('overnight', 'Get ready to edit unattended overnight: checks the Mac and keeps it awake until this session ends.', { videos: z.array(z.number().int().positive()).min(1) }, async ({ videos }) => {
     const { ok: ready, problems } = await preflight({ project, videos, deps });
     if (!ready) return { content: [{ type: 'text', text: problems.join('\n') }], isError: true };
-    const awakePid = startAwake();
+    // A caffeinate this session already started and that still runs keeps the Mac awake: no second one.
+    const earlier = (await readSessionState(project, sid())).awakePid;
+    const awakePid = earlier !== null && alive(earlier) ? earlier : startAwake();
     await writeSessionState(project, sid(), { overnight: { videos, startedAt: new Date().toISOString() }, awakePid });
     return ok(`ready: ${videos.length} videos, Mac kept awake until this session ends`);
   });
 
   tool('status', 'Where the project stands: its title, each video\'s stage and deliveries, the viewer, and whether the tools are installed.', {}, async () => {
     const lines: string[] = [];
-    const meta = await readFile(join(project, 'mirage.json'), 'utf8').then((t) => JSON.parse(t) as { title?: unknown }, () => null);
-    if (!meta) lines.push(`No Mirage project here yet (${project}). Use new_project to start one.`);
-    else lines.push(`Project: ${typeof meta.title === 'string' ? meta.title : 'untitled'}`);
+    const meta = await readProject(project).catch((e: unknown) => {
+      lines.push(`✖ ${describeError(e).message}`);
+      return undefined;
+    });
+    if (meta === null) lines.push(`No Mirage project here yet (${project}). Use new_project to start one.`);
+    else if (meta) lines.push(`Project: ${meta.title}`);
     const numbers = (await readdir(join(project, 'episodes')).catch(() => [] as string[])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a, b) => a - b);
     for (const n of numbers) {
       const { stage, deliveries } = await videoStage(project, n);
       const title = (await readVideo(project, n).catch(() => null))?.title;
       lines.push(`Video ${n}${title ? ` “${title}”` : ''}: ${stage} · ${deliveries} ${deliveries === 1 ? 'delivery' : 'deliveries'}`);
     }
-    const viewer = await readFile(join(project, '.mirage', 'viewer.json'), 'utf8').then((t) => JSON.parse(t) as { url?: unknown; pid?: unknown } | null, () => null);
-    const running = viewer !== null && typeof viewer === 'object' && !(typeof viewer.pid === 'number' && !alive(viewer.pid));
-    lines.push(running ? `Viewer: running${typeof viewer.url === 'string' ? ` at ${viewer.url}` : ''}` : 'Viewer: not running');
+    // A missing or broken viewer.json, or a pid that is gone (the viewer died without cleaning up), means it is not running.
+    const viewer = await readJsonFile(join(project, '.mirage', 'viewer.json'), ViewerInfoSchema, '.mirage/viewer.json').catch(() => null);
+    lines.push(viewer && alive(viewer.pid) ? `Viewer: running at ${viewer.url}` : 'Viewer: not running');
     for (const t of ['ffmpeg', 'ffprobe']) lines.push(`${t}: ${(await deps.which(t)) ? 'ok' : 'missing'}`);
     lines.push(`transcriber: ${(await access(transcriberPath(), constants.X_OK).then(() => true, () => false)) ? 'ok' : 'missing'}`);
     lines.push(Number(process.versions.node.split('.')[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);

@@ -10,3 +10,4 @@ export * from './schemas/version.js';
 export * from './schemas/session.js';
 export * from './schemas/video.js';
 export * from './schemas/notes.js';
+export * from './schemas/project.js';

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import { describeError, MirageError } from './errors.js';
-import { resolveUserPath } from './project.js';
+import { initProject, readProject, resolveUserPath } from './project.js';
 
 const errno = (code: string, syscall: string, path: string) => Object.assign(new Error(`${code}: ${syscall} '${path}'`), { code, syscall, path });
 
@@ -46,5 +46,16 @@ describe('resolveUserPath', () => {
     expect(resolveUserPath('proj', '/Users/me/Desktop', '/Users/me')).toBe('/Users/me/Desktop/proj');
     expect(resolveUserPath('/abs/p', '/repo', '/Users/me')).toBe('/abs/p');
     expect(resolveUserPath('~other/x', '/repo', '/Users/me')).toBe('/repo/~other/x');
+  });
+});
+
+describe('readProject', () => {
+  it('reads what init wrote, null when there is no project, and names a broken file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-proj-'));
+    expect(await readProject(dir)).toBeNull();
+    await initProject(dir, 'My build');
+    expect(await readProject(dir)).toMatchObject({ version: 1, title: 'My build' });
+    await writeFile(join(dir, 'mirage.json'), JSON.stringify({ version: 1, title: 3 }));
+    await expect(readProject(dir)).rejects.toThrow(/mirage\.json/);
   });
 });

@@ -6,8 +6,10 @@ const POLL_MS = 250;
 /**
  * Runs a long engine command so the person can stop it and Claude's session can show how far it got.
  *
- * - `signal` aborts when the MCP request is cancelled (`requestSignal`), or when the video's control.json asks to
- *   pause now or stop with an `updatedAt` after the command started (a stop from before it started is old news).
+ * - `signal` aborts when the MCP request is cancelled (`requestSignal`), or when the video's control.json asks for something
+ *   new since the command started: a `stop` made after the start, or `pauseNow` turning on (it counts as new only if it was
+ *   off at the start or went off since). A stale pauseNow/stop is old news, however often control.json is rewritten
+ *   meanwhile (a correction bumps `updatedAt`).
  * - progress.json of the session folder `dir` is written at most every 250 ms and removed when the command ends.
  *
  * With `video` null (a command that belongs to no video yet) there is no control file to watch.
@@ -29,6 +31,8 @@ export async function runLong<T>(o: {
   else o.requestSignal?.addEventListener('abort', abort, { once: true });
 
   let polling = false;
+  // A pauseNow that is already on when the command starts belongs to an earlier command; it counts again once it has been off.
+  let pauseWasOff = o.video === null ? true : !(await readControl(o.project, o.video).catch(() => null))?.pauseNow;
   const poll =
     o.video === null
       ? null
@@ -37,7 +41,8 @@ export async function runLong<T>(o: {
           polling = true;
           readControl(o.project, o.video!)
             .then((c) => {
-              if ((c.pauseNow || c.stop) && Date.parse(c.updatedAt) > started) abort();
+              if (!c.pauseNow) pauseWasOff = true;
+              if ((c.pauseNow && pauseWasOff) || (c.stop && Date.parse(c.stop.at) > started)) abort();
             })
             .catch(() => {}) // an unreadable control file never stops a command
             .finally(() => (polling = false));

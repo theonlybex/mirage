@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  readLog, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeControl,
+  loadEpisode, readLog, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeControl,
   type MediaTools,
 } from '@wordedits/core';
 import { EpisodeSchema } from '@wordedits/shared';
@@ -137,6 +137,102 @@ describe('engine tools', () => {
     expect(r).toEqual({ isError: true, text: '✖ Stopped by the person before it finished. Nothing was changed.' });
     expect(existsSync(join(dir, 'episodes', '1', 'rough.mp4'))).toBe(false);
     expect(existsSync(join(sessionDir(dir, 1, 's1'), 'progress.json'))).toBe(false);
+    expect(await readdir(join(dir, 'episodes', '1'))).not.toContain('.mirage.lock');
+  });
+
+  it('cut is not stopped by a pauseNow from before it started, even when control.json is rewritten meanwhile', async () => {
+    const dir = await projectWithVideo();
+    await writeControl(dir, 1, { pauseNow: true });
+    let started!: () => void;
+    const inFfmpeg = new Promise<void>((r) => (started = r));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const tools = {
+      pickEncoder: async () => enc,
+      probe: async () => ({ durationSec: 3, width: 960, height: 540, fps: 30, hasVideo: true, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac', colorTransfer: null }),
+      runFfmpeg: async (args: string[]) => {
+        started();
+        await gate;
+        await writeFile(args[args.length - 1], 'video');
+      },
+    } as unknown as MediaTools;
+    const { call } = await connect(dir, { tools });
+    const running = call('cut', { video: 1 });
+    await inFfmpeg;
+    await writeControl(dir, 1, { correction: 'make the intro shorter' }); // bumps updatedAt, pauseNow still on from before
+    await new Promise((r) => setTimeout(r, 600)); // more than two polls
+    release();
+    const r = await running;
+    expect(r.isError).toBe(false);
+    expect(r.text).toContain('rough.mp4');
+  });
+
+  it('cut stops on a pauseNow that was switched off and on again after it started', async () => {
+    const dir = await projectWithVideo();
+    await writeControl(dir, 1, { pauseNow: true });
+    let started!: () => void;
+    const inFfmpeg = new Promise<void>((r) => (started = r));
+    const tools = {
+      pickEncoder: async () => enc,
+      runFfmpeg: async (_a: string[], o?: { signal?: AbortSignal }) => {
+        started();
+        await new Promise<void>((_, reject) => o!.signal!.addEventListener('abort', () => reject(new SidecarError('ffmpeg', 'CANCELLED', 'ffmpeg was stopped', 'Stopped on request.'))));
+      },
+    } as unknown as MediaTools;
+    const { call } = await connect(dir, { tools });
+    const running = call('cut', { video: 1 });
+    await inFfmpeg;
+    await writeControl(dir, 1, { pauseNow: false });
+    await new Promise((r) => setTimeout(r, 400));
+    await writeControl(dir, 1, { pauseNow: true });
+    expect((await running).text).toBe('✖ Stopped by the person before it finished. Nothing was changed.');
+  });
+
+  it('ingest says the clips catalogued so far are kept when it is stopped', async () => {
+    const dir = await projectWithVideo();
+    const clips = join(dir, 'new clips');
+    await mkdir(clips);
+    await writeFile(join(clips, 'a.mov'), 'footage');
+    let started!: () => void;
+    const inFfmpeg = new Promise<void>((r) => (started = r));
+    const tools = {
+      probe: async () => ({ durationSec: 3, width: 960, height: 540, fps: 30, hasVideo: true, hasAudio: false, videoCodec: 'h264', audioCodec: null, colorTransfer: null }),
+      runFfmpeg: async (_a: string[], o?: { signal?: AbortSignal }) => {
+        started();
+        await new Promise<void>((_, reject) => o!.signal!.addEventListener('abort', () => reject(new SidecarError('ffmpeg', 'CANCELLED', 'ffmpeg was stopped', 'Stopped on request.'))));
+      },
+    } as unknown as MediaTools;
+    const { call } = await connect(dir, { tools });
+    await call('new_video', { title: 'Two', about: 'x', footage: [clips] }); // the session now works on video 2
+    const running = call('ingest', { folder: clips });
+    await inFfmpeg;
+    await new Promise((r) => setTimeout(r, 100));
+    await writeControl(dir, 2, { stop: { at: new Date().toISOString() } });
+    expect(await running).toEqual({ isError: true, text: '✖ Stopped by the person before it finished. Clips catalogued so far are kept.' });
+  });
+
+  it('logs a warning that is in the middle of a line, and a video-less warning to the newest video', async () => {
+    const dir = await projectWithVideo();
+    const { call } = await connect(dir);
+    await call('slots', { video: 1 });
+    const ep = await loadEpisode(dir, 1);
+    await saveEpisode(dir, { ...ep, slots: ep.slots.map((s, i) => (i === 0 ? { ...s, line: Array(s.maxWords + 5).fill('word').join(' ') } : s)) });
+    const r = await call('slots', { video: 1 });
+    expect(r.text).toMatch(/ {2}.*⚠ over budget/);
+    expect(await readLog(sessionDir(dir, 1, 's1'))).toMatchObject([{ kind: 'warning', text: expect.stringMatching(/^over budget \(/) }]);
+
+    // ingest before the session has a video: the HDR warning goes to the newest video (here 1)
+    const clips = join(dir, 'hdr clips');
+    await mkdir(clips);
+    await writeFile(join(clips, 'a.mov'), 'footage');
+    const tools = {
+      probe: async () => ({ durationSec: 3, width: 960, height: 540, fps: 30, hasVideo: true, hasAudio: false, videoCodec: 'h264', audioCodec: null, colorTransfer: 'smpte2084' }),
+      runFfmpeg: async (_a: string[], o?: { cwd?: string }) => { await writeFile(join(o!.cwd!, 'f0001.jpg'), 'x'); },
+    } as unknown as MediaTools;
+    const other = await connect(dir, { tools });
+    const ing = await other.call('ingest', { folder: clips });
+    expect(ing.text).toContain('is HDR');
+    expect((await readLog(sessionDir(dir, 1, 's1'))).map((e) => e.text)).toContainEqual(expect.stringMatching(/^a\.mov is HDR/));
   });
 
   it('cut ignores a stop from before it started', async () => {
@@ -260,6 +356,16 @@ describe('engine tools', () => {
     expect(Date.parse(state.overnight!.startedAt)).toBeGreaterThan(0);
   });
 
+  it('overnight does not start a second caffeinate while the first still runs', async () => {
+    const dir = await projectWithVideo();
+    let awake = 0;
+    const { call } = await connect(dir, { startAwake: () => { awake++; return process.pid; } });
+    await call('overnight', { videos: [1] });
+    await call('overnight', { videos: [1, 2] });
+    expect(awake).toBe(1);
+    expect((await readSessionState(dir, 's1')).awakePid).toBe(process.pid);
+  });
+
   it('status says where the project is: stage, deliveries, viewer and tools', async () => {
     const dir = await projectWithVideo();
     await writeFile(join(dir, 'episodes', '1', 'rough.mp4'), 'x');
@@ -290,6 +396,17 @@ describe('engine tools', () => {
   it('status on a folder that is not a project yet says so', async () => {
     const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')));
     expect((await call('status')).text).toMatch(/^No Mirage project here yet/);
+  });
+
+  it('status says a broken mirage.json is broken, and treats a dead viewer pid as not running', async () => {
+    const dir = await projectWithVideo();
+    await writeFile(join(dir, 'mirage.json'), JSON.stringify({ version: 1, title: 4 }));
+    await mkdir(join(dir, '.mirage'), { recursive: true });
+    await writeFile(join(dir, '.mirage', 'viewer.json'), JSON.stringify({ url: 'http://127.0.0.1:1', pid: 2 ** 22 + 12345 }));
+    const { call } = await connect(dir);
+    const lines = (await call('status')).text.split('\n');
+    expect(lines[0]).toMatch(/^✖ mirage\.json/);
+    expect(lines).toContain('Viewer: not running');
   });
 
   it('every other tool says there is no project when there is none', async () => {

@@ -2,7 +2,9 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { MirageProjectSchema, type MirageProject } from '@wordedits/shared';
 import { MirageError } from './errors.js';
+import { readJsonFile } from './json-file.js';
 
 /**
  * A path the user typed, made absolute: a leading `~/` is their home folder (a quoted "~/x" reaches us unexpanded) and a
@@ -27,5 +29,15 @@ export async function initProject(project: string, title: string): Promise<void>
 export function requireProject(project: string): void {
   if (!existsSync(join(project, 'mirage.json'))) {
     throw new MirageError('NO_PROJECT', `no Mirage project at ${project}`, `Check the path, or create one with: pnpm mirage init ${project} --title "<title>"`);
+  }
+}
+
+/** The project's mirage.json, or null when there is none. A file that does not match throws, naming the problem. */
+export async function readProject(project: string): Promise<MirageProject | null> {
+  try {
+    return await readJsonFile(join(project, 'mirage.json'), MirageProjectSchema, 'mirage.json');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw e;
   }
 }
