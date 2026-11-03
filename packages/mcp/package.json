@@ -1,0 +1,20 @@
+{
+  "name": "@wordedits/mcp",
+  "version": "0.0.1",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/server.ts",
+      "default": "./src/server.ts"
+    }
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@wordedits/core": "workspace:*",
+    "@wordedits/shared": "workspace:*",
+    "@wordedits/sidecars": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}

@@ -31,6 +31,21 @@ describe('speechRanges', () => {
   });
 });
 
+describe('transcriberPath', () => {
+  it('is WORDEDITS_TRANSCRIBER when set, else the built binary', () => {
+    const was = process.env.WORDEDITS_TRANSCRIBER;
+    try {
+      process.env.WORDEDITS_TRANSCRIBER = '/plugin/bin/wordedits-transcribe';
+      expect(transcriberPath()).toBe('/plugin/bin/wordedits-transcribe');
+      delete process.env.WORDEDITS_TRANSCRIBER;
+      expect(transcriberPath()).toMatch(/bin\/darwin\/wordedits-transcribe$/);
+    } finally {
+      if (was === undefined) delete process.env.WORDEDITS_TRANSCRIBER;
+      else process.env.WORDEDITS_TRANSCRIBER = was;
+    }
+  });
+});
+
 describe.skipIf(process.platform !== 'darwin')('transcribeAudio (macOS)', () => {
   beforeAll(() => {
     if (!existsSync(transcriberPath())) execFileSync('pnpm', ['build:native'], { stdio: 'inherit' });

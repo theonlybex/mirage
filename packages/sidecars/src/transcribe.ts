@@ -7,7 +7,9 @@ import { runPath } from './run.js';
 const NAME = 'wordedits-transcribe';
 const SENTENCE_END = /[.?!]["'”’)\]]*$/;
 
+/** Where the transcriber is: WORDEDITS_TRANSCRIBER when set (the plugin points it at its own copy), else the built one in bin/. */
 export function transcriberPath(): string {
+  if (process.env.WORDEDITS_TRANSCRIBER) return process.env.WORDEDITS_TRANSCRIBER;
   return fileURLToPath(new URL(`../bin/darwin/${NAME}`, import.meta.url));
 }
 

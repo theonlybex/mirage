@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { mkdir, readdir } from 'node:fs/promises';
+import { access, mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { VideoSchema, type Video } from '@wordedits/shared';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 import { episodeDir } from './render-episode.js';
+import { listVersions } from './versions.js';
 
 const videoPath = (project: string, n: number) => join(episodeDir(project, n), 'video.json');
 
@@ -34,4 +35,23 @@ export async function readVideo(project: string, n: number): Promise<Video | nul
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw e;
   }
+}
+
+export type VideoStage = 'new' | 'rough' | 'guide' | 'final';
+
+/**
+ * How far video `n` has come: the newest render that exists in episodes/<n>/ (final over guide over rough, else new), and how
+ * many deliveries it has had.
+ */
+export async function videoStage(project: string, n: number): Promise<{ stage: VideoStage; deliveries: number }> {
+  const dir = episodeDir(project, n);
+  let stage: VideoStage = 'new';
+  for (const s of ['final', 'guide', 'rough'] as const) {
+    if (await access(join(dir, `${s}.mp4`)).then(() => true, () => false)) {
+      stage = s;
+      break;
+    }
+  }
+  const deliveries = (await listVersions(project, n)).filter((v) => v.kind === 'delivery').length;
+  return { stage, deliveries };
 }
