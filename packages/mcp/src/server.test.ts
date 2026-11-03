@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import { existsSync, realpathSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -17,7 +17,7 @@ import { createEngineServer, newestSessionId, TOOL_NAMES, type EngineContext } f
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
 const GB = 1024 ** 3;
-const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, ...over });
+const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, transcriber: async () => true, ...over });
 
 const clients: Client[] = [];
 afterEach(async () => {
@@ -83,17 +83,37 @@ describe('engine tools', () => {
     const dir = await projectWithVideo();
     const { call } = await connect(dir);
     const gone = join(dir, 'nowhere');
-    const r = await call('new_video', { title: 'Two', about: 'x', footage: [dir, gone] });
+    const r = await call('new_video', { title: 'Two', about: 'x', footage: [gone] });
     expect(r).toEqual({ isError: true, text: `✖ ${gone} does not exist` });
     expect(existsSync(join(dir, 'episodes', '2'))).toBe(false);
+  });
+
+  it('new_video refuses footage that is not a folder, or that is or holds the project (also through a symlink)', async () => {
+    const parent = realpathSync(await mkdtemp(join(tmpdir(), 'mirage-clips-')));
+    const dir = join(parent, 'series');
+    await mkdir(dir);
+    await writeFile(join(dir, 'mirage.json'), JSON.stringify({ version: 1, title: 'My build', createdAt: new Date().toISOString() }));
+    await writeFile(join(parent, 'a.mov'), '');
+    await symlink(parent, join(dir, 'clips-link'));
+    const { call } = await connect(dir);
+    const holds = (p: string) => `✖ ${p} holds this project. Make a new folder for the series, open Claude Code there, and add the clips folder from there.`;
+    const file = join(parent, 'a.mov');
+    const r = await call('new_video', { title: 'Two', about: 'x', footage: [file, dir, parent, join(dir, 'clips-link')] });
+    expect(r).toEqual({ isError: true, text: [`✖ ${file} isn't a folder.`, holds(dir), holds(parent), holds(join(dir, 'clips-link'))].join('\n') });
+    expect(existsSync(join(dir, 'episodes'))).toBe(false);
+    // A folder beside the project, or inside it, is fine.
+    await mkdir(join(parent, 'clips'));
+    await mkdir(join(dir, 'raw'));
+    expect((await call('new_video', { title: 'Two', about: 'x', footage: [join(parent, 'clips'), join(dir, 'raw')] })).text).toBe('video 1 created');
   });
 
   it('new_video creates the video and records it in the session state', async () => {
     const dir = await projectWithVideo();
     const { call } = await connect(dir);
-    const r = await call('new_video', { title: 'Two', about: 'the second', mention: 'the bug', footage: [dir] });
+    const clips = await mkdtemp(join(tmpdir(), 'mirage-clips-'));
+    const r = await call('new_video', { title: 'Two', about: 'the second', mention: 'the bug', footage: [clips] });
     expect(r).toEqual({ isError: false, text: 'video 2 created' });
-    expect(JSON.parse(await readFile(join(dir, 'episodes', '2', 'video.json'), 'utf8'))).toMatchObject({ title: 'Two', mention: 'the bug', hide: '', footage: [dir] });
+    expect(JSON.parse(await readFile(join(dir, 'episodes', '2', 'video.json'), 'utf8'))).toMatchObject({ title: 'Two', mention: 'the bug', hide: '', footage: [clips] });
     expect((await readSessionState(dir, 's1')).video).toBe(2);
   });
 

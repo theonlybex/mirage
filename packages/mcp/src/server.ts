@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { access, constants, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZodRawShape } from 'zod';
 import { z } from 'zod';
@@ -64,6 +64,20 @@ export function newestSessionId(project: string): string | null {
     if (!best || mtime > best.mtime) best = { id, mtime };
   }
   return best?.id ?? null;
+}
+
+/**
+ * Why `folder` can't be a video's footage, or null when it can: it must be a folder, and neither the project nor a folder
+ * holding it (footage is read-only, and the engine writes inside the project). Symlinks are followed.
+ */
+function footageProblem(folder: string, project: string): string | null {
+  if (!existsSync(folder)) return `✖ ${folder} does not exist`;
+  if (!statSync(folder).isDirectory()) return `✖ ${folder} isn't a folder.`;
+  const rel = relative(realpathSync(folder), realpathSync(project));
+  if (rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) {
+    return `✖ ${folder} holds this project. Make a new folder for the series, open Claude Code there, and add the clips folder from there.`;
+  }
+  return null;
 }
 
 type Result = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -172,8 +186,11 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     },
     async (a) => {
       const folders = a.footage.map((f) => resolveUserPath(f, project));
-      const missing = folders.filter((f) => !existsSync(f));
-      if (missing.length) return { content: [{ type: 'text', text: missing.map((f) => `✖ ${f} does not exist`).join('\n') }], isError: true };
+      const refused = folders.flatMap((f) => {
+        const why = footageProblem(f, project);
+        return why ? [why] : [];
+      });
+      if (refused.length) return { content: [{ type: 'text', text: refused.join('\n') }], isError: true };
       const n = await newVideo(project, { title: a.title, about: a.about, mention: a.mention ?? '', hide: a.hide ?? '', footage: folders });
       await writeSessionState(project, sid(), { video: n });
       return ok(`video ${n} created`);

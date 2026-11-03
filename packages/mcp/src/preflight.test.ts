@@ -8,6 +8,7 @@ const fine = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({
   freeBytes: async () => 500 * GB,
   footageBytes: async () => 20 * GB,
   which: async () => true,
+  transcriber: async () => true,
   ...over,
 });
 
@@ -38,8 +39,13 @@ describe('preflight', () => {
     expect(none.problems).toEqual(["ffmpeg isn't installed. Run /mirage:setup.", "ffprobe isn't installed. Run /mirage:setup."]);
   });
 
+  it('says to build the speech helper when it is missing', async () => {
+    const r = await preflight({ project: '/p', videos: [1], deps: fine({ transcriber: async () => false }) });
+    expect(r).toEqual({ ok: false, problems: ["The speech helper isn't built yet. Run /mirage:status."] });
+  });
+
   it('reports every problem at once', async () => {
-    const r = await preflight({ project: '/p', videos: [1], deps: fine({ onBattery: async () => true, which: async () => false, freeBytes: async () => 0 }) });
-    expect(r.problems).toHaveLength(4);
+    const r = await preflight({ project: '/p', videos: [1], deps: fine({ onBattery: async () => true, which: async () => false, freeBytes: async () => 0, transcriber: async () => false }) });
+    expect(r.problems).toHaveLength(5);
   });
 });

@@ -37,6 +37,7 @@ async function fakeDeps(over: Partial<HookDeps> = {}) {
       return true;
     },
     ppid: 4242,
+    developerTools: async () => true,
     ...over,
   };
   return { deps, sleeps, compiles };
@@ -59,13 +60,15 @@ const versions = async (dir: string, n = 1) => (await listVersions(dir, n)).map(
 describe('runHook', () => {
   it('does nothing outside a Mirage project', async () => {
     const { deps, compiles } = await fakeDeps();
+    await mkdir(join(deps.pluginRoot, 'native'), { recursive: true });
+    await writeFile(join(deps.pluginRoot, 'native', 'transcribe.swift'), '// swift');
     const dir = await tmp();
     for (const ev of ['pre', 'post', 'stop'] as const) {
       expect(await runHook(ev, input(dir, { tool_name: 'Write', tool_input: { file_path: join(dir, 'x') } }), deps)).toEqual({ stdout: '', exitCode: 0 });
     }
     expect(await runHook('session-start', input(dir, { hook_event_name: 'SessionStart' }), deps)).toEqual({ stdout: '', exitCode: 0 });
     expect(existsSync(join(dir, '.mirage'))).toBe(false);
-    expect(compiles).toEqual([]); // no transcribe.swift in this plugin root
+    expect(compiles).toEqual([]); // the speech helper is compiled only inside a Mirage project
   });
 
   it.skipIf(!existsSync(DIST))('does nothing outside a Mirage project, fast, through the bundled script', async () => {
@@ -78,7 +81,7 @@ describe('runHook', () => {
     expect(out).toBe('');
   });
 
-  it('compiles the speech helper at session start when it is missing or older than its source, without waiting', async () => {
+  it('compiles the speech helper at session start in a Mirage project when it is missing or older than its source, without waiting', async () => {
     let finish!: (ok: boolean) => void;
     const { deps, compiles } = await fakeDeps();
     deps.swiftc = (src, out) => {
@@ -89,8 +92,11 @@ describe('runHook', () => {
     await mkdir(dirname(src), { recursive: true });
     await writeFile(src, '// swift');
     const out = join(deps.pluginData, 'bin', 'wordedits-transcribe');
-    const elsewhere = await tmp();
-    expect((await runHook('session-start', input(elsewhere), deps)).stdout).toBe('');
+    // Not in a Mirage project: nothing.
+    expect((await runHook('session-start', input(await tmp()), deps)).stdout).toBe('');
+    expect(compiles).toEqual([]);
+    const { dir } = await project();
+    await runHook('session-start', input(dir), deps);
     expect(compiles).toEqual([[src, out]]);
     expect(existsSync(dirname(out))).toBe(true);
     finish(true);
@@ -99,14 +105,56 @@ describe('runHook', () => {
     await writeFile(out, 'bin');
     const past = new Date(Date.now() - 60_000);
     await utimes(src, past, past);
-    await runHook('session-start', input(elsewhere), deps);
+    await runHook('session-start', input(dir), deps);
     expect(compiles).toHaveLength(1);
 
     // The source is newer again.
     const future = new Date(Date.now() + 60_000);
     await utimes(src, future, future);
-    await runHook('session-start', input(elsewhere), deps);
+    await runHook('session-start', input(dir), deps);
     expect(compiles).toHaveLength(2);
+  });
+
+  it('compiles only when xcode-select -p finds the developer tools, and after a failed compile waits 24 h unless the source changes', async () => {
+    let tools = false;
+    const { deps, compiles } = await fakeDeps({ developerTools: async () => tools });
+    let t = Date.parse('2026-11-02T22:00:00.000Z');
+    deps.now = () => new Date(t);
+    deps.swiftc = async (src, out) => {
+      compiles.push([src, out]);
+      return false; // the compile fails
+    };
+    const src = join(deps.pluginRoot, 'native', 'transcribe.swift');
+    await mkdir(dirname(src), { recursive: true });
+    await writeFile(src, '// swift v1');
+    const { dir } = await project();
+    const start = () => runHook('session-start', input(dir), deps);
+    // No developer tools: swiftc is never run (it would open Apple's install dialog), and nothing is remembered.
+    await start();
+    expect(compiles).toEqual([]);
+    expect(existsSync(join(deps.pluginData, 'bin', '.transcribe-failed'))).toBe(false);
+
+    tools = true;
+    await start();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(compiles).toHaveLength(1);
+    const failed = JSON.parse(await readFile(join(deps.pluginData, 'bin', '.transcribe-failed'), 'utf8'));
+    expect(failed).toEqual({ hash: expect.stringMatching(/^[0-9a-f]{64}$/), at: '2026-11-02T22:00:00.000Z' });
+    // Not again within 24 h …
+    t += 23 * 3600_000;
+    await start();
+    expect(compiles).toHaveLength(1);
+    // … unless the source changed …
+    await writeFile(src, '// swift v2');
+    await start();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(compiles).toHaveLength(2);
+    // … and again once 24 h have passed.
+    await start();
+    expect(compiles).toHaveLength(2);
+    t += 24 * 3600_000 + 1;
+    await start();
+    expect(compiles).toHaveLength(3);
   });
 
   it('writes the session file and tells Claude about the project at session start', async () => {

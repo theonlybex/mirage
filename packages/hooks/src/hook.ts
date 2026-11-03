@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // The Claude Code hooks of the Mirage plugin. Outside a Mirage project (see findProject) every event returns at once with
 // nothing to print; the engine (@wordedits/core) is imported only inside one.
-import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { SessionState, StepLine, VersionMeta } from '@wordedits/shared';
@@ -30,8 +31,13 @@ export interface HookDeps {
   pluginData: string;
   /** ${CLAUDE_PLUGIN_ROOT}: native/transcribe.swift is here. */
   pluginRoot: string;
-  /** Compiles the speech helper; the hook starts it and never waits for it. */
-  swiftc(src: string, out: string): Promise<boolean>;
+  /**
+   * Compiles the speech helper; the hook starts it and never waits for it. On failure it writes `failed.text` to
+   * `failed.path` (the compile outlives the hook, so it records its own failure); on success it removes that file.
+   */
+  swiftc(src: string, out: string, failed: { path: string; text: string }): Promise<boolean>;
+  /** Whether Apple's developer tools are installed (`xcode-select -p`, which never opens a dialog, unlike swiftc). */
+  developerTools(): Promise<boolean>;
   /** The Claude Code process running the hook (process.ppid: scripts/node execs node). The engine it started has the same parent. */
   ppid: number;
   /** ${CLAUDE_PROJECT_DIR}, when set: the project root if it holds a mirage.json. */
@@ -71,8 +77,8 @@ export async function runHook(event: HookEvent, input: HookInput, deps: HookDeps
   // Without a session there is nowhere to write steps or state: every event does nothing.
   if (typeof input.session_id !== 'string' || input.session_id === '') return result();
   const project = findProject(deps.projectDir, input.cwd);
-  if (event === 'session-start') startSpeechHelper(deps, event);
   if (project === null) return result();
+  if (event === 'session-start') await startSpeechHelper(deps, event);
   const core: Core = await import('@wordedits/core');
   // Which session this Claude Code process runs, for the engine it started (which can't see the session id).
   try {
@@ -90,11 +96,19 @@ export async function runHook(event: HookEvent, input: HookInput, deps: HookDeps
   }
 }
 
-/** Compiles the speech helper when it is missing or older than its source: started detached, never waited for. */
-function startSpeechHelper(deps: HookDeps, event: string): void {
+/** After a failed compile, how long before the same source is tried again. */
+const COMPILE_RETRY_MS = 24 * 3600_000;
+
+/**
+ * Compiles the speech helper when it is missing or older than its source: started detached, never waited for. Only when
+ * `xcode-select -p` finds the developer tools (swiftc without them opens Apple's install dialog), and not again within
+ * 24 h of a failed compile of the same source (bin/.transcribe-failed holds its hash and time).
+ */
+async function startSpeechHelper(deps: HookDeps, event: string): Promise<void> {
   if (!deps.pluginRoot || !deps.pluginData) return;
   const src = join(deps.pluginRoot, 'native', 'transcribe.swift');
   const out = join(deps.pluginData, 'bin', 'wordedits-transcribe');
+  const marker = join(deps.pluginData, 'bin', '.transcribe-failed');
   try {
     const srcTime = statSync(src).mtimeMs;
     let stale = true;
@@ -104,8 +118,23 @@ function startSpeechHelper(deps: HookDeps, event: string): void {
       // not compiled yet
     }
     if (!stale) return;
+    const hash = createHash('sha256').update(readFileSync(src)).digest('hex');
+    try {
+      const last = JSON.parse(readFileSync(marker, 'utf8')) as { hash?: unknown; at?: unknown };
+      const since = deps.now().getTime() - Date.parse(String(last.at));
+      if (last.hash === hash && since >= 0 && since < COMPILE_RETRY_MS) return;
+    } catch {
+      // no failed compile on record (or an unreadable record): try
+    }
+    if (!(await deps.developerTools())) return;
     mkdirSync(dirname(out), { recursive: true });
-    void deps.swiftc(src, out).catch((e: unknown) => logHookError(deps.pluginData, event, e));
+    const failed = { path: marker, text: JSON.stringify({ hash, at: deps.now().toISOString() }) };
+    void deps.swiftc(src, out, failed).then(
+      (ok) => {
+        if (!ok) writeFileSync(failed.path, failed.text);
+      },
+      (e: unknown) => logHookError(deps.pluginData, event, e),
+    ).catch((e: unknown) => logHookError(deps.pluginData, event, e));
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'ENOENT') logHookError(deps.pluginData, event, e);
   }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -140,6 +140,44 @@ describe('control', () => {
       expect(await readControl(dir, 1)).toMatchObject({ stop: { at: '2026-11-02T10:00:00.000Z' }, correction: null });
       expect((await readdir(join(dir, 'episodes', '1'))).filter((f) => f.includes('.take-'))).toEqual([]);
     }
+  });
+
+  it('takeCorrection without hard links (exFAT, network volumes): an exclusive write that never replaces a newer control.json', async () => {
+    const dir = await project();
+    const control = join(dir, 'episodes', '1', 'control.json');
+    const noLinks = async () => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    };
+    await writeControl(dir, 1, { paused: true, correction: 'Cut the ums.' });
+    expect(await takeCorrection(dir, 1, { link: noLinks })).toBe('Cut the ums.');
+    expect(await readControl(dir, 1)).toMatchObject({ paused: true, correction: null });
+    expect(JSON.parse(await readFile(control, 'utf8'))).toMatchObject({ version: 1, paused: true, correction: null });
+    expect((await readdir(join(dir, 'episodes', '1'))).filter((f) => f.includes('.take-') || f.includes('.tmp-'))).toEqual([]);
+    // Somebody writes a newer control.json while the take is in flight: theirs stays.
+    await writeControl(dir, 1, { paused: true, correction: 'Again.' });
+    const racing = async () => {
+      await writeFile(control, JSON.stringify({ version: 1, paused: false, pauseNow: false, stop: { at: '2026-11-03T00:00:00.000Z' }, correction: null, updatedAt: '2026-11-03T00:00:00.000Z' }));
+      throw Object.assign(new Error('not supported'), { code: 'ENOTSUP' });
+    };
+    expect(await takeCorrection(dir, 1, { link: racing })).toBe('Again.');
+    expect(await readControl(dir, 1)).toMatchObject({ paused: false, stop: { at: '2026-11-03T00:00:00.000Z' } });
+  });
+
+  it('a claim older than 60 s, left by a take that died, is pruned when control is read; with no control.json its state is put back', async () => {
+    const dir = await project();
+    const ep = join(dir, 'episodes', '1');
+    const old = new Date(Date.now() - 120_000);
+    await writeControl(dir, 1, { paused: true, correction: 'x' });
+    const { rename } = await import('node:fs/promises');
+    await rename(join(ep, 'control.json'), join(ep, `control.json.take-${old.getTime()}-dead`));
+    expect(await readControl(dir, 1)).toMatchObject({ paused: true, correction: null });
+    expect((await readdir(ep)).filter((f) => f.includes('.take-'))).toEqual([]);
+    expect(JSON.parse(await readFile(join(ep, 'control.json'), 'utf8'))).toMatchObject({ paused: true, correction: null });
+    // Beside a control.json, an old claim (by its mtime when its name has no time) is only removed.
+    await writeFile(join(ep, 'control.json.take-dead'), JSON.stringify({ version: 1, paused: false, pauseNow: false, stop: null, correction: 'stale', updatedAt: old.toISOString() }));
+    await utimes(join(ep, 'control.json.take-dead'), old, old);
+    expect(await readControl(dir, 1)).toMatchObject({ paused: true });
+    expect((await readdir(ep)).filter((f) => f.includes('.take-'))).toEqual([]);
   });
 
   it('while a correction is being taken, the control still reads as it will be afterwards', async () => {
