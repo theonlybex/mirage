@@ -43,6 +43,15 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
 
+  packages/hooks:
+    dependencies:
+      '@wordedits/core':
+        specifier: workspace:*
+        version: link:../core
+      '@wordedits/shared':
+        specifier: workspace:*
+        version: link:../shared
+
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':

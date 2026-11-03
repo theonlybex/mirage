@@ -1,0 +1,17 @@
+{
+  "name": "@wordedits/hooks",
+  "version": "0.0.1",
+  "private": true,
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/hook.ts",
+      "default": "./src/hook.ts"
+    }
+  },
+  "dependencies": {
+    "@wordedits/core": "workspace:*",
+    "@wordedits/shared": "workspace:*"
+  }
+}

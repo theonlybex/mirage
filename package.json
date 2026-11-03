@@ -9,7 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b packages/shared packages/sidecars packages/core packages/mcp scripts",
+    "typecheck": "tsc -b packages/shared packages/sidecars packages/core packages/mcp packages/hooks scripts",
     "fixtures": "tsx scripts/make-fixtures.ts",
     "mirage": "tsx scripts/mirage.ts",
     "build:native": "tsx scripts/build-native.ts",
