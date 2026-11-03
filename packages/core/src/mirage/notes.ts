@@ -89,7 +89,9 @@ export type NoteStatus = { status: NonNullable<LogEntry['status']>; reason?: str
 /** What Claude did with each note, from the session logs of the video: the newest `note-status` entry of a note wins. */
 export async function noteStatuses(project: string, n: number): Promise<Record<string, NoteStatus>> {
   const sessions = join(episodeDir(project, n), 'sessions');
-  const names = (await readdir(sessions).catch(() => [] as string[])).sort();
+  // Session folders only: a stray file (.DS_Store) in sessions/ is not a session.
+  const entries = await readdir(sessions, { withFileTypes: true }).catch(() => []);
+  const names = entries.filter((d) => d.isDirectory()).map((d) => d.name).sort();
   const newest = new Map<string, NoteStatus & { at: number }>();
   for (const name of names) {
     for (const e of await readLog(join(sessions, name))) {

@@ -127,6 +127,14 @@ describe('noteStatuses', () => {
     });
   });
 
+  it('ignores stray files in the sessions folder', async () => {
+    const dir = await project();
+    await appendLog(sessionDir(dir, 1, 's1'), { at: '2026-11-02T10:00:00.000Z', kind: 'note-status', noteId: 'n1', status: 'done', text: '' });
+    await appendLog(sessionDir(dir, 1, 's2'), { at: '2026-11-02T11:00:00.000Z', kind: 'note-status', noteId: 'n2', status: 'could-not', text: 'No footage.' });
+    await writeFile(join(dir, 'episodes', '1', 'sessions', '.DS_Store'), 'junk');
+    expect(await noteStatuses(dir, 1)).toEqual({ n1: { status: 'done' }, n2: { status: 'could-not', reason: 'No footage.' } });
+  });
+
   it('is empty without sessions', async () => {
     expect(await noteStatuses(await project(), 1)).toEqual({});
   });
