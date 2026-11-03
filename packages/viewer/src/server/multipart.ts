@@ -3,7 +3,6 @@
 // disk (never whole into memory). Enough for the page's own uploads; not a general-purpose parser.
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
 import { HttpError } from './http-error.js';
 
@@ -15,6 +14,8 @@ type Options = {
   fileLimit: number;
   /** Where the file is written, decided from the fields before it and its name. Throw to refuse it. */
   open: (fields: Record<string, string>, filename: string) => Promise<string>;
+  /** Sees the file's write stream once it is open (tests watch its listeners). */
+  onFileStream?: (out: WriteStream) => void;
 };
 
 const FIELD_LIMIT = 1024;
@@ -60,6 +61,8 @@ export async function readMultipart(body: AsyncIterable<Buffer | Uint8Array>, bo
   let part: { name: string; chunks: Buffer[]; size: number } | null = null;
   let out: WriteStream | null = null;
   let failed: Error | null = null;
+  /** The write waiting for 'drain', which a write error must also end. */
+  let waiter: ((e?: Error) => void) | null = null;
 
   const write = async (data: Buffer) => {
     if (!data.length) return;
@@ -67,7 +70,17 @@ export async function readMultipart(body: AsyncIterable<Buffer | Uint8Array>, bo
       file.size += data.length;
       if (file.size > o.fileLimit) throw new HttpError(413, 'That is too large.');
       if (failed) throw failed;
-      if (!out.write(data)) await Promise.race([once(out, 'drain'), once(out, 'error')]);
+      const stream: WriteStream = out;
+      if (!stream.write(data)) {
+        // One persistent error handler (set at open) and one 'drain' at a time: no listener piles up per wait.
+        await new Promise<void>((resolve, reject) => {
+          waiter = (e) => (e ? reject(e) : resolve());
+          stream.once('drain', () => {
+            waiter = null;
+            resolve();
+          });
+        });
+      }
       if (failed) throw failed;
     } else if (part) {
       part.size += data.length;
@@ -124,7 +137,13 @@ export async function readMultipart(body: AsyncIterable<Buffer | Uint8Array>, bo
           const path = await o.open({ ...fields }, filename);
           file = { name: filename, path, size: 0 };
           out = createWriteStream(path, { flags: 'wx' });
-          out.on('error', (e) => (failed = e));
+          out.on('error', (e) => {
+            failed = e;
+            const wake = waiter as ((e?: Error) => void) | null;
+            waiter = null;
+            wake?.(e);
+          });
+          o.onFileStream?.(out);
         }
         state = 'body';
         return true;

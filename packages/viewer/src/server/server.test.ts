@@ -634,12 +634,17 @@ describe('API', () => {
     await writeFile(rec, 'audio');
     const r = await api('/api/voiceover', { body: { video: 1, path: rec } });
     expect(r.status).toBe(200);
-    expect(lines[1]).toBe(`Mirage viewer: the person dropped a voice-over recording for video 1: ${rec}. Use the mirage:voiceover skill.`);
+    expect(lines[1]).toBe(`Mirage viewer: the person dropped a voice-over recording for video 1: “${rec}”. Use the mirage:voiceover skill.`);
     const bad = await api('/api/voiceover', { body: { video: 1, path: join(t.root, 'missing.m4a') } });
     expect(bad.status).toBe(400);
     expect((await api('/api/voiceover', { body: { video: 1, path: 'relative.m4a' } })).status).toBe(400);
     expect((await api('/api/voiceover', { body: { video: 1, path: t.root } })).status).toBe(400);
     expect(lines).toHaveLength(2);
+    // Curly quotes in the path cannot close the line's own quotes.
+    const curly = join(t.root, 'my “best” take.m4a');
+    await writeFile(curly, 'audio');
+    expect((await api('/api/voiceover', { body: { video: 1, path: curly } })).status).toBe(200);
+    expect(lines[2]).toBe(`Mirage viewer: the person dropped a voice-over recording for video 1: “${join(t.root, 'my "best" take.m4a')}”. Use the mirage:voiceover skill.`);
   });
 
   it('voiceover upload saves the file and says the line', async () => {
@@ -658,7 +663,7 @@ describe('API', () => {
     const saved = join(dir, 'My take_ 1.m4a');
     expect(await r.json()).toEqual({ ok: true, path: saved });
     expect((await readFile(saved)).equals(bytes)).toBe(true);
-    expect(lines[1]).toBe(`Mirage viewer: the person dropped a voice-over recording for video 1: ${saved}. Use the mirage:voiceover skill.`);
+    expect(lines[1]).toBe(`Mirage viewer: the person dropped a voice-over recording for video 1: “${saved}”. Use the mirage:voiceover skill.`);
 
     // The same name again keeps the first recording.
     const again = await upload('My take: 1.m4a', { body: new Blob(['second']) });

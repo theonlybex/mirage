@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { WriteStream } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { multipartBoundary, readMultipart } from './multipart.js';
 
@@ -56,6 +57,43 @@ describe('readMultipart', () => {
       expect(r.fields).toEqual({ video: '3' });
       expect(r.file).toEqual({ name: 'my "take".m4a', path: join(dir, `upload-${size}`), size: BYTES.length });
       expect((await readFile(join(dir, `upload-${size}`))).equals(BYTES), `chunk size ${size}`).toBe(true);
+    }
+  });
+
+  it('waits for the disk without piling up listeners on a big file', async () => {
+    const warnings: Error[] = [];
+    const onWarning = (w: Error) => warnings.push(w);
+    process.on('warning', onWarning);
+    try {
+      const big = Buffer.from(Array.from({ length: 3 << 20 }, (_, i) => (i * 131) % 256));
+      const form = new FormData();
+      form.append('file', new Blob([big]), 'big.m4a');
+      const { chunks, boundary } = await encode(form, 4096);
+      let out: WriteStream | null = null;
+      let drains = 0;
+      const errorListeners: number[] = [];
+      async function* watched() {
+        for (const c of chunks) {
+          if (out) errorListeners.push(out.listenerCount('error'));
+          yield c;
+        }
+      }
+      const r = await readMultipart(watched(), boundary, {
+        fileLimit: 4 << 20,
+        open,
+        onFileStream: (s) => {
+          out = s;
+          s.on('drain', () => drains++);
+        },
+      });
+      expect(r.file?.size).toBe(big.length);
+      expect((await readFile(join(dir, 'upload'))).equals(big)).toBe(true);
+      expect(drains).toBeGreaterThan(20);
+      expect(Math.max(...errorListeners)).toBe(1);
+      await new Promise((ok) => setImmediate(ok));
+      expect(warnings.map((w) => w.name)).not.toContain('MaxListenersExceededWarning');
+    } finally {
+      process.off('warning', onWarning);
     }
   });
 

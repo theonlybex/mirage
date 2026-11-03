@@ -105,19 +105,22 @@ function useVoiceNote(video: number, onText: (text: string) => void, sendAudio: 
     }
     const type = MediaRecorder.isTypeSupported?.('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
     try {
-      r.recorder = MediaRecorder.isTypeSupported?.(type) ? new MediaRecorder(r.stream, { mimeType: type }) : new MediaRecorder(r.stream);
+      const recorder = MediaRecorder.isTypeSupported?.(type) ? new MediaRecorder(r.stream, { mimeType: type }) : new MediaRecorder(r.stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size) r.chunks.push(e.data);
+      };
+      recorder.onstop = () => void finish(r);
+      r.recorder = recorder;
+      // Inside the try: a recorder that will not start must still give the microphone back.
+      recorder.start();
     } catch (e) {
+      if (r.recorder) r.recorder.onstop = null;
       stopTracks(r.stream);
       rec.current = null;
       setState('idle');
       setMessage(micError(e));
       return;
     }
-    r.recorder.ondataavailable = (e) => {
-      if (e.data.size) r.chunks.push(e.data);
-    };
-    r.recorder.onstop = () => void finish(r);
-    r.recorder.start();
     r.startedAt = Date.now();
     setState('recording');
   };
@@ -189,6 +192,8 @@ export function NoteComposer({ video, t, box, still, onAdd, onCancel, sendAudio 
     onPointerUp: mic.stop,
     onPointerCancel: mic.stop,
     onLostPointerCapture: mic.stop,
+    // Focus leaving the button (Tab, a click elsewhere, the window losing focus) ends a keyboard or pointer hold.
+    onBlur: mic.stop,
     onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => {
       if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
         e.preventDefault();

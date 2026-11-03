@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { NoteView, VersionView } from '../../view-types.js';
 import type { LiveVideo } from '../api.js';
 import { Button } from '../components/Button.js';
@@ -30,6 +30,11 @@ type ReviewTabProps = {
 export function ReviewTab({ video, live, chosen, onChoose }: ReviewTabProps) {
   const pickerId = useId();
   const [seek, setSeek] = useState<{ versionId: string; t: number; nonce: number } | null>(null);
+  const currentId = reviewVersion(live.versions, chosen)?.id ?? null;
+  // A seek belongs to the version it was made for: once another version plays it is spent, so coming back starts fresh.
+  useEffect(() => {
+    if (seek && seek.versionId !== currentId) setSeek(null);
+  }, [currentId]);
   if (live.versions === null) {
     return (
       <div className="review" aria-busy="true" aria-label="Loading the review">

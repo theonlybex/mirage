@@ -195,7 +195,7 @@ async function voiceNote(ctx: ApiContext, req: IncomingMessage, url: URL): Promi
 }
 
 const sayVoiceover = (ctx: ApiContext, video: number, path: string) =>
-  ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${video}: ${path}. Use the mirage:voiceover skill.`);
+  ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${video}: “${oneLine(path)}”. Use the mirage:voiceover skill.`);
 
 /** `/api/voiceover`: the path of a recording (JSON, for Claude's side), or the recording itself (form data, from the page). */
 async function voiceover(ctx: ApiContext, req: IncomingMessage): Promise<ApiResult> {

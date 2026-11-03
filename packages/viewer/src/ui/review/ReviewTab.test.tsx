@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LiveVideo } from '../api.js';
 import { before, checkpoint, guide, note, rough } from './fixtures.js';
@@ -40,6 +41,30 @@ describe('ReviewTab', () => {
     expect(screen.getByText('V1 · Rough cut')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^0:04.*Earlier note/ }));
     expect(onChoose).toHaveBeenCalledWith('d1');
+  });
+
+  it('a seek is spent once another version plays: coming back does not jump to the note again', () => {
+    HTMLMediaElement.prototype.pause = vi.fn();
+    const state = live({ versions: [rough, guide], notes: [note({ id: 'n1', versionId: 'd1', t: 4.2, text: 'Earlier note' })] });
+    function Stateful() {
+      const [chosen, setChosen] = useState<string | null>(null);
+      return <ReviewTab video={1} live={state} chosen={chosen} onChoose={setChosen} />;
+    }
+    const { container } = render(<Stateful />);
+    const loaded = () => {
+      const v = container.querySelector('video')!;
+      Object.defineProperty(v, 'duration', { value: 20, configurable: true });
+      fireEvent(v, new Event('loadedmetadata'));
+      return v;
+    };
+    fireEvent.click(screen.getByRole('button', { name: /^0:04.*Earlier note/ }));
+    expect(loaded().currentTime).toBe(4.2);
+    const picker = screen.getByLabelText('Version') as HTMLSelectElement;
+    fireEvent.change(picker, { target: { value: 'd2' } });
+    loaded();
+    fireEvent.change(picker, { target: { value: 'd1' } });
+    expect(picker.value).toBe('d1');
+    expect(loaded().currentTime).toBe(0);
   });
 
   it('says there is nothing to watch before the first cut', () => {
