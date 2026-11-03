@@ -3,10 +3,11 @@ import { useState } from 'react';
 import type { Control, Progress, StepLine, VersionView } from '../../view-types.js';
 import { Button } from '../components/Button.js';
 import { Chip, type ChipTone } from '../components/Chip.js';
+import type { IconName } from '../components/Icon.js';
 import { Spinner } from '../components/Spinner.js';
 import { WavyProgress } from '../components/WavyProgress.js';
 import { CorrectionBox } from './CorrectionBox.js';
-import { interruptedStep, newestVersion } from './InterruptedBanner.js';
+import { newestVersion } from './InterruptedBanner.js';
 import { finishesText, PauseSheet, type PauseMode } from './PauseSheet.js';
 import { StopDialog } from './StopDialog.js';
 
@@ -32,7 +33,7 @@ export function runState(control: Control | null, steps: readonly StepLine[]): R
   return inTurn ? 'working' : 'idle';
 }
 
-const STATE: Record<RunState, { label: string; tone: ChipTone; icon?: string }> = {
+const STATE: Record<RunState, { label: string; tone: ChipTone; icon?: IconName }> = {
   working: { label: 'Working', tone: 'primary' },
   pausing: { label: 'Pausing', tone: 'secondary', icon: 'pause' },
   paused: { label: 'Paused', tone: 'secondary', icon: 'pause' },
@@ -63,10 +64,10 @@ export function RunBar({ video, control: streamed, steps, progress, versions, no
   const [sheet, setSheet] = useState(false);
   const [stopping, setStopping] = useState(false);
 
-  // An edit that stopped part-way (InterruptedBanner) isn't working any more; a pause the person set stays theirs to lift.
-  const stalled = interruptedStep(steps, progress, now) !== null;
-  const running = stalled ? null : runningStep(steps);
-  const state: RunState = stalled && !control?.stop ? (control?.paused ? 'paused' : 'idle') : runState(control, steps);
+  // Pause and Stop stay while the turn hasn't ended, even when a step has gone quiet: Claude may still be at it, and the
+  // InterruptedBanner is what says the edit may have stopped.
+  const running = runningStep(steps);
+  const state = runState(control, steps);
   const shown = STATE[state];
   const withProgress = running && progress ? progress : null;
 

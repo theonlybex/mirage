@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { ButtonHTMLAttributes, Ref } from 'react';
-import { Icon } from './Icon.js';
+import { Icon, type IconName } from './Icon.js';
 
 export type ButtonVariant = 'filled' | 'tonal' | 'outlined' | 'text';
 
@@ -9,7 +9,7 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   /** `error` is for destructive actions (Stop), as text buttons in the error colour. */
   tone?: 'default' | 'error';
   /** A leading Material Symbol. */
-  icon?: string;
+  icon?: IconName;
   size?: 'small' | 'medium';
   ref?: Ref<HTMLButtonElement>;
 };

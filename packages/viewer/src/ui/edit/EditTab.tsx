@@ -24,7 +24,7 @@ export function EditTab({ video, live }: { video: number; live: LiveVideo }) {
   return (
     <div className="edit">
       <RunBar video={video} control={live.control} steps={steps} progress={live.progress} versions={live.versions} now={now} post={post} />
-      <InterruptedBanner steps={steps} progress={live.progress} versions={live.versions} now={now} onGoBack={(id) => post('/api/restore', { video, id })} />
+      <InterruptedBanner steps={steps} progress={live.progress} versions={live.versions} now={now} paused={live.control?.paused ?? false} onGoBack={(id) => post('/api/restore', { video, id })} />
       <div className="edit__grid">
         <LiveTimeline view={live.timeline} />
         <StepList steps={steps} />

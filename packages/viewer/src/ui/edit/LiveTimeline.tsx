@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import type { TimelineView } from '../../view-types.js';
 import { withKey } from '../api.js';
 import { Chip } from '../components/Chip.js';
-import { Icon } from '../components/Icon.js';
+import { Icon, type IconName } from '../components/Icon.js';
 import { Spinner } from '../components/Spinner.js';
 import { keysBy, usePresence, type Presence } from './presence.js';
 import { assignRows, beatColour, beatName, formatTime, PX_PER_ITEM, rulerTicks, SCROLL_AFTER_ITEMS } from './timeline-layout.js';
@@ -16,7 +16,7 @@ function place(span: Span, duration: number, extra: Record<string, string | numb
   return { '--start': Math.max(0, span.start) / d, '--len': Math.max(0, span.end - span.start) / d, ...extra } as CSSProperties;
 }
 
-function Lane({ name, label, icon, children, style }: { name: string; label: string; icon: string; children: ReactNode; style?: CSSProperties }) {
+function Lane({ name, label, icon, children, style }: { name: string; label: string; icon: IconName; children: ReactNode; style?: CSSProperties }) {
   return (
     <div className="timeline__row" data-row={name} style={style}>
       <div className="timeline__label" aria-hidden="true">

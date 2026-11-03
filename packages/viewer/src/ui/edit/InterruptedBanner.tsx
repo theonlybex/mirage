@@ -36,17 +36,19 @@ type BannerProps = {
   progress: Progress | null;
   versions: readonly VersionView[] | null;
   now: number;
+  /** The person has paused the edit: a quiet step is then expected, so no banner. */
+  paused?: boolean;
   onGoBack: (versionId: string) => Promise<unknown> | void;
 };
 
 /** Says when an edit stopped part-way, and offers to go back to the last finished step or leave things as they are. */
-export function InterruptedBanner({ steps, progress, versions, now, onGoBack }: BannerProps) {
+export function InterruptedBanner({ steps, progress, versions, now, paused = false, onGoBack }: BannerProps) {
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const step = interruptedStep(steps, progress, now);
   const key = step ? `${step.id}@${step.at}` : null;
-  if (!step || dismissed === key) return null;
+  if (!step || paused || dismissed === key) return null;
   const point = restorePoint(versions);
 
   const goBack = async () => {

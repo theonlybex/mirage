@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { ButtonHTMLAttributes, Ref } from 'react';
-import { Icon } from './Icon.js';
+import { Icon, type IconName } from './Icon.js';
 
 export type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
-  icon: string;
+  icon: IconName;
   /** Required: an icon alone says nothing to a screen reader. */
   'aria-label': string;
   variant?: 'standard' | 'filled' | 'tonal' | 'outlined';

@@ -78,16 +78,17 @@ describe('RunBar', () => {
     expect(post).toHaveBeenCalledWith('/api/control', { video: 1, stop: true });
   });
 
-  it('treats an edit that stopped part-way as idle, but keeps Resume while the pause is on', () => {
-    const stale: StepLine = { ...running, at: ago(300) };
-    setup({ steps: [done, stale], progress: { ...progress, updatedAt: ago(200) } });
-    expect(screen.getByText('Idle')).toBeTruthy();
-    expect(screen.queryByRole('progressbar')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
+  it('keeps Pause and Stop for a running step that has gone quiet: only the banner says it may have stopped', () => {
+    const quiet: StepLine = { ...running, at: ago(300) };
+    setup({ steps: [done, quiet], progress: { ...progress, updatedAt: ago(200) } });
+    expect(screen.getByText('Working')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
     cleanup();
-    setup({ control: control({ paused: true }), steps: [done, stale] });
-    expect(screen.getByText('Paused')).toBeTruthy();
+    setup({ control: control({ paused: true }), steps: [done, quiet] });
+    expect(screen.getByText('Pausing')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
   });
 
   it('shows Stopping and Idle without controls', () => {

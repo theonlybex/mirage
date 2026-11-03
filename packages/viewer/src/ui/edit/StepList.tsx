@@ -43,7 +43,7 @@ function StatusMark({ status }: { status: ToolLine['status'] }) {
       </span>
     );
   }
-  const icon = { done: 'check', failed: 'error', denied: 'pause' }[status];
+  const icon = ({ done: 'check', failed: 'error', denied: 'pause' } as const)[status];
   const words = { done: 'Done', failed: 'Didn’t work', denied: 'Held back' }[status];
   return (
     <span className="step__mark">

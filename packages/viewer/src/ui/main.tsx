@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import '@fontsource-variable/google-sans-flex';
-import 'material-symbols/rounded.css';
+import './theme/fonts.css';
 import './theme/tokens.css';
 import './theme/base.css';
 import './components/components.css';

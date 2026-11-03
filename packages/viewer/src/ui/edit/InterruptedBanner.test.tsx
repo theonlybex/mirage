@@ -47,6 +47,11 @@ describe('InterruptedBanner', () => {
     expect(screen.queryByText(/This edit stopped/)).toBeNull();
   });
 
+  it('is hidden while the person has paused the edit', () => {
+    render(<InterruptedBanner steps={[running(200)]} progress={null} versions={versions} now={now} paused onGoBack={() => {}} />);
+    expect(screen.queryByText(/This edit stopped/)).toBeNull();
+  });
+
   it('is hidden while the edit is alive', () => {
     render(<InterruptedBanner steps={[running(30)]} progress={null} versions={versions} now={now} onGoBack={() => {}} />);
     expect(screen.queryByText(/This edit stopped/)).toBeNull();
