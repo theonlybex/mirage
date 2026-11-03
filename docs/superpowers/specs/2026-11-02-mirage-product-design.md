@@ -381,6 +381,20 @@ Every phase ends with something people can run. Phase 1 alone must already beat 
   Later phases download their parts on first use (HyperFrames, Parakeet, browser), shown in the connections panel. This keeps the first download small.
 - **Cost (moved from Phase 6).** Phase 1 shows a rough estimate before a run, a running total during it, and a nightly limit for overnight mode. These are needed because everyone pays per use on their key. The full meter with per-step model choice stays in Phase 6.
 
+**Defaults taken when the user said "implement" without answering the last three questions (my calls, easy to change)**
+- **Video types.** Phase 1 stays on the build-story route. If the colleagues mostly make talking-head videos, Phase 2 (which brings that route) comes straight after.
+- **Voice-over.**
+  - Overnight, V1 is the **guide cut**: the picture and music edit, plus narration lines written for each slot, rendered without voice. The morning report says "record the voice-over next".
+  - Phase 1 takes a voice-over file the person **drops in**. The engine's existing `vo` step fits it, and then V2 renders.
+  - In-app recording (a teleprompter over the playing cut, with retakes) is later work.
+- **Distribution.**
+  - Builds are **unsigned** at first. The README explains the one-time right-click → Open.
+  - Signing and notarisation are added once there's an Apple Developer account.
+- **Licence.**
+  - Mirage's own code is **MIT**.
+  - ffmpeg ships as a **separate executable**, a GPL build because the engine uses libx264. Its licence and a source link are included.
+  - Mirage never links ffmpeg into its own code.
+
 ## 11. Risks and open items
 
 1. **Claude plan sign-in: resolved.** It's not allowed without Anthropic's approval, so Mirage uses an API key (§4). Asking Anthropic for approval is optional later work.
