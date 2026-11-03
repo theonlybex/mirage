@@ -8,17 +8,20 @@ import {
   type NoteStatus,
 } from '@wordedits/core';
 import type { Control, Note, Progress, StepLine, VersionMeta } from '@wordedits/shared';
+import { mediaPath } from './media.js';
 import { buildTimelineView, type TimelineView } from './timeline-view.js';
 
-/** A note with what Claude did with it, when it did something. */
-export type NoteView = Note & Partial<NoteStatus>;
+/** A note with what Claude did with it, when it did something, and where its still is (a media path; the page adds the key). */
+export type NoteView = Note & Partial<NoteStatus> & { stillUrl: string };
+/** A version, with where its video is (a media path) when it has one. */
+export type VersionView = VersionMeta & { videoUrl?: string };
 
 /** The seven kinds of event the page gets for one video, each as the JSON of its `data:` line. */
 export type VideoEvents = {
   timeline: TimelineView;
   steps: StepLine[];
   progress: Progress | null;
-  versions: VersionMeta[];
+  versions: VersionView[];
   notes: NoteView[];
   control: Control;
   report: string | null;
@@ -33,7 +36,18 @@ const RETRY_MS = 500;
 /** The notes of video `n`, each with what Claude did with it (status, and its reason) once it did something. */
 export async function noteViews(project: string, n: number): Promise<NoteView[]> {
   const [notes, statuses] = await Promise.all([readNotes(project, n), noteStatuses(project, n)]);
-  return notes.map((x) => ({ ...x, ...statuses[x.id] }));
+  return notes.map((x) => ({ ...x, ...statuses[x.id], stillUrl: noteStillUrl(project, n, x) }));
+}
+
+/** Where a note's still is, as a media path. The page never builds file paths itself. */
+export const noteStillUrl = (project: string, n: number, note: Pick<Note, 'still'>): string => mediaPath(join(episodeDir(project, n), note.still));
+
+/** The versions of video `n`, each with a `videoUrl` when it has a render. */
+export async function versionViews(project: string, n: number): Promise<VersionView[]> {
+  return (await listVersions(project, n)).map((v) => ({
+    ...v,
+    ...(v.render ? { videoUrl: mediaPath(join(episodeDir(project, n), 'versions', v.id, v.render.file)) } : {}),
+  }));
 }
 
 const readText = (path: string): Promise<string | null> => readFile(path, 'utf8').catch(() => null);
@@ -99,7 +113,7 @@ export class EventHub {
         const all = (await Promise.all(dirs.map((d) => readProgress(d)))).filter((p): p is Progress => p !== null);
         return all.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))[0] ?? null;
       }),
-      part('versions', () => listVersions(project, n)),
+      part('versions', () => versionViews(project, n)),
       part('notes', () => noteViews(project, n)),
       part('control', () => readControl(project, n)),
       part('report', async () => {

@@ -43,11 +43,11 @@ interface RawWord {
   conf?: unknown;
 }
 
-export async function transcribeAudio(audioPath: string, opts: { locale?: string; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Transcript> {
+export async function transcribeAudio(audioPath: string, opts: { locale?: string; timeoutMs?: number; signal?: AbortSignal; /** The helper to run, instead of transcriberPath(). */ transcriber?: string } = {}): Promise<Transcript> {
   if (process.platform !== 'darwin') {
     throw new SidecarError(NAME, 'NOT_FOUND', 'On-device transcription is only available on macOS for now', 'Use a Mac with macOS 26 or later.');
   }
-  const bin = transcriberPath();
+  const bin = opts.transcriber ?? transcriberPath();
   try {
     await access(bin, constants.X_OK);
   } catch {

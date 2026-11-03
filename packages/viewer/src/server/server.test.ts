@@ -9,11 +9,12 @@ import {
   type MediaTools,
 } from '@wordedits/core';
 import { ViewerInfoSchema } from '@wordedits/shared';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mediaPath } from './media.js';
 import { startViewer } from './server.js';
 import { catalogJson, CLIP_BYTES, episodeJson, makeProject, type TestProject } from './test-project.js';
 
+const transcribeCalls: { audio: string; opts: unknown }[] = [];
 const tools = {
   runFfmpeg: async (args: string[]) => {
     await writeFile(args[args.length - 1]!, 'jpg');
@@ -21,7 +22,10 @@ const tools = {
   extractWav: async (_src: string, out: string) => {
     await writeFile(out, 'wav');
   },
-  transcribe: async () => ({ words: [], segments: [{ start: 0, end: 1, text: 'Make the intro' }, { start: 1, end: 2, text: 'shorter' }], speech: [] }),
+  transcribe: async (audio: string, opts: unknown) => {
+    transcribeCalls.push({ audio, opts });
+    return { words: [], segments: [{ start: 0, end: 1, text: 'Make the intro' }, { start: 1, end: 2, text: 'shorter' }], speech: [] };
+  },
 } as unknown as MediaTools;
 
 let t: TestProject;
@@ -35,10 +39,13 @@ const start = async (over: Partial<Parameters<typeof startViewer>[0]> = {}) => {
   return viewer;
 };
 beforeEach(async () => {
+  vi.stubEnv('WORDEDITS_TRANSCRIBER', '');
+  transcribeCalls.length = 0;
   t = await makeProject();
   lines = [];
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   while (closers.length) await closers.pop()!();
 });
 
@@ -314,7 +321,9 @@ describe('events', () => {
     expect((await ev.waitFor('timeline')).status).toBe('ok');
     expect((await ev.waitFor('steps')).map((s: any) => s.id)).toEqual(['a']);
     expect((await ev.waitFor('progress')).fraction).toBe(0.5);
-    expect((await ev.waitFor('versions')).map((v: any) => v.kind)).toEqual(['delivery']);
+    const versions = await ev.waitFor('versions');
+    expect(versions.map((v: any) => v.kind)).toEqual(['delivery']);
+    expect(versions[0].videoUrl).toBe(mediaPath(join(t.project, 'episodes', '1', 'versions', versions[0].id, 'video.mp4')));
     expect(await ev.waitFor('notes')).toEqual([]);
     expect((await ev.waitFor('control')).paused).toBe(true);
     expect(await ev.waitFor('report')).toBe('# Report\n');
@@ -364,6 +373,25 @@ describe('events', () => {
     await ev.waitFor('notes', (n) => n.length === 1 && n[0]?.id === json.id && n[0]?.round === null);
     await appendLog(dir, { at: '2026-11-02T10:01:00.000Z', kind: 'note-status', text: 'Sped it up', noteId: json.id, status: 'done' });
     await ev.waitFor('notes', (n) => n[0]?.status === 'done' && n[0]?.reason === 'Sped it up');
+  });
+
+  it('gives versions with a video a videoUrl and notes a stillUrl, and the page can fetch both', async () => {
+    await start();
+    const id = await deliverRough();
+    const checkpoint = await snapshotVersion(t.project, 1, { kind: 'checkpoint', label: 'A step' });
+    const { json: added } = await api('/api/notes', { body: { video: 1, versionId: id, t: 1, text: 'Too slow', box: null } });
+    const stillUrl = mediaPath(join(t.project, 'episodes', '1', 'notes', 'n1.jpg'));
+    expect(added.stillUrl).toBe(stillUrl);
+    const ev = await openEvents();
+    const versions = await ev.waitFor('versions', (v) => v.length === 2);
+    expect(versions.find((v: any) => v.id === id).videoUrl).toBe(mediaPath(join(t.project, 'episodes', '1', 'versions', id, 'video.mp4')));
+    expect('videoUrl' in versions.find((v: any) => v.id === checkpoint.id)).toBe(false);
+    const notes = await ev.waitFor('notes', (n) => n.length === 1);
+    expect(notes[0].stillUrl).toBe(stillUrl);
+    expect((await api('/api/notes?video=1')).json[0].stillUrl).toBe(stillUrl);
+    // …and the viewer serves them
+    expect((await fetch(`${base()}${versions.find((v: any) => v.id === id).videoUrl}?k=${viewer.key}`)).status).toBe(200);
+    expect((await fetch(`${base()}${stillUrl}?k=${viewer.key}`)).status).toBe(200);
   });
 
   it('keeps the last good view while the file is broken', async () => {
@@ -499,6 +527,33 @@ describe('API', () => {
     expect(res.status).toBe(400);
   });
 
+  it('answers a body over the cap with 413 JSON and closes the connection', async () => {
+    await start();
+    const big = JSON.stringify({ video: 1, pause: 'now', pad: 'x'.repeat(2 << 20) });
+    const res = await fetch(`${base()}/api/control`, { method: 'POST', headers: { 'x-mirage-key': viewer.key, 'content-type': 'application/json' }, body: big });
+    expect(res.status).toBe(413);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(typeof (await res.json()).error).toBe('string');
+    expect(existsSync(join(t.project, 'episodes', '1', 'control.json'))).toBe(false);
+    // the same, for a sender that doesn't say how much is coming (chunked): it is cut off at the cap
+    const chunked = await new Promise<{ status: number; connection: string | undefined; body: string }>((resolve, reject) => {
+      const req = httpRequest({ host: '127.0.0.1', port: viewer.port, path: '/api/control', method: 'POST', headers: { host: `127.0.0.1:${viewer.port}`, 'x-mirage-key': viewer.key, 'transfer-encoding': 'chunked' } }, (r) => {
+        let body = '';
+        r.on('data', (c) => (body += c));
+        r.on('end', () => resolve({ status: r.statusCode ?? 0, connection: r.headers.connection, body }));
+      });
+      req.on('error', reject);
+      req.write('x'.repeat(1 << 20));
+      req.write('x'.repeat(1 << 20));
+      req.end();
+    });
+    expect(chunked.status).toBe(413);
+    expect(chunked.connection).toBe('close');
+    expect(JSON.parse(chunked.body).error).toBeTypeOf('string');
+    // and the viewer still works
+    expect((await api('/api/videos')).status).toBe(200);
+  });
+
   it('sending notes says the exact line and marks the round', async () => {
     await start();
     const versionId = await deliverRough();
@@ -539,14 +594,14 @@ describe('API', () => {
     expect(await readControl(t.project, 1)).toMatchObject({ paused: false, pauseNow: false, correction: null });
   });
 
-  it('stop writes the stop time and un-pauses', async () => {
+  it('stop writes the stop time and clears pause and a pending correction', async () => {
     await start();
-    await api('/api/control', { body: { video: 1, pause: 'after-step' } });
+    await writeControl(t.project, 1, { paused: true, pauseNow: true, correction: 'Make it shorter' });
     const before = Date.now();
     const r = await api('/api/control', { body: { video: 1, stop: true } });
     expect(r.status).toBe(200);
     const c = await readControl(t.project, 1);
-    expect(c.paused).toBe(false);
+    expect(c).toMatchObject({ paused: false, pauseNow: false, correction: null });
     expect(Date.parse(c.stop!.at)).toBeGreaterThanOrEqual(before - 1000);
     expect(lines).toHaveLength(1);
   });
@@ -638,6 +693,29 @@ describe('API', () => {
       expect(r.status).toBe(503);
       expect(await r.json()).toEqual({ error: 'Speech recognition is still being set up. Try again in a minute, or type the note.' });
       expect(existsSync(join(t.project, 'episodes', '1', 'notes'))).toBe(false);
+    });
+
+    it('uses WORDEDITS_TRANSCRIBER when set, for the check and for the transcription', async () => {
+      const mine = join(t.root, 'my-helper');
+      vi.stubEnv('WORDEDITS_TRANSCRIBER', mine);
+      await start();
+      expect((await post()).status).toBe(503); // not at <pluginData>/bin, and not yet at the env's path
+      await installTranscriber(); // a helper in pluginData/bin is not the one asked for
+      expect((await post()).status).toBe(503);
+      await writeFile(mine, '#!/bin/sh\n');
+      await chmod(mine, 0o755);
+      expect((await post()).status).toBe(200);
+      expect(transcribeCalls.map((c) => c.opts)).toEqual([{ transcriber: mine }]);
+    });
+
+    it('an explicit transcriber path wins, and the default is the one in pluginData/bin', async () => {
+      await start();
+      await installTranscriber();
+      expect((await post()).status).toBe(200);
+      expect(transcribeCalls[0]!.opts).toEqual({ transcriber: join(t.pluginData, 'bin', 'wordedits-transcribe') });
+      const other = join(t.root, 'other-helper');
+      await start({ transcriber: other });
+      expect((await post()).status).toBe(503);
     });
 
     it('refuses an empty recording and a video that does not exist', async () => {

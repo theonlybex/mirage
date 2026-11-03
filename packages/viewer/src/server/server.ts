@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { join, resolve } from 'node:path';
 import { readVideo, writeJsonFile, type MediaTools } from '@wordedits/core';
 import { ViewerInfoSchema } from '@wordedits/shared';
-import { errorResult, handleApi, HttpError, videoNumbers, type ApiResult } from './api.js';
+import { errorResult, handleApi, videoNumbers, type ApiResult } from './api.js';
 import { EventHub } from './events.js';
 import { handleMedia } from './media.js';
 import { serveAsset, servePage, type StaticResult } from './static.js';
@@ -19,6 +19,8 @@ export type ViewerOptions = {
   uiDir: string;
   /** The plugin's data folder (the speech-recognition helper is in bin/). */
   pluginData: string;
+  /** The speech-recognition helper. Default: WORDEDITS_TRANSCRIBER if set, else `<pluginData>/bin/wordedits-transcribe`. */
+  transcriber?: string;
   /** First and last port to try on 127.0.0.1. */
   ports?: [number, number];
   key?: string;
@@ -61,6 +63,7 @@ export async function startViewer(o: ViewerOptions): Promise<Viewer> {
   const key = o.key ?? randomBytes(32).toString('base64url');
   // One line each, whatever is passed in: a newline would be a second notification.
   const say = (line: string) => o.say(line.replace(/[\r\n]+/g, ' '));
+  const transcriber = o.transcriber ?? (process.env.WORDEDITS_TRANSCRIBER || join(o.pluginData, 'bin', 'wordedits-transcribe'));
   const hub = new EventHub(project);
   const ends = new Set<() => void>();
   let port = 0;
@@ -69,7 +72,8 @@ export async function startViewer(o: ViewerOptions): Promise<Viewer> {
     res.writeHead(status, { ...SECURITY_HEADERS, 'content-type': type, 'cache-control': 'no-store', ...extra });
     res.end(body);
   };
-  const sendJson = (res: ServerResponse, r: ApiResult) => send(res, r.status, 'application/json; charset=utf-8', JSON.stringify(r.body));
+  const sendJson = (res: ServerResponse, r: ApiResult, extra: Record<string, string> = {}) =>
+    send(res, r.status, 'application/json; charset=utf-8', JSON.stringify(r.body), extra);
   const sendStatic = (res: ServerResponse, r: StaticResult) =>
     r.status === 200 ? send(res, 200, r.type ?? 'application/octet-stream', r.body ?? '') : send(res, r.status, 'text/plain; charset=utf-8', r.status === 400 ? 'Bad request' : 'Not found');
 
@@ -112,7 +116,7 @@ export async function startViewer(o: ViewerOptions): Promise<Viewer> {
       return pipeline(Readable.fromWeb(r.body as import('node:stream/web').ReadableStream), res).catch(() => {});
     }
     if (pathname.startsWith('/api/')) {
-      return sendJson(res, await handleApi({ project, pluginData: o.pluginData, tools: o.tools, say }, req, url));
+      return sendJson(res, await handleApi({ project, transcriber, tools: o.tools, say }, req, url));
     }
     if (method !== 'GET' && method !== 'HEAD') return send(res, 405, 'text/plain; charset=utf-8', 'Method not allowed', { allow: 'GET, HEAD' });
     if (pathname === '/') return sendStatic(res, await servePage(o.uiDir, key));
@@ -124,7 +128,12 @@ export async function startViewer(o: ViewerOptions): Promise<Viewer> {
     route(req, res).catch((e: unknown) => {
       if (res.headersSent) return void res.destroy();
       try {
-        sendJson(res, errorResult(e instanceof HttpError || e instanceof Error ? e : new Error(String(e))));
+        const result = errorResult(e instanceof Error ? e : new Error(String(e)));
+        if (result.status !== 413) return sendJson(res, result);
+        // Too large: stop taking the body (it is dropped, not kept), answer, and close the connection after the answer.
+        sendJson(res, result, { connection: 'close' });
+        req.resume();
+        res.once('finish', () => void setTimeout(() => req.destroy(), 2000).unref());
       } catch {
         res.destroy();
       }

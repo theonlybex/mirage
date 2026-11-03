@@ -8,10 +8,10 @@ export const CLIP_BYTES = Buffer.from(Array.from({ length: 1000 }, (_, i) => i %
 
 export type TestProject = { root: string; project: string; footage: string; outside: string; uiDir: string; pluginData: string };
 
-/** A project named `we proj 'q' #1 ✨` (spaces, a quote, a hash and an emoji must all survive URLs) with video 1. */
+/** A project named `we proj 'q' "d" 100% #1 ✨` (spaces, quotes, a percent sign, a hash and an emoji must all survive URLs) with video 1. */
 export async function makeProject(): Promise<TestProject> {
   const root = await mkdtemp(join(tmpdir(), 'mirage-viewer-'));
-  const project = join(root, "we proj 'q' #1 ✨");
+  const project = join(root, `we proj 'q' "d" 100% #1 ✨`);
   const footage = join(root, 'footage');
   const outside = join(root, 'outside');
   const uiDir = join(root, 'ui');

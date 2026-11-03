@@ -9,7 +9,7 @@ import {
 } from '@wordedits/core';
 import { SidecarError } from '@wordedits/sidecars';
 import { z } from 'zod';
-import { noteViews } from './events.js';
+import { noteStillUrl, noteViews } from './events.js';
 
 /** An error that becomes this HTTP status and `{ error }`. */
 export class HttpError extends Error {
@@ -20,7 +20,8 @@ export class HttpError extends Error {
 
 export type ApiContext = {
   project: string;
-  pluginData: string;
+  /** The speech helper: checked before a voice note is taken and the one that transcribes it. */
+  transcriber: string;
   tools: MediaTools;
   /** Prints one line to stdout: Claude's notification. */
   say: (line: string) => void;
@@ -51,14 +52,27 @@ export function errorResult(e: unknown): ApiResult {
   return { status: 500, body: { error: describeError(e).message } };
 }
 
+/** How much of an over-large body is read and thrown away (and for how long) so the sender gets the answer, not a reset. */
+const DRAIN_BYTES = 64 << 20;
+const DRAIN_MS = 10_000;
+
 async function readBody(req: IncomingMessage, limit: number): Promise<Buffer> {
+  const tooLarge = () => new HttpError(413, 'That is too large.');
   const chunks: Buffer[] = [];
   let size = 0;
+  let over = Number(req.headers['content-length']) > limit;
+  const giveUp = Date.now() + DRAIN_MS;
   for await (const c of req) {
     size += (c as Buffer).length;
-    if (size > limit) throw new HttpError(413, 'That is too large.');
+    if (size > limit) over = true;
+    // Past the limit nothing more is kept: the rest is only read off the wire (up to a bound) so the answer can get through.
+    if (over) {
+      if (size > DRAIN_BYTES || Date.now() > giveUp) break;
+      continue;
+    }
     chunks.push(c as Buffer);
   }
+  if (over) throw tooLarge();
   return Buffer.concat(chunks);
 }
 
@@ -113,7 +127,7 @@ async function control(ctx: ApiContext, req: IncomingMessage): Promise<ApiResult
   const b = controlBody.parse(await readJson(req));
   await requireVideo(ctx.project, b.video);
   const { project } = ctx;
-  if (b.stop) return { status: 200, body: await writeControl(project, b.video, { stop: { at: new Date().toISOString() }, paused: false }) };
+  if (b.stop) return { status: 200, body: await writeControl(project, b.video, { stop: { at: new Date().toISOString() }, paused: false, pauseNow: false, correction: null }) };
   if (b.pause) return { status: 200, body: await writeControl(project, b.video, { paused: true, pauseNow: b.pause === 'now' }) };
   if (!b.resume) throw new HttpError(400, 'Say what to do: pause, resume or stop.');
   const correction = b.resume.correction?.trim() || null;
@@ -131,7 +145,7 @@ async function addVideoNote(ctx: ApiContext, req: IncomingMessage): Promise<ApiR
   if (!version?.render) throw new HttpError(400, 'Notes go on a version that has a video.');
   const videoPath = join(episodeDir(ctx.project, b.video), 'versions', version.id, version.render.file);
   const added = await addNote(ctx.project, b.video, { versionId: version.id, videoPath, t: b.t, text: b.text, box: b.box ?? null, tools: ctx.tools });
-  return { status: 200, body: added };
+  return { status: 200, body: { ...added, stillUrl: noteStillUrl(ctx.project, b.video, added) } };
 }
 
 async function sendVideoNotes(ctx: ApiContext, req: IncomingMessage): Promise<ApiResult> {
@@ -151,7 +165,7 @@ async function voiceNote(ctx: ApiContext, req: IncomingMessage, url: URL): Promi
   const audio = await readBody(req, AUDIO_LIMIT);
   if (!audio.length) throw new HttpError(400, 'The recording is empty.');
   const notReady = new HttpError(503, SPEECH_NOT_READY);
-  await access(join(ctx.pluginData, 'bin', 'wordedits-transcribe'), constants.X_OK).catch(() => {
+  await access(ctx.transcriber, constants.X_OK).catch(() => {
     throw notReady;
   });
   const dir = join(episodeDir(ctx.project, n), 'notes');
@@ -162,7 +176,7 @@ async function voiceNote(ctx: ApiContext, req: IncomingMessage, url: URL): Promi
   await writeFile(webm, audio);
   try {
     await ctx.tools.extractWav(webm, wav);
-    const transcript = await ctx.tools.transcribe(wav);
+    const transcript = await ctx.tools.transcribe(wav, { transcriber: ctx.transcriber });
     return { status: 200, body: { text: transcript.segments.map((s) => s.text.trim()).filter(Boolean).join(' ') } };
   } catch (e) {
     if (e instanceof SidecarError && e.code === 'NOT_FOUND') throw notReady;
@@ -208,7 +222,8 @@ async function noteById(ctx: ApiContext, req: IncomingMessage, url: URL, id: str
   }
   const { text, box } = body as z.infer<typeof notePatch>;
   if (text === undefined && box === undefined) throw new HttpError(400, 'Say what to change: text or box.');
-  return { status: 200, body: await updateNote(ctx.project, n, id, { ...(text !== undefined && { text }), ...(box !== undefined && { box }) }) };
+  const updated = await updateNote(ctx.project, n, id, { ...(text !== undefined && { text }), ...(box !== undefined && { box }) });
+  return { status: 200, body: { ...updated, stillUrl: noteStillUrl(ctx.project, n, updated) } };
 }
 
 const NOTE_ID = /^\/api\/notes\/(n[1-9]\d*)$/;

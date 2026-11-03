@@ -22,7 +22,7 @@ export interface MediaTools {
   makeProxy(src: string, out: string, opts?: { height?: number; onProgress?: (f: number) => void }): Promise<void>;
   measureLoudness(file: string, opts?: { audioStream?: number; maxSec?: number }): Promise<{ integratedLufs: number; truePeakDb: number }>;
   extractWav(src: string, out: string, opts?: { timeoutMs?: number; audioStream?: number; signal?: AbortSignal }): Promise<void>;
-  transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<Transcript>;
+  transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number; signal?: AbortSignal; transcriber?: string }): Promise<Transcript>;
 }
 
 export async function realMediaTools(): Promise<MediaTools> {
