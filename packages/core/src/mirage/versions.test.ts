@@ -52,6 +52,9 @@ describe('versions', () => {
     expect(v3.delivery).toBe(3);
     expect(v3.render).toEqual({ mode: 'final', file: 'video.mp4', captions: 'captions.srt' });
     expect(await readFile(join(ep, 'versions', v3.id, 'captions.srt'), 'utf8')).toBe('1\n');
+    // The renderer rewrites final.srt in place: an earlier delivery's captions must not change.
+    await writeFile(join(ep, 'final.srt'), '2\n');
+    expect(await readFile(join(ep, 'versions', v3.id, 'captions.srt'), 'utf8')).toBe('1\n');
   });
 
   it('fails clearly when the render to deliver does not exist', async () => {

@@ -114,10 +114,12 @@ async function snapshotLocked(
     if (summary) await writeFile(join(tmp, 'summary.md'), summary);
     let render: VersionMeta['render'] = null;
     if (o.render) {
+      // Hard link: safe only because renders are replaced by rename (a new inode), never rewritten in place.
       await linkOrCopy(join(dir, `${o.render}.mp4`), join(tmp, 'video.mp4'));
       let captions: 'captions.srt' | null = null;
       if (o.render === 'final' && (await readBytes(join(dir, 'final.srt'))) !== null) {
-        await linkOrCopy(join(dir, 'final.srt'), join(tmp, 'captions.srt'));
+        // Copied, not linked: the renderer rewrites final.srt in place, which would change this version's captions.
+        await copyFile(join(dir, 'final.srt'), join(tmp, 'captions.srt'));
         captions = 'captions.srt';
       }
       render = { mode: o.render, file: 'video.mp4', captions };
