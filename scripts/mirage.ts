@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
-  analyzeLibrary, carrySlots, checkEpisode, computeSlots, cutOf, describeError, fitRecording, formatTime, hasWords, ingestClips, notEnglish, initProject, layoutTimeline, loadCatalog,
-  loadEpisode, MirageError, realMediaTools, renderEpisode, requireProject, resolveUserPath, saveEpisode, timelineDuration, type EpisodeMode,
+  analyzeLibrary, checkEpisode, checkReport, describeError, fitRecording, ingestClips, ingestReport, initProject, MirageError, musicReport, realMediaTools,
+  renderEpisode, renderReport, requireProject, resolveUserPath, slotsReport, updateSlots, voReport, type EpisodeMode,
 } from '@wordedits/core';
 
 const USAGE = `usage: pnpm mirage <command> ...
@@ -34,19 +34,12 @@ const progress = (f: number) => {
     process.stdout.write(`\r  ${pct}%`);
   }
 };
-const range = (s: { start: number; end: number }) => `${s.start.toFixed(1)}–${s.end.toFixed(1)}`;
-const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
+const print = (lines: string[]) => lines.forEach((l) => console.log(l));
 
 async function check(project: string, n: number) {
-  const { episode: ep, warnings, notes } = await checkEpisode(project, n);
-  for (const l of layoutTimeline(ep)) {
-    const it = l.item;
-    console.log(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${it.clip}  ${it.src.in.toFixed(2)}–${it.src.out.toFixed(2)}  ×${it.speed}  ${l.start.toFixed(2)}–${l.end.toFixed(2)}${it.quiet ? '  quiet' : ''}`);
-  }
-  console.log(`total ${formatTime(timelineDuration(ep))} · ${ep.items.length} items · ${ep.overlays.length} overlays · ${ep.music.length} music cues`);
-  for (const m of notes) console.log(`• ${m}`);
-  for (const w of warnings) console.log(`⚠ ${w}`);
-  return ep;
+  const r = await checkEpisode(project, n);
+  print(checkReport(r));
+  return r.episode;
 }
 
 /** A mistake in how the command was typed: printed with the usage. */
@@ -100,21 +93,13 @@ async function main() {
   switch (cmd) {
     case 'ingest': {
       const r = await ingestClips({ project, clipsDir: resolveUserPath(third), tools, onStep: (m) => console.log(`• ${m}`) });
-      for (const s of r.skipped) console.log(s.reason === 'already in the catalog' ? `  skipped ${s.file}: ${s.reason}` : `⚠ skipped ${s.file}: ${s.reason}`);
-      for (const w of r.warnings) console.log(`⚠ ${w}`);
-      console.log(`✓ ${r.added.length} clips added${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}`);
+      print(ingestReport(r));
       break;
     }
     case 'music': {
       const dir = join(project, 'music');
       if (!existsSync(dir)) throw new MirageError('NO_MUSIC_TRACK', `${dir} does not exist`, 'Create it and put your music tracks in it.');
-      const { tracks, warnings } = await analyzeLibrary(dir, tools);
-      if (!tracks.length) console.log(`  no tracks in ${dir}`);
-      for (const t of tracks) {
-        const tempo = t.bpm === null ? 'no clear beat' : `${t.bpm.toFixed(1)} BPM`;
-        console.log(`  ${t.file}  ${t.mood}  ${tempo}${t.durationSec === null ? '' : `  ${t.durationSec.toFixed(0)} s`}`);
-      }
-      for (const w of warnings) console.log(`⚠ ${w}`);
+      print(musicReport(dir, await analyzeLibrary(dir, tools)));
       break;
     }
     case 'check':
@@ -126,44 +111,17 @@ async function main() {
       const mode: EpisodeMode = cmd === 'cut' ? 'rough' : cmd === 'guide' ? 'guide' : 'final';
       // cut checks under the episode's lock: during a vo it says busy without touching episode.json.
       const r = await renderEpisode({ project, episode: n, mode, tools, onProgress: progress, beforeRender: cmd === 'cut' ? () => check(project, n) : undefined });
-      console.log(`\n✓ ${r.outputPath} (${formatTime(r.durationSec)})${r.srtPath ? `\n  captions: ${r.srtPath}` : ''}`);
-      for (const w of r.warnings) console.log(`⚠ ${w}`);
+      console.log(''); // ends the progress line
+      print(renderReport(r));
       break;
     }
-    case 'slots': {
-      const ep = await loadEpisode(project, n);
-      const { slots, moved, dropped } = carrySlots(ep, computeSlots(ep, await loadCatalog(project)));
-      await saveEpisode(project, { ...ep, slots, slotsCut: cutOf(ep) }, n);
-      for (const s of slots) {
-        const words = wordCount(s.line);
-        const over = words > s.maxWords ? `  ⚠ over budget (${words} > ${s.maxWords} words)` : '';
-        console.log(`  ${s.id}  ${range(s)} s  ≤${s.maxWords} words  ${s.line || '(no line yet)'}${over}`);
-      }
-      for (const m of moved) console.log(`⚠ moved line (was ${m.from.id} ${range(m.from)}, now ${m.to.id} ${range(m.to)}): "${m.line}" — it followed its picture; check it still fits`);
-      for (const s of dropped) console.log(`⚠ dropped line (was ${s.id} ${range(s)}): "${s.line}"`);
-      for (const s of slots) {
-        if (notEnglish(s.line)) console.log(`⚠ ${s.id}'s line isn't in English — voice-over matching supports English only for now`);
-        else if (s.line.trim() && !hasWords(s.line)) console.log(`⚠ ${s.id}'s line has no words to read ("${s.line}") — write words, or leave it empty`);
-      }
-      const written = slots.filter((s) => hasWords(s.line)).length;
-      console.log(`✓ ${slots.length} slot${slots.length === 1 ? '' : 's'}, ${written} with lines${dropped.length ? `, ${dropped.length} dropped` : ''}`);
+    case 'slots':
+      print(slotsReport(await updateSlots(project, n)));
       break;
-    }
     case 'vo': {
       const slots = values.slots?.split(',').map((s) => s.trim()).filter(Boolean);
       const { report } = await fitRecording({ project, episode: n, recording: resolveUserPath(fourth), tools, add: values.add, slots, onStep: (m) => console.log(`• ${m}`) });
-      for (const l of report.lines) {
-        const status =
-          l.status === 'kept' ? 'kept the earlier take (not found in this recording)'
-          : l.status === 'too long' ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold — shorten it or give it a longer slot, then vo --add`
-          : l.status === 'partial' ? `⚠ only part of the line was found — re-read the whole line with vo --add --slots ${l.slot}`
-          : l.status;
-        console.log(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec && (l.status === 'placed' || l.status === 'partial') ? `  held picture +${l.overrunSec}s` : ''}`);
-      }
-      const missing = report.lines.filter((l) => l.status === 'missing').map((l) => l.slot);
-      console.log(`✓ voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ''}`);
-      if (missing.length) console.log(`⚠ not found: ${missing.join(', ')} — record just those lines, then: pnpm mirage vo <project> ${n} <new recording> --add`);
-      for (const w of report.warnings) console.log(`⚠ ${w}`);
+      print(voReport(report, n));
       break;
     }
   }

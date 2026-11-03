@@ -16,3 +16,7 @@ export * from './json-file.js';
 export * from './cancel.js';
 export * from './versions.js';
 export * from './labels.js';
+export * from './session-files.js';
+export * from './video.js';
+export * from './notes.js';
+export * from './reports.js';

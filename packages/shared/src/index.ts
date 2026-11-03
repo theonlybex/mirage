@@ -7,3 +7,6 @@ export * from './schemas/episode.js';
 export * from './schemas/library.js';
 export * from './schemas/strict.js';
 export * from './schemas/version.js';
+export * from './schemas/session.js';
+export * from './schemas/video.js';
+export * from './schemas/notes.js';

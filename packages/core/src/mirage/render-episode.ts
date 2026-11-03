@@ -326,7 +326,7 @@ type RenderOptions = {
   beforeRender?: () => Promise<unknown>;
 };
 
-type RenderResult = {
+export type RenderResult = {
   outputPath: string;
   srtPath: string | null;
   durationSec: number;
