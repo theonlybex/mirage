@@ -54,3 +54,16 @@ export const SessionStateSchema = strictObject({
   awakePid: z.number().int().nullable(),
 });
 export type SessionState = z.infer<typeof SessionStateSchema>;
+
+/** What a Claude session id looks like (letters, digits, dots, dashes and underscores; no `..`). */
+export const SESSION_ID_PATTERN = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * `<project>/.mirage/claude/<pid>.json`: the session the Claude Code process `<pid>` is running, written by the hooks on
+ * every event. The engine, started by the same process, reads it to know its session.
+ */
+export const ClaudeProcessSchema = strictObject({
+  sessionId: z.string().regex(SESSION_ID_PATTERN),
+  updatedAt: z.string(),
+});
+export type ClaudeProcess = z.infer<typeof ClaudeProcessSchema>;

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// The Claude Code hooks of the Mirage plugin. Outside a Mirage project (no mirage.json in cwd) every event returns at once
-// with nothing to print; the engine (@wordedits/core) is imported only inside one.
+// The Claude Code hooks of the Mirage plugin. Outside a Mirage project (see findProject) every event returns at once with
+// nothing to print; the engine (@wordedits/core) is imported only inside one.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { SessionState, StepLine, VersionMeta } from '@wordedits/shared';
 import { engineTool, fileDecision, isChanging, isStage, stepLabel, videoOf } from './policy.js';
+import { findProject } from './project-root.js';
 
 type Core = typeof import('@wordedits/core');
 
@@ -31,6 +32,10 @@ export interface HookDeps {
   pluginRoot: string;
   /** Compiles the speech helper; the hook starts it and never waits for it. */
   swiftc(src: string, out: string): Promise<boolean>;
+  /** The Claude Code process running the hook (process.ppid: scripts/node execs node). The engine it started has the same parent. */
+  ppid: number;
+  /** ${CLAUDE_PROJECT_DIR}, when set: the project root if it holds a mirage.json. */
+  projectDir?: string;
 }
 
 export const STOP_REASON = 'The person stopped the edit. Stop now and say in one line what was finished.';
@@ -65,11 +70,16 @@ export async function runHook(event: HookEvent, input: HookInput, deps: HookDeps
   if (input === null || typeof input !== 'object' || typeof input.cwd !== 'string' || input.cwd === '') return result();
   // Without a session there is nowhere to write steps or state: every event does nothing.
   if (typeof input.session_id !== 'string' || input.session_id === '') return result();
-  const project = resolve(input.cwd);
-  const inProject = existsSync(join(project, 'mirage.json'));
+  const project = findProject(deps.projectDir, input.cwd);
   if (event === 'session-start') startSpeechHelper(deps, event);
-  if (!inProject) return result();
+  if (project === null) return result();
   const core: Core = await import('@wordedits/core');
+  // Which session this Claude Code process runs, for the engine it started (which can't see the session id).
+  try {
+    await core.writeClaudeProcess(project, deps.ppid, input.session_id, deps.now());
+  } catch (e) {
+    logHookError(deps.pluginData, event, e);
+  }
   const h = new Handler(core, project, input, deps, event);
   switch (event) {
     case 'session-start': return h.sessionStart();
@@ -210,6 +220,8 @@ class Handler {
 
   async pre(): Promise<Result> {
     const { core, project, tool } = this;
+    // The engine's fallback guess at its session is the session file touched last.
+    await this.soft(() => core.touchSessionState(project, this.sid));
     const toolInput = this.input.tool_input;
     const { label } = stepLabel(tool, toolInput);
     const file = fileDecision(tool, toolInput, project, await this.footage());

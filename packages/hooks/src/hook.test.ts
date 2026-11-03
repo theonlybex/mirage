@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  appendLog, listVersions, newVideo, readControl, readLog, readSessionState, readSteps, sessionDir, writeControl, writeSessionState,
+  appendLog, listVersions, newVideo, readClaudeProcess, readControl, readLog, readSessionState, readSteps, sessionDir, writeControl, writeSessionState,
 } from '@wordedits/core';
 import { describe, expect, it } from 'vitest';
 import { runHook, type HookDeps, type HookInput } from './hook.js';
@@ -36,6 +36,7 @@ async function fakeDeps(over: Partial<HookDeps> = {}) {
       compiles.push([src, out]);
       return true;
     },
+    ppid: 4242,
     ...over,
   };
   return { deps, sleeps, compiles };
@@ -143,6 +144,52 @@ describe('runHook', () => {
     // A tool of a video with no session folder yet still runs.
     expect((await runHook('pre', input(dir, { tool_name: E('check'), tool_input: { video: 7 } }), deps)).stdout).toBe(ALLOW);
     expect(existsSync(join(dir, 'episodes', '7'))).toBe(false); // nothing is written for a video that isn't there
+  });
+
+  it('records, on every event, which session its Claude Code process runs, and touches the session file at each step', async () => {
+    const { deps } = await fakeDeps();
+    const { dir } = await project();
+    expect(readClaudeProcess(dir, 4242)).toBeNull();
+    await runHook('pre', input(dir, { tool_name: 'Bash', tool_input: {} }), deps);
+    expect(readClaudeProcess(dir, 4242)).toBe('s1');
+    expect(existsSync(join(dir, '.mirage', 'sessions', 's1.json'))).toBe(true);
+    // A second Claude Code in the same folder, with its own session.
+    await runHook('session-start', input(dir, { session_id: 's2', hook_event_name: 'SessionStart' }), { ...deps, ppid: 5151 });
+    for (const ev of ['post', 'stop'] as const) await runHook(ev, input(dir, { session_id: 's2', tool_name: 'Bash', tool_input: {} }), { ...deps, ppid: 5151 });
+    expect([readClaudeProcess(dir, 4242), readClaudeProcess(dir, 5151)]).toEqual(['s1', 's2']);
+    // An old session file is touched again by its next step.
+    const old = new Date(Date.now() - 3 * 24 * 3600_000);
+    await utimes(join(dir, '.mirage', 'sessions', 's1.json'), old, old);
+    await runHook('pre', input(dir, { tool_name: 'Bash', tool_input: {} }), deps);
+    const { mtimeMs } = await import('node:fs').then((fs) => fs.statSync(join(dir, '.mirage', 'sessions', 's1.json')));
+    expect(Date.now() - mtimeMs).toBeLessThan(60_000);
+  });
+
+  it('works from a subfolder of the project: cwd = <project>/episodes/1 still guards footage and holds on pause', async () => {
+    const { dir, footage } = await project();
+    const sub = join(dir, 'episodes', '1');
+    const reason = deny('Footage folders are read-only in Mirage.');
+    // As Claude Code runs it (CLAUDE_PROJECT_DIR is the project), and with no CLAUDE_PROJECT_DIR (the nearest mirage.json above cwd).
+    for (const projectDir of [dir, undefined]) {
+      const { deps, sleeps } = await fakeDeps({ projectDir });
+      expect((await runHook('pre', input(sub, { tool_name: 'Write', tool_input: { file_path: join(footage, 'new.mov') } }), deps)).stdout).toBe(reason);
+      await writeControl(dir, 1, { paused: true });
+      const fakeSleep = deps.sleep;
+      deps.sleep = async (ms) => {
+        await fakeSleep(ms);
+        await writeControl(dir, 1, { paused: false });
+      };
+      expect((await runHook('pre', input(sub, { tool_name: E('cut'), tool_input: { video: 1 } }), deps)).stdout).toBe(ALLOW);
+      expect(sleeps).toEqual([250]);
+    }
+    // A CLAUDE_PROJECT_DIR without mirage.json is no project, and the walk stops 20 folders up.
+    const { deps } = await fakeDeps({ projectDir: await tmp() });
+    expect((await runHook('pre', input(sub, { tool_name: 'Write', tool_input: { file_path: join(footage, 'new.mov') } }), deps)).stdout).toBe('');
+    const deep = join(dir, ...Array.from({ length: 21 }, (_, i) => `d${i}`));
+    await mkdir(deep, { recursive: true });
+    const { deps: noEnv } = await fakeDeps();
+    expect((await runHook('pre', input(deep, { tool_name: 'Write', tool_input: { file_path: join(footage, 'new.mov') } }), noEnv)).stdout).toBe('');
+    expect((await runHook('pre', input(join(deep, '..'), { tool_name: 'Write', tool_input: { file_path: join(footage, 'new.mov') } }), noEnv)).stdout).toBe(reason);
   });
 
   it('denies writing into a footage folder (including through a symlink)', async () => {
@@ -445,7 +492,13 @@ describe('main.ts', () => {
 
   it('prints the decision in a project', async () => {
     const { dir } = await project();
-    const out = run('pre', JSON.stringify(input(dir, { tool_name: E('status'), tool_input: {} })), { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-') });
+    const out = run('pre', JSON.stringify(input(dir, { tool_name: E('status'), tool_input: {} })), { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), CLAUDE_PROJECT_DIR: '' });
     expect(out).toBe(ALLOW);
+  });
+
+  it('finds the project through CLAUDE_PROJECT_DIR from a subfolder', async () => {
+    const { dir, footage } = await project();
+    const json = JSON.stringify(input(join(dir, 'episodes', '1'), { tool_name: 'Write', tool_input: { file_path: join(footage, 'x.mov') } }));
+    expect(run('pre', json, { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), CLAUDE_PROJECT_DIR: dir })).toBe(deny('Footage folders are read-only in Mirage.'));
   });
 });

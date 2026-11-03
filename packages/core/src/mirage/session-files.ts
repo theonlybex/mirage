@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { randomUUID } from 'node:crypto';
-import { appendFile, link, mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { appendFile, link, mkdir, readdir, readFile, rename, rm, stat, utimes } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import {
-  ControlSchema, LogEntrySchema, ProgressSchema, SessionStateSchema, StepLineSchema,
+  ClaudeProcessSchema, ControlSchema, LogEntrySchema, ProgressSchema, SessionStateSchema, StepLineSchema,
   type Control, type LogEntry, type Progress, type SessionState, type StepLine,
 } from '@wordedits/shared';
 import type { ZodType } from 'zod';
@@ -187,4 +188,42 @@ export async function writeSessionState(project: string, sessionId: string, patc
   await mkdir(dirname(path), { recursive: true });
   await writeJsonFile(path, SessionStateSchema, next, `.mirage/sessions/${sessionId}.json`);
   return next;
+}
+
+/** Marks a session's state file as just used, so the engine's fallback guess picks it; writes an empty one when there is none. */
+export async function touchSessionState(project: string, sessionId: string): Promise<void> {
+  const now = new Date();
+  try {
+    await utimes(sessionStatePath(project, sessionId), now, now);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    await writeSessionState(project, sessionId, {});
+  }
+}
+
+// --- which session a Claude Code process runs ---------------------------------------------------------------------------
+
+function claudeProcessPath(project: string, pid: number): string {
+  if (!Number.isInteger(pid) || pid <= 0) throw new MirageError('BAD_INPUT', `"${pid}" is not a process id`, 'A process id is a whole number above 0.');
+  return join(resolve(project), '.mirage', 'claude', `${pid}.json`);
+}
+
+/**
+ * Records that the Claude Code process `pid` runs session `sessionId`: `<project>/.mirage/claude/<pid>.json`. The hooks
+ * write it on every event; the engine that process started reads it with readClaudeProcess.
+ */
+export async function writeClaudeProcess(project: string, pid: number, sessionId: string, at: Date = new Date()): Promise<void> {
+  const path = claudeProcessPath(project, pid);
+  await mkdir(dirname(path), { recursive: true });
+  await writeJsonFile(path, ClaudeProcessSchema, { sessionId: checkSessionId(sessionId), updatedAt: at.toISOString() }, `.mirage/claude/${pid}.json`);
+}
+
+/** The session the Claude Code process `pid` runs, or null when its file is missing or broken. Synchronous: the engine asks on every call. */
+export function readClaudeProcess(project: string, pid: number): string | null {
+  try {
+    const r = ClaudeProcessSchema.safeParse(JSON.parse(readFileSync(claudeProcessPath(project, pid), 'utf8')));
+    return r.success ? r.data.sessionId : null;
+  } catch {
+    return null;
+  }
 }

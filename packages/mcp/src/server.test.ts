@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  loadEpisode, readLog, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeControl,
+  loadEpisode, readLog, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeClaudeProcess, writeControl, writeSessionState,
   type MediaTools,
 } from '@wordedits/core';
 import { EpisodeSchema } from '@wordedits/shared';
@@ -417,8 +417,41 @@ describe('engine tools', () => {
   });
 });
 
+describe('session identity', () => {
+  it('two sessions in one project: each engine follows its own Claude Code process, whatever session file is newest', async () => {
+    const dir = await projectWithVideo();
+    await writeClaudeProcess(dir, 111, 'sess-a');
+    await writeClaudeProcess(dir, 222, 'sess-b');
+    await writeSessionState(dir, 'sess-a', {});
+    await writeSessionState(dir, 'sess-b', {}); // the newest session file: the old guess picked it for both
+    const a = await connect(dir, { sessionId: undefined, ppid: 111 });
+    const b = await connect(dir, { sessionId: undefined, ppid: 222 });
+    await a.call('log', { video: 1, kind: 'guess', text: 'from a' });
+    await b.call('log', { video: 1, kind: 'question', text: 'from b' });
+    expect((await readLog(sessionDir(dir, 1, 'sess-a'))).map((e) => e.text)).toEqual(['from a']);
+    expect((await readLog(sessionDir(dir, 1, 'sess-b'))).map((e) => e.text)).toEqual(['from b']);
+    const footage = await mkdtemp(join(tmpdir(), 'mirage-footage-'));
+    expect((await a.call('new_video', { title: 'Two', about: 'x', footage: [footage] })).text).toBe('video 2 created');
+    expect((await b.call('new_video', { title: 'Three', about: 'x', footage: [footage] })).text).toBe('video 3 created');
+    expect([(await readSessionState(dir, 'sess-a')).video, (await readSessionState(dir, 'sess-b')).video]).toEqual([2, 3]);
+    expect(existsSync(join(dir, '.mirage', 'sessions', 'unknown.json'))).toBe(false);
+  });
+
+  it('without a file for its process, the engine takes the session file touched last', async () => {
+    const dir = await projectWithVideo();
+    await writeClaudeProcess(dir, 111, 'sess-a');
+    await writeSessionState(dir, 'sess-a', {});
+    await writeSessionState(dir, 'sess-b', {});
+    const old = new Date(Date.now() - 3 * 24 * 3600_000);
+    await utimes(join(dir, '.mirage', 'sessions', 'sess-a.json'), old, old);
+    const { call } = await connect(dir, { sessionId: undefined, ppid: 333 });
+    await call('log', { video: 1, kind: 'guess', text: 'guessed' });
+    expect((await readLog(sessionDir(dir, 1, 'sess-b'))).map((e) => e.text)).toEqual(['guessed']);
+  });
+});
+
 describe('newestSessionId', () => {
-  it('is the newest session file touched in the last 24 hours', async () => {
+  it('is the session file touched last, however long ago', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-mcp-'));
     expect(newestSessionId(dir)).toBeNull();
     const sessions = join(dir, '.mirage', 'sessions');
@@ -429,7 +462,7 @@ describe('newestSessionId', () => {
       await utimes(join(sessions, name), t, t);
     };
     await touch('old.json', 25 * 3600_000);
-    expect(newestSessionId(dir)).toBeNull();
+    expect(newestSessionId(dir)).toBe('old');
     await touch('a.json', 3600_000);
     await touch('b.json', 60_000);
     await touch('unknown.json', 1000);

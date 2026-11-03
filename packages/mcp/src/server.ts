@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { ViewerInfoSchema } from '@wordedits/shared';
 import {
   analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, ingestClips, ingestReport, initProject, listVersions,
-  MirageError, musicReport, newVideo, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
+  MirageError, musicReport, newVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
   sessionDir, slotsReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
 import { transcriberPath } from '@wordedits/sidecars';
@@ -23,20 +23,25 @@ export interface EngineContext {
   /** The project folder (it may not hold a mirage.json yet: new_project makes one). */
   project: string;
   tools: MediaTools;
-  /** The Claude session this server belongs to; null when unknown. Default: newestSessionId(project). */
+  /**
+   * The Claude session this server belongs to; null when unknown. Default: the session the hooks recorded for the Claude
+   * Code process that started this server (`.mirage/claude/<ppid>.json`), else newestSessionId(project).
+   */
   sessionId?: () => string | null;
+  /** The Claude Code process that started this server (through the `scripts/node` launcher, which execs). Default: process.ppid. */
+  ppid?: number;
   /** Machine checks for `overnight` and `status`. Default: the real machine. */
   preflightDeps?: PreflightDeps;
   /** Keeps the Mac awake; returns the pid of what does. Default: caffeinate. */
   startAwake?: () => number | null;
 }
 
-const DAY_MS = 24 * 3600_000;
 const SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 
 /**
- * The Claude session in charge: the newest `<project>/.mirage/sessions/<id>.json` touched in the last 24 hours (the
- * SessionStart hook touches it). Null when there is none. `unknown.json` (state kept for a session nobody could name) is not a session.
+ * The best guess at the Claude session in charge when the hooks have not said which one this process runs: the
+ * `<project>/.mirage/sessions/<id>.json` touched last (the hooks touch it at every step). Null when there is none.
+ * `unknown.json` (state kept for a session nobody could name) is not a session.
  */
 export function newestSessionId(project: string): string | null {
   const dir = join(resolve(project), '.mirage', 'sessions');
@@ -56,7 +61,6 @@ export function newestSessionId(project: string): string | null {
     } catch {
       continue;
     }
-    if (Date.now() - mtime > DAY_MS) continue;
     if (!best || mtime > best.mtime) best = { id, mtime };
   }
   return best?.id ?? null;
@@ -100,7 +104,8 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   const { tools } = ctx;
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
-  const knownSession = ctx.sessionId ?? (() => newestSessionId(project));
+  const ppid = ctx.ppid ?? process.ppid;
+  const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project, ppid) ?? newestSessionId(project));
   const sid = () => knownSession() ?? 'unknown';
   const server = new McpServer({ name: 'engine', version: '0.0.1' });
 

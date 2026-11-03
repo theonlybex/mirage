@@ -3,8 +3,9 @@
 // 0; any failure prints nothing and adds a line to ${CLAUDE_PLUGIN_DATA}/hook-errors.log. Outside a Mirage project it only
 // reads stdin and checks for mirage.json, so it stays fast in every other session of the person.
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { findProject } from './project-root.js';
 
 const EVENTS = ['session-start', 'pre', 'post', 'stop'] as const;
 type Event = (typeof EVENTS)[number];
@@ -12,6 +13,7 @@ type Event = (typeof EVENTS)[number];
 const event = process.argv[2] ?? '';
 const pluginData = process.env.CLAUDE_PLUGIN_DATA ?? '';
 const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT ?? '';
+const projectDir = process.env.CLAUDE_PROJECT_DIR || undefined;
 
 /** The same line format as hook.ts's logHookError, without loading hook.ts. */
 function logError(e: unknown): void {
@@ -47,7 +49,7 @@ async function main(): Promise<void> {
   if (!(EVENTS as readonly string[]).includes(event)) return;
   const input = JSON.parse(await readStdin()) as { cwd?: unknown };
   if (typeof input?.cwd !== 'string') return;
-  if (event !== 'session-start' && !existsSync(join(input.cwd, 'mirage.json'))) return;
+  if (event !== 'session-start' && findProject(projectDir, input.cwd) === null) return;
   const { runHook } = await import('./hook.js');
   const r = await runHook(event as Event, input as Parameters<typeof runHook>[1], {
     now: () => new Date(),
@@ -55,6 +57,8 @@ async function main(): Promise<void> {
     pluginData,
     pluginRoot,
     swiftc,
+    ppid: process.ppid,
+    projectDir,
   });
   if (r.stdout) process.stdout.write(r.stdout);
 }
