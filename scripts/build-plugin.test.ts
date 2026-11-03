@@ -23,9 +23,10 @@ function walk(dir: string): string[] {
 }
 
 let built: string;
+let inputs: string[];
 beforeAll(async () => {
   built = realpathSync(await mkdtemp(join(tmpdir(), 'mirage-build-')));
-  await buildPlugin(built);
+  ({ inputs } = await buildPlugin(built));
 }, 300_000);
 afterAll(async () => {
   await rm(built, { recursive: true, force: true });
@@ -45,6 +46,27 @@ describe('buildPlugin', () => {
     expect(files.filter((f) => !f.startsWith('assets/') && f !== 'index.html')).toEqual([]);
   });
 
+  it('lists every bundled npm package in THIRD_PARTY_NOTICES.txt with its licence text, and ships the AGPL licence', () => {
+    const notices = readFileSync(join(built, 'THIRD_PARTY_NOTICES.txt'), 'utf8');
+    // Every file under node_modules that went into a bundle (esbuild's metafile inputs and the page's modules) names a package.
+    const packages = new Set<string>();
+    for (const f of inputs.filter((i) => /[\\/]node_modules[\\/]/.test(i))) {
+      const parts = f.split(/[\\/]/);
+      const at = parts.lastIndexOf('node_modules');
+      const dir = parts.slice(0, at + (parts[at + 1]!.startsWith('@') ? 3 : 2)).join('/');
+      const pkg = json(join(dir, 'package.json'));
+      packages.add(`${pkg.name}@${pkg.version}`);
+    }
+    expect(packages.size).toBeGreaterThan(20);
+    for (const p of [...packages, 'react@', 'zod@', 'fast-uri@', 'human-signals@']) expect(notices, p).toMatch(new RegExp(`^${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm'));
+    // The full texts: an MIT notice, fast-uri's BSD-3 and human-signals' Apache-2.0.
+    expect(notices).toContain('Permission is hereby granted, free of charge');
+    expect(notices).toMatch(/fast-uri@[^\n]+\nLicense: BSD-3-Clause\n[\s\S]*?Redistribution and use in source and binary forms/);
+    expect(notices).toMatch(/human-signals@[^\n]+\nLicense: Apache-2\.0\n[\s\S]*?Apache License/);
+    expect(notices).not.toContain(ROOT); // no absolute paths: the same on every machine
+    expect(readFileSync(join(built, 'LICENSE'), 'utf8')).toBe(readFileSync(join(ROOT, 'LICENSE'), 'utf8'));
+  });
+
   it('plugin-dist-fresh: the committed plugin/dist is what a rebuild gives', () => {
     expect(existsSync(join(PLUGIN, 'dist'))).toBe(true);
     expect(walk(join(PLUGIN, 'dist'))).toEqual(walk(join(built, 'dist')));
@@ -53,7 +75,10 @@ describe('buildPlugin', () => {
       const committed = readFileSync(join(PLUGIN, 'dist', f));
       expect(fresh.equals(committed), `plugin/dist/${f} is stale: run pnpm build:plugin`).toBe(true);
     }
-    expect(readFileSync(join(PLUGIN, 'native/transcribe.swift'), 'utf8')).toBe(readFileSync(join(built, 'native/transcribe.swift'), 'utf8'));
+    for (const f of ['native/transcribe.swift', 'LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
+      expect(existsSync(join(PLUGIN, f)), `plugin/${f} is missing: run pnpm build:plugin`).toBe(true);
+      expect(readFileSync(join(PLUGIN, f), 'utf8'), `plugin/${f} is stale: run pnpm build:plugin`).toBe(readFileSync(join(built, f), 'utf8'));
+    }
   });
 });
 
