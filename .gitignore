@@ -12,3 +12,4 @@ packages/sidecars/bin/
 .superpowers/
 packages/viewer/dist-ui/
 !plugin/dist/
+packages/viewer/test-results/

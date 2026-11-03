@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "composite": false, "declaration": false, "sourceMap": false, "noEmit": true },
+  "include": ["e2e", "playwright.config.ts"]
+}

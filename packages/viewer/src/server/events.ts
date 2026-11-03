@@ -51,14 +51,20 @@ async function sessionDirs(project: string, n: number): Promise<string[]> {
 
 const atOf = (s: StepLine) => Date.parse(s.at) || 0;
 
-/** Same bytes but for the clock: a video with no control.json reads as "all off, updated now", which is not a change. */
-const dedupeKey = (type: EventType, data: unknown): string => {
-  if (type === 'control') {
-    const c = data as Control;
-    if (!c.paused && !c.pauseNow && !c.stop && c.correction === null) return JSON.stringify({ ...c, updatedAt: '' });
-  }
-  return JSON.stringify(data);
-};
+/** When the control of a video without control.json was last changed: never. */
+const NEVER = new Date(0).toISOString();
+
+/**
+ * The control of video `n`. Without control.json, readControl gives "all off, updated now"; the page gets it dated never
+ * instead, so it reads the same every time. Every written control.json keeps its own date, so each write is a change the
+ * page hears, even an "all off" one: the page keeps its own POST's answer until the stream sends something newer.
+ */
+async function controlView(project: string, n: number): Promise<Control> {
+  const c = await readControl(project, n);
+  if (c.paused || c.pauseNow || c.stop || c.correction !== null) return c;
+  const written = await stat(join(episodeDir(project, n), 'control.json')).then(() => true, () => false);
+  return written ? c : { ...c, updatedAt: NEVER };
+}
 
 /** Reads the state of videos for the page and keeps the timeline of each video's last good episode. */
 export class EventHub {
@@ -105,7 +111,7 @@ export class EventHub {
       }),
       part('versions', () => versionViews(project, n)),
       part('notes', () => noteViews(project, n)),
-      part('control', () => readControl(project, n)),
+      part('control', () => controlView(project, n)),
       part('report', async () => {
         let best: { path: string; mtime: number } | null = null;
         for (const d of dirs) {
@@ -150,7 +156,7 @@ export class EventHub {
           for (const type of Object.keys(state) as EventType[]) {
             if (closed) return;
             const data = state[type];
-            const key = dedupeKey(type, data);
+            const key = JSON.stringify(data);
             if (sent.get(type) === key) continue;
             sent.set(type, key);
             res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);

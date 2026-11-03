@@ -28542,13 +28542,13 @@ async function sessionDirs(project2, n2) {
   return entries.filter((e) => e.isDirectory()).map((e) => join10(root, e.name)).sort();
 }
 var atOf = (s) => Date.parse(s.at) || 0;
-var dedupeKey = (type, data) => {
-  if (type === "control") {
-    const c3 = data;
-    if (!c3.paused && !c3.pauseNow && !c3.stop && c3.correction === null) return JSON.stringify({ ...c3, updatedAt: "" });
-  }
-  return JSON.stringify(data);
-};
+var NEVER2 = (/* @__PURE__ */ new Date(0)).toISOString();
+async function controlView(project2, n2) {
+  const c3 = await readControl(project2, n2);
+  if (c3.paused || c3.pauseNow || c3.stop || c3.correction !== null) return c3;
+  const written = await stat5(join10(episodeDir(project2, n2), "control.json")).then(() => true, () => false);
+  return written ? c3 : { ...c3, updatedAt: NEVER2 };
+}
 var EventHub = class {
   constructor(project2) {
     this.project = project2;
@@ -28591,7 +28591,7 @@ var EventHub = class {
       }),
       part("versions", () => versionViews(project2, n2)),
       part("notes", () => noteViews(project2, n2)),
-      part("control", () => readControl(project2, n2)),
+      part("control", () => controlView(project2, n2)),
       part("report", async () => {
         let best = null;
         for (const d of dirs) {
@@ -28634,7 +28634,7 @@ var EventHub = class {
           for (const type of Object.keys(state)) {
             if (closed) return;
             const data = state[type];
-            const key = dedupeKey(type, data);
+            const key = JSON.stringify(data);
             if (sent.get(type) === key) continue;
             sent.set(type, key);
             res.write(`event: ${type}

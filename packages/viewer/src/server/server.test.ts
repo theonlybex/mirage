@@ -375,6 +375,30 @@ describe('events', () => {
     await ev.waitFor('notes', (n) => n[0]?.status === 'done' && n[0]?.reason === 'Sped it up');
   });
 
+  it('sends a control written back to all off, even when the stream never saw the state in between', async () => {
+    await writeControl(t.project, 1, { paused: true });
+    await writeControl(t.project, 1, { paused: false });
+    await start();
+    const ev = await openEvents();
+    expect((await ev.waitFor('control')).paused).toBe(false);
+    // A stop and the Stop hook clearing it, both inside one debounce: the stream only reads the cleared control. The page
+    // still holds the stop from its own POST's answer, so it must hear that the control moved on.
+    await writeControl(t.project, 1, { stop: { at: new Date().toISOString() } });
+    const cleared = await writeControl(t.project, 1, { stop: null });
+    expect((await ev.waitFor('control', (c) => c.updatedAt === cleared.updatedAt)).stop).toBeNull();
+  });
+
+  it('sends the control of a video without control.json once, dated never, however often other things change', async () => {
+    await start();
+    const ev = await openEvents();
+    expect((await ev.waitFor('control')).updatedAt).toBe(new Date(0).toISOString());
+    await appendStep(sessionDir(t.project, 1, 's1'), { at: '2026-11-02T10:00:00.000Z', id: 'a', tool: 'Read', label: 'Reading x', status: 'done' });
+    await ev.waitFor('steps', (s) => s.length === 1);
+    await appendStep(sessionDir(t.project, 1, 's1'), { at: '2026-11-02T10:00:01.000Z', id: 'b', tool: 'Read', label: 'Reading y', status: 'done' });
+    await ev.waitFor('steps', (s) => s.length === 2);
+    expect(ev.events.filter((e) => e.type === 'control')).toHaveLength(1);
+  });
+
   it('gives versions with a video a videoUrl and notes a stillUrl, and the page can fetch both', async () => {
     await start();
     const id = await deliverRough();
