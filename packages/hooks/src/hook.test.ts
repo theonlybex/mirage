@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync, symlinkSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  appendLog, listVersions, newVideo, readControl, readSessionState, readSteps, sessionDir, writeControl, writeSessionState,
+  appendLog, listVersions, newVideo, readControl, readLog, readSessionState, readSteps, sessionDir, writeControl, writeSessionState,
 } from '@wordedits/core';
 import { describe, expect, it } from 'vitest';
 import { runHook, type HookDeps, type HookInput } from './hook.js';
@@ -155,6 +155,22 @@ describe('runHook', () => {
     expect((await runHook('pre', input(dir, { tool_name: 'Read', tool_input: { file_path: join(footage, 'new.mov') } }), deps)).stdout).toBe('');
   });
 
+  it('denies writes to a path with a .. segment', async () => {
+    const { deps } = await fakeDeps();
+    const { dir, footage } = await project();
+    symlinkSync(footage, join(dir, 'episodes', '1', 'l'));
+    const reason = deny('Use a plain path inside the project (no “..”).');
+    for (const tool_name of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+      expect((await runHook('pre', input(dir, { tool_name, tool_input: { file_path: 'episodes/1/l/../episode.json' } }), deps)).stdout).toBe(reason);
+    }
+    expect((await runHook('pre', input(dir, { tool_name: 'Write', tool_input: { file_path: `${dir}/episodes/1/../1/summary.md` } }), deps)).stdout).toBe(reason);
+    expect((await runHook('pre', input(dir, { tool_name: 'Edit', tool_input: { file_path: 'episodes\\1\\..\\x.json' } }), deps)).stdout).toBe(reason);
+    // A name that merely contains dots is fine.
+    expect((await runHook('pre', input(dir, { tool_name: 'Write', tool_input: { file_path: 'episodes/1/..notes' } }), deps)).stdout).toBe('');
+    // Reads are not guarded.
+    expect((await runHook('pre', input(dir, { tool_name: 'Read', tool_input: { file_path: 'episodes/1/../1/episode.json' } }), deps)).stdout).toBe('');
+  });
+
   it('auto-approves engine tools and timeline writes', async () => {
     const { deps } = await fakeDeps();
     const { dir } = await project();
@@ -233,8 +249,10 @@ describe('runHook', () => {
     await writeSessionState(dir, 's1', { video: 1 });
     await writeControl(dir, 1, { paused: true });
     const r = await runHook('pre', input(dir, { tool_name: 'Bash', tool_input: { command: 'ls' } }), deps);
-    expect(r.stdout).toBe(deny(STOP));
+    expect(r.stdout).toBe(deny('The edit has been paused for almost a day. Stop here and say in one line what was finished; the person will resume it later.'));
     expect(sleeps).toHaveLength(24);
+    const control = await readControl(dir, 1);
+    expect([control.paused, control.stop, control.correction]).toEqual([true, null, null]); // left as it was
   });
 
   it('stop denies tools and the Stop hook restores the last checkpoint', async () => {
@@ -301,7 +319,8 @@ describe('runHook', () => {
     ]);
     // A failed stage: a failed line with the ✖ line as detail, and no versions.
     await post(E('guide'), { video: 1 }, { content: [{ type: 'text', text: '• checking\n✖ episodes/1/episode.json does not exist\n  Ask Claude…' }], isError: true });
-    await post(E('render'), { video: 1 }, 'Error: something broke');
+    await writeFile(join(dir, 'episodes', '1', 'final.mp4'), 'video bytes');
+    await post(E('render'), { video: 1 }, { result: '✖ ffmpeg failed\n  Try again.' });
     expect(await listVersions(dir, 1)).toHaveLength(3);
     const steps = await readSteps(sessionDir(dir, 1, 's1'));
     expect(steps.map((s) => ('label' in s ? [s.label, s.status, s.detail ?? null] : s.type))).toEqual([
@@ -309,8 +328,65 @@ describe('runHook', () => {
       ['Timeline written', 'done', null],
       ['Rough cut rendered', 'done', null],
       ['Rendering the guide video', 'failed', '✖ episodes/1/episode.json does not exist'],
-      ['Rendering the final video', 'failed', 'Error: something broke'],
+      ['Rendering the final video', 'failed', '✖ ffmpeg failed'],
     ]);
+  });
+
+  it('post sees an engine error in a bare content array: no checkpoint, no delivery', async () => {
+    const { deps } = await fakeDeps();
+    const { dir } = await project();
+    await writeFile(join(dir, 'episodes', '1', 'rough.mp4'), 'an older render');
+    await runHook('post', input(dir, {
+      hook_event_name: 'PostToolUse', tool_name: E('cut'), tool_input: { video: 1 },
+      tool_response: [{ type: 'text', text: '\n✖ episodes/1/episode.json: item 3 has no clip\n  Fix the timeline.' }],
+    }), deps);
+    expect(await listVersions(dir, 1)).toEqual([]);
+    const steps = await readSteps(sessionDir(dir, 1, 's1'));
+    expect(steps).toMatchObject([{ label: 'Rendering the rough cut', status: 'failed', detail: '✖ episodes/1/episode.json: item 3 has no clip' }]);
+    // A ✖ further down a successful report is not a failure.
+    await runHook('post', input(dir, { hook_event_name: 'PostToolUse', tool_name: E('check'), tool_input: { video: 1 }, tool_response: [{ type: 'text', text: 'total 0:03\n✖ not the first line' }] }), deps);
+    expect(await versions(dir)).toEqual([['checkpoint', 'Timeline checked']]);
+    // Claude's own Write echoes the file's content: a file that starts with ✖ is not a failed write.
+    await runHook('post', input(dir, { hook_event_name: 'PostToolUse', tool_name: 'Write', tool_input: { file_path: join(dir, 'episodes', '1', 'summary.md') }, tool_response: { type: 'create', content: '✖ marks the cut' } }), deps);
+    expect((await readSteps(sessionDir(dir, 1, 's1'))).at(-1)).toMatchObject({ label: 'Saved summary.md', status: 'done' });
+  });
+
+  it('a stop still clears when going back fails, and the log says to go back by hand', async () => {
+    const { deps } = await fakeDeps();
+    const { dir } = await project();
+    await runHook('post', input(dir, { hook_event_name: 'PostToolUse', tool_name: E('check'), tool_input: { video: 1 }, tool_response: 'ok' }), deps);
+    const [cp] = await listVersions(dir, 1);
+    // Break the checkpoint: its episode.json is a folder, so it can't be read back.
+    const saved = join(dir, 'episodes', '1', 'versions', cp!.id, 'episode.json');
+    await rm(saved);
+    await mkdir(saved);
+    await writeControl(dir, 1, { stop: { at: new Date().toISOString() } });
+    await runHook('stop', input(dir, { hook_event_name: 'Stop' }), deps);
+    expect((await readControl(dir, 1)).stop).toBeNull();
+    const log = await readLog(sessionDir(dir, 1, 's1'));
+    expect(log).toHaveLength(1);
+    expect(log[0]!.kind).toBe('warning');
+    expect(log[0]!.text).toMatch(/^Couldn’t go back to the last finished step: .+\. Use the viewer’s Versions tab to go back by hand\.$/);
+    expect(await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8')).toBe('{"v":"A"}');
+  });
+
+  it('does nothing at all without a session id', async () => {
+    const { deps, compiles } = await fakeDeps();
+    const { dir } = await project();
+    const src = join(deps.pluginRoot, 'native', 'transcribe.swift');
+    await mkdir(dirname(src), { recursive: true });
+    await writeFile(src, '// swift');
+    await writeControl(dir, 1, { stop: { at: new Date().toISOString() } });
+    for (const session_id of [undefined, 42, null, '']) {
+      for (const ev of ['session-start', 'pre', 'post', 'stop'] as const) {
+        const i = { ...input(dir, { tool_name: E('check'), tool_input: { video: 1 }, tool_response: 'ok' }), session_id } as unknown as HookInput;
+        expect(await runHook(ev, i, deps)).toEqual({ stdout: '', exitCode: 0 });
+      }
+    }
+    expect(compiles).toEqual([]);
+    expect(existsSync(join(dir, '.mirage'))).toBe(false);
+    expect(await readdir(join(dir, 'episodes', '1'))).toEqual(expect.not.arrayContaining(['sessions', 'versions']));
+    expect((await readControl(dir, 1)).stop).not.toBeNull();
   });
 
   it('post records the video new_video made', async () => {

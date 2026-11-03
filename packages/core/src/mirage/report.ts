@@ -5,6 +5,16 @@ const NEXT_AFTER_GUIDE = "Record the voice-over: open the video in Mirage's view
 
 const unique = (xs: string[]) => [...new Set(xs)];
 
+/** The engine tools whose finished steps are work worth reporting (not reads, checks or notes). */
+const REPORTED_ENGINE_TOOLS = new Set(['ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'render', 'restore', 'overnight'].map((t) => `mcp__plugin_mirage_engine__${t}`));
+const SAVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
+/** Of Claude's own saves, only the timeline and the clip descriptions are reported. */
+const REPORTED_SAVES = new Set(['Timeline written', 'Clips described']);
+
+/** Whether a finished step goes under "What I did": engine stages and the like, and timeline and catalog writes. */
+const reported = (s: Extract<StepLine, { status: string }>) =>
+  s.status === 'done' && (REPORTED_ENGINE_TOOLS.has(s.tool) || (SAVE_TOOLS.has(s.tool) && REPORTED_SAVES.has(s.label)));
+
 /** The label of the last step line (turn ends skipped), or null when there is none. */
 function lastLabel(steps: StepLine[]): string | null {
   for (let i = steps.length - 1; i >= 0; i--) {
@@ -16,7 +26,7 @@ function lastLabel(steps: StepLine[]): string | null {
 
 /**
  * The morning report of one video, in Markdown: the title says which version is ready (or where the run stopped), then
- * what was done, the concerns, guesses, questions and warnings from the session log, and for a guide cut what to do next.
+ * what was done (engine stages and timeline/catalog writes only), the concerns, guesses, questions and warnings from the session log, and for a guide cut what to do next.
  * Empty sections are left out.
  */
 export function buildReport(o: { videoTitle: string; steps: StepLine[]; log: LogEntry[]; delivered: VersionMeta | null; stoppedAt?: string }): string {
@@ -26,7 +36,7 @@ export function buildReport(o: { videoTitle: string; steps: StepLine[]; log: Log
     if (items.length) parts.push(`## ${heading}\n\n${items.map((t) => `- ${t}`).join('\n')}`);
   };
   const ofKind = (kind: LogEntry['kind']) => o.log.filter((e) => e.kind === kind).map((e) => e.text);
-  section('What I did', unique(o.steps.flatMap((s) => ('status' in s && s.status === 'done' ? [s.label] : []))));
+  section('What I did', unique(o.steps.flatMap((s) => ('status' in s && reported(s) ? [s.label] : []))));
   section("Things I wasn't sure about", ofKind('concern'));
   section('Choices I made for you', ofKind('guess'));
   section('Questions for you', ofKind('question'));

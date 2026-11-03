@@ -123,6 +123,11 @@ describe('fileDecision', () => {
     expect(fileDecision('Read', { file_path: join(footage, 'a.mov') }, project, [footage])).toBeNull();
     expect(fileDecision('Write', {}, project, [footage])).toBeNull();
     expect(fileDecision('Write', 'x', project, [footage])).toBeNull();
+    const dotdot = { deny: 'Use a plain path inside the project (no “..”).' };
+    expect(fileDecision('Write', { file_path: 'episodes/1/l/../episode.json' }, project, [footage])).toEqual(dotdot);
+    expect(fileDecision('NotebookEdit', { notebook_path: `${footage}/../x.ipynb` }, project, [footage])).toEqual(dotdot);
+    expect(fileDecision('Edit', { file_path: 'a\\..\\catalog.json' }, project, [footage])).toEqual(dotdot);
+    expect(fileDecision('Read', { file_path: '../x' }, project, [footage])).toBeNull();
   });
 
   it('sees through symlinks, both ways', () => {

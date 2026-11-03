@@ -34,6 +34,7 @@ export interface HookDeps {
 }
 
 export const STOP_REASON = 'The person stopped the edit. Stop now and say in one line what was finished.';
+export const HELD_TOO_LONG = 'The edit has been paused for almost a day. Stop here and say in one line what was finished; the person will resume it later.';
 const correctionReason = (text: string) =>
   `The person paused the edit and said: “${text}”. Act on this before you carry on. The step you were about to run didn't run.`;
 const BEFORE_LABEL = 'Before this edit';
@@ -62,6 +63,8 @@ export function logHookError(pluginData: string, event: string, e: unknown): voi
 /** Runs one Claude Code hook event. Always exit code 0; stdout is the JSON decision, or empty for none. */
 export async function runHook(event: HookEvent, input: HookInput, deps: HookDeps): Promise<Result> {
   if (input === null || typeof input !== 'object' || typeof input.cwd !== 'string' || input.cwd === '') return result();
+  // Without a session there is nowhere to write steps or state: every event does nothing.
+  if (typeof input.session_id !== 'string' || input.session_id === '') return result();
   const project = resolve(input.cwd);
   const inProject = existsSync(join(project, 'mirage.json'));
   if (event === 'session-start') startSpeechHelper(deps, event);
@@ -98,31 +101,37 @@ function startSpeechHelper(deps: HookDeps, event: string): void {
   }
 }
 
-/** The text of a tool_response: a string, MCP content blocks (bare or under `content`), or a `text`/`result`/`error` field. */
-function responseText(r: unknown): string {
+/**
+ * The text of a tool_response, whatever its shape: a string, MCP content blocks (bare, or under `content`), or a `text`,
+ * `result` or `error` field (itself any of these shapes).
+ */
+function responseText(r: unknown, depth = 0): string {
   if (typeof r === 'string') return r;
-  const blocks = Array.isArray(r) ? r : Array.isArray((r as { content?: unknown } | null)?.content) ? (r as { content: unknown[] }).content : null;
-  if (blocks) return blocks.map((b) => (typeof (b as { text?: unknown } | null)?.text === 'string' ? (b as { text: string }).text : '')).join('\n');
-  if (r !== null && typeof r === 'object') {
-    for (const k of ['text', 'result', 'error'] as const) {
-      const v = (r as Record<string, unknown>)[k];
-      if (typeof v === 'string') return v;
-    }
+  if (r === null || typeof r !== 'object' || depth > 4) return '';
+  if (Array.isArray(r)) return r.map((b) => responseText(b, depth + 1)).filter(Boolean).join('\n');
+  const o = r as Record<string, unknown>;
+  for (const k of ['content', 'text', 'result', 'error'] as const) {
+    const text = k in o ? responseText(o[k], depth + 1) : '';
+    if (text) return text;
   }
   return '';
 }
 
-/** A failed tool: PostToolUseFailure, a response with `isError: true`, or an error string (one that starts with ✖ or Error). */
+/**
+ * A failed tool: PostToolUseFailure, a response with `isError: true`, or an engine response whose text starts with `✖` on
+ * its first non-empty line, whatever the response's shape (the engine's errors start with ✖; other tools' responses can
+ * echo file content, which may start with anything). Detail: the first ✖ line.
+ */
 function failure(input: HookInput): { detail: string } | null {
   const r = input.tool_response;
   const raw = input as unknown as { error?: unknown };
+  const text = responseText(r) || (typeof raw.error === 'string' ? raw.error : '');
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const isFailure =
     input.hook_event_name === 'PostToolUseFailure' ||
     (r !== null && typeof r === 'object' && !Array.isArray(r) && (r as { isError?: unknown }).isError === true) ||
-    (typeof r === 'string' && /^\s*(✖|Error\b)/.test(r));
+    (engineTool(input.tool_name ?? '') !== null && (lines[0]?.startsWith('✖') ?? false));
   if (!isFailure) return null;
-  const text = responseText(r) || (typeof raw.error === 'string' ? raw.error : '');
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
   const detail = lines.find((l) => l.startsWith('✖')) ?? lines[0] ?? '';
   return { detail: detail.slice(0, 500) };
 }
@@ -147,7 +156,7 @@ class Handler {
     private readonly event: string,
   ) {
     this.tool = typeof input.tool_name === 'string' ? input.tool_name : '';
-    this.sid = typeof input.session_id === 'string' ? input.session_id : '';
+    this.sid = input.session_id;
   }
 
   /** Runs a side effect that must not cost the decision: a failure is logged and the hook carries on. */
@@ -223,8 +232,9 @@ class Handler {
         await this.deps.sleep(PAUSE_POLL_MS);
         control = await core.readControl(project, n);
       }
-      // Held for the whole hook timeout: the person is gone, so the edit stops (the Stop hook leaves the pause on).
-      if (control.paused || control.stop) return deny(STOP_REASON);
+      if (control.stop) return deny(STOP_REASON);
+      // Held for the whole hook timeout: the edit stops here and the pause stays on for the person to resume.
+      if (control.paused) return deny(HELD_TOO_LONG);
       // Taken even when this hook didn't wait: the person may have paused and resumed during a long step.
       const correction = await core.takeCorrection(project, n);
       if (correction !== null) return deny(correctionReason(correction));
@@ -296,7 +306,20 @@ class Handler {
       if (!control.stop) continue;
       // Go back to the last finished stage (or to before this session's edit); restoreVersion keeps what is there as a backup.
       const back = (await this.myVersions(n)).filter((v) => v.kind === 'checkpoint' || v.kind === 'before').at(-1);
-      if (back) await this.soft(() => core.restoreVersion(project, n, back.id));
+      if (back) {
+        try {
+          await core.restoreVersion(project, n, back.id);
+        } catch (e) {
+          // The stop is cleared anyway, so the person isn't locked out; the log tells them to go back by hand.
+          logHookError(this.deps.pluginData, this.event, e);
+          const reason = (e instanceof Error ? e.message : String(e)).replace(/\.+$/, '');
+          await this.soft(() => core.appendLog(core.sessionDir(project, n, sid), {
+            at: this.deps.now().toISOString(),
+            kind: 'warning',
+            text: `Couldn’t go back to the last finished step: ${reason}. Use the viewer’s Versions tab to go back by hand.`,
+          }));
+        }
+      }
       if (back || touched.has(n)) await this.soft(() => core.writeControl(project, n, { stop: null, paused: false, pauseNow: false }));
     }
 

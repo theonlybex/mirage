@@ -7,6 +7,7 @@ import type { SessionState } from '@wordedits/shared';
 
 export const ENGINE_PREFIX = 'mcp__plugin_mirage_engine__';
 export const FOOTAGE_DENY = 'Footage folders are read-only in Mirage.';
+export const DOTDOT_DENY = 'Use a plain path inside the project (no “..”).';
 
 /** The engine tool's short name (`check` for `mcp__plugin_mirage_engine__check`), or null for any other tool. */
 export const engineTool = (tool: string): string | null => (tool.startsWith(ENGINE_PREFIX) ? tool.slice(ENGINE_PREFIX.length) : null);
@@ -150,13 +151,15 @@ export function isChanging(tool: string, input: unknown, project: string): boole
 export const isStage = (tool: string): boolean => STAGES.has(engineTool(tool) ?? '');
 
 /**
- * The file guard. Writes (Write, Edit, MultiEdit, NotebookEdit) inside any footage folder are denied. Saves of the project's
+ * The file guard. Writes (Write, Edit, MultiEdit, NotebookEdit) inside any footage folder, or to a path with a `..` segment, are denied. Saves of the project's
  * catalog.json, or of episode.json or summary.md directly in episodes/<n>/, are allowed without a prompt. Anything else: null.
  */
 export function fileDecision(tool: string, input: unknown, project: string, footage: string[]): 'allow' | { deny: string } | null {
   if (!FILE_TOOLS.has(tool)) return null;
   const p = filePathOf(input);
   if (p === null) return null;
+  // `..` after a symlink would be resolved by name before the link is: such a path could slip past the guard.
+  if (p.split(/[\\/]/).includes('..')) return { deny: DOTDOT_DENY };
   const target = normalisePath(p, project);
   if (footage.some((f) => inside(target, normalisePath(f, project)) !== null)) return { deny: FOOTAGE_DENY };
   if (!SAVE_TOOLS.has(tool)) return null;
