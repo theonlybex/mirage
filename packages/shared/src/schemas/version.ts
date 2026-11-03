@@ -2,7 +2,8 @@
 import { z } from 'zod';
 import { strictObject } from './strict.js';
 
-export const VersionKindSchema = z.enum(['before', 'checkpoint', 'delivery']);
+/** `backup`: what was there when a version was gone back to, so going back can be undone. Never a restore target of Stop. */
+export const VersionKindSchema = z.enum(['before', 'checkpoint', 'delivery', 'backup']);
 export type VersionKind = z.infer<typeof VersionKindSchema>;
 
 /** `meta.json` of a saved version of an episode (episodes/<n>/versions/<id>/). */

@@ -7,7 +7,7 @@ import type { IconName } from '../components/Icon.js';
 import { Spinner } from '../components/Spinner.js';
 import { WavyProgress } from '../components/WavyProgress.js';
 import { CorrectionBox } from './CorrectionBox.js';
-import { newestVersion } from './InterruptedBanner.js';
+import { interruptedStep, restorePoint } from './InterruptedBanner.js';
 import { finishesText, PauseSheet, type PauseMode } from './PauseSheet.js';
 import { StopDialog } from './StopDialog.js';
 
@@ -64,7 +64,7 @@ export function RunBar({ video, control: streamed, steps, progress, versions, no
   const [sheet, setSheet] = useState(false);
   const [stopping, setStopping] = useState(false);
 
-  // Pause and Stop stay while the turn hasn't ended, even when a step has gone quiet: Claude may still be at it, and the
+  // Pause stays while the turn hasn't ended, even when a step has gone quiet: Claude may still be at it, and the
   // InterruptedBanner is what says the edit may have stopped.
   const running = runningStep(steps);
   const state = runState(control, steps);
@@ -110,8 +110,11 @@ export function RunBar({ video, control: streamed, steps, progress, versions, no
             : 'Nothing is running. Ask Claude in Claude Code to work on this video.';
 
   const held = state === 'paused' || state === 'pausing';
-  // What Stop goes back to (as the Stop hook does): the newer of the newest checkpoint and the newest "before" version.
-  const back = newestVersion(versions, ['checkpoint', 'before']);
+  // The InterruptedBanner shows (a quiet step, not paused): its "Go back" is the action, and a Stop would only wait for a
+  // Stop hook that may never come.
+  const interrupted = !control?.paused && interruptedStep(steps, progress, now) !== null;
+  // What Stop goes back to (as the Stop hook does).
+  const back = restorePoint(versions);
   const lastFinished = back?.kind === 'checkpoint' ? back.label : null;
 
   return (
@@ -132,7 +135,7 @@ export function RunBar({ video, control: streamed, steps, progress, versions, no
               Resume
             </Button>
           )}
-          {(state === 'working' || held) && (
+          {(state === 'working' || held) && !interrupted && (
             <Button variant="text" tone="error" icon="stop" onClick={() => setStopping(true)} disabled={busy}>
               Stop
             </Button>

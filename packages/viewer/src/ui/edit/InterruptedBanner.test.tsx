@@ -41,6 +41,20 @@ describe('InterruptedBanner', () => {
     expect(onGoBack).toHaveBeenCalledWith('v2');
   });
 
+  it('never goes back to a backup (what was there before a go-back), however new: the newest checkpoint or "before"', () => {
+    const onGoBack = vi.fn();
+    const withBackup = [...versions, version('v4', 'backup', 100, 'Before going back to “Timeline checked”')];
+    render(<InterruptedBanner steps={[running(200)]} progress={null} versions={withBackup} now={now} onGoBack={onGoBack} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Go back to the last finished step' }));
+    expect(onGoBack).toHaveBeenCalledWith('v2');
+    cleanup();
+    // A "before" newer than the newest checkpoint (a later session's first change) is where it goes.
+    const onGoBack2 = vi.fn();
+    render(<InterruptedBanner steps={[running(200)]} progress={null} versions={[...withBackup, version('v5', 'before', 400, 'Before this edit')]} now={now} onGoBack={onGoBack2} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Go back to the last finished step' }));
+    expect(onGoBack2).toHaveBeenCalledWith('v5');
+  });
+
   it('goes away on "Keep things as they are"', () => {
     render(<InterruptedBanner steps={[running(200)]} progress={null} versions={versions} now={now} onGoBack={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'Keep things as they are' }));

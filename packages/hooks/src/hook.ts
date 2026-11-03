@@ -212,6 +212,11 @@ class Handler {
 
   async sessionStart(): Promise<Result> {
     await this.core.writeSessionState(this.project, this.sid, {});
+    // A new session never inherits a stop (one a turn that ended without its Stop hook left behind). A pause stays.
+    for (const n of videoNumbers(this.project)) {
+      const control = await this.soft(() => this.core.readControl(this.project, n));
+      if (control?.stop) await this.soft(() => this.core.writeControl(this.project, n, { stop: null }));
+    }
     const p = await this.core.readProject(this.project);
     const k = videoNumbers(this.project).length;
     const line = `This folder is a Mirage project (“${p?.title ?? ''}”, ${k} ${k === 1 ? 'video' : 'videos'}). Use the mirage:edit skill to make or change a video.`;
@@ -332,7 +337,9 @@ class Handler {
           }));
         }
       }
-      if (back || touched.has(n)) await this.soft(() => core.writeControl(project, n, { stop: null, paused: false, pauseNow: false }));
+      // Cleared on every video, also one this session never worked on (a stop left by an Esc or a crash): the next request
+      // must not be denied by it.
+      await this.soft(() => core.writeControl(project, n, { stop: null, paused: false, pauseNow: false }));
     }
 
     if (session.overnight) {

@@ -16,15 +16,18 @@ type VersionsListProps = {
   post?: Post;
 };
 
-const ICON: Record<VersionView['kind'], IconName> = { delivery: 'movie', before: 'history', checkpoint: 'check' };
+const ICON: Record<VersionView['kind'], IconName> = { delivery: 'movie', before: 'history', checkpoint: 'check', backup: 'alt_route' };
 const SUPPORT: Partial<Record<VersionView['kind'], string>> = {
   before: 'How the video was before an edit started',
   checkpoint: 'A point saved along the way',
+  backup: 'What was there before going back',
 };
+/** Saved by the way, shown only with "Show steps": each step's checkpoint and what was there before each go-back. */
+const isStep = (v: VersionView) => v.kind === 'checkpoint' || v.kind === 'backup';
 
 /**
  * Every kept version, newest first: the deliveries (`V<k> · <label> · <date>`) and the "Before this edit" points, plus
- * each step's checkpoint behind "Show steps". Each can be played (when it has a video) or gone back to, after a yes.
+ * each step's checkpoint and each go-back's backup behind "Show steps". Each can be played (when it has a video) or gone back to, after a yes.
  */
 export function VersionsList({ video, versions, onPlay, post = apiPost }: VersionsListProps) {
   const [showSteps, setShowSteps] = useState(false);
@@ -32,8 +35,8 @@ export function VersionsList({ video, versions, onPlay, post = apiPost }: Versio
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const shown = newestFirst(versions.filter((v) => showSteps || v.kind !== 'checkpoint'));
-  const hasSteps = versions.some((v) => v.kind === 'checkpoint');
+  const shown = newestFirst(versions.filter((v) => showSteps || !isStep(v)));
+  const hasSteps = versions.some(isStep);
 
   const goBack = async (v: VersionView) => {
     setAsking(null);

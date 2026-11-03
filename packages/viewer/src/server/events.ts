@@ -51,6 +51,23 @@ async function sessionDirs(project: string, n: number): Promise<string[]> {
 
 const atOf = (s: StepLine) => Date.parse(s.at) || 0;
 
+/** The step lines of every session of video `n` (whose folders are `dirs`), oldest first. */
+async function mergedSteps(dirs: string[]): Promise<StepLine[]> {
+  const all = (await Promise.all(dirs.map((d) => readSteps(d)))).flat();
+  // Array.prototype.sort is stable: lines with the same time keep the order they were written in.
+  return all.sort((a, b) => atOf(a) - atOf(b));
+}
+
+/**
+ * Whether Claude is in a turn on video `n`: the newest step line across its sessions is a step, with no turn-end after it.
+ * Its next tool call then meets the PreToolUse hook (which holds it while paused, and hands over a correction). A step
+ * held by a pause has no line of its own yet: the hook writes its running line once it lets it go.
+ */
+export async function inTurn(project: string, n: number): Promise<boolean> {
+  const last = (await mergedSteps(await sessionDirs(project, n))).at(-1);
+  return last !== undefined && !('type' in last);
+}
+
 /** When the control of a video that has no usable control.json was last changed: never. */
 const NEVER = new Date(0).toISOString();
 
@@ -98,11 +115,7 @@ export class EventHub {
     const dirs = await sessionDirs(project, n);
     await Promise.all([
       part('timeline', () => this.timeline(n)),
-      part('steps', async () => {
-        const all = (await Promise.all(dirs.map((d) => readSteps(d)))).flat();
-        // Array.prototype.sort is stable: lines with the same time keep the order they were written in.
-        return all.sort((a, b) => atOf(a) - atOf(b)).slice(-STEP_LIMIT);
-      }),
+      part('steps', async () => (await mergedSteps(dirs)).slice(-STEP_LIMIT)),
       part('progress', async () => {
         const all = (await Promise.all(dirs.map((d) => readProgress(d)))).filter((p): p is Progress => p !== null);
         return all.sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0))[0] ?? null;

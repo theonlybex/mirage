@@ -78,13 +78,19 @@ describe('RunBar', () => {
     expect(post).toHaveBeenCalledWith('/api/control', { video: 1, stop: true });
   });
 
-  it('keeps Pause and Stop for a running step that has gone quiet: only the banner says it may have stopped', () => {
+  it('keeps Pause for a running step that has gone quiet, but not Stop: the banner\'s "Go back" is the action then', () => {
     const quiet: StepLine = { ...running, at: ago(300) };
     setup({ steps: [done, quiet], progress: { ...progress, updatedAt: ago(200) } });
     expect(screen.getByText('Working')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    cleanup();
+    // Not quiet yet: Stop is there.
+    setup({ steps: [done, quiet], progress: { ...progress, updatedAt: ago(100) } });
     expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
     cleanup();
+    // Paused, the banner is hidden: Stop is back.
+
     setup({ control: control({ paused: true }), steps: [done, quiet] });
     expect(screen.getByText('Pausing')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Resume' })).toBeTruthy();

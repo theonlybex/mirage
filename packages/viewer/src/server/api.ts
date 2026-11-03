@@ -9,7 +9,7 @@ import {
 } from '@wordedits/core';
 import { SidecarError } from '@wordedits/sidecars';
 import { z } from 'zod';
-import { noteStillUrl, noteViews } from './events.js';
+import { inTurn, noteStillUrl, noteViews } from './events.js';
 import { HttpError } from './http-error.js';
 import { multipartBoundary, readMultipart } from './multipart.js';
 import type { VideoSummary } from '../view-types.js';
@@ -140,9 +140,11 @@ async function control(ctx: ApiContext, req: IncomingMessage): Promise<ApiResult
   if (!b.resume) throw new HttpError(400, 'Say what to do: pause, resume or stop.');
   const correction = b.resume.correction?.trim() || null;
   const current = await readControl(project, b.video);
-  if (current.paused) return { status: 200, body: await writeControl(project, b.video, { paused: false, pauseNow: false, correction }) };
-  // Not paused, so Claude is not about to meet a hook that would hand it the correction: tell Claude directly.
-  if (correction) ctx.say(`Mirage viewer: the person says about video ${b.video}: “${oneLine(correction)}”`);
+  // A hook hands the correction over only when Claude is paused in a turn (its next step is held, or about to be). Not
+  // paused, or the turn has ended: no hook is coming, so Claude is told directly and nothing is stored for later.
+  const hookWillTake = current.paused && (await inTurn(project, b.video));
+  if (correction && !hookWillTake) ctx.say(`Mirage viewer: the person says about video ${b.video}: “${oneLine(correction)}”`);
+  if (current.paused) return { status: 200, body: await writeControl(project, b.video, { paused: false, pauseNow: false, correction: hookWillTake ? correction : null }) };
   return { status: 200, body: current };
 }
 

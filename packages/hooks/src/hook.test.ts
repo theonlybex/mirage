@@ -326,7 +326,7 @@ describe('runHook', () => {
     expect(await readFile(ep, 'utf8')).toBe('{"v":"B"}');
     const all = await listVersions(dir, 1);
     const backup = all.at(-1)!;
-    expect(backup.label).toBe('Before going back to “Timeline checked”');
+    expect(backup).toMatchObject({ kind: 'backup', label: 'Before going back to “Timeline checked”' });
     expect(await readFile(join(dir, 'episodes', '1', 'versions', backup.id, 'episode.json'), 'utf8')).toBe('{"v":"C"}');
     const control = await readControl(dir, 1);
     expect([control.stop, control.paused, control.pauseNow]).toEqual([null, false, false]);
@@ -346,6 +346,30 @@ describe('runHook', () => {
     expect(await versions(dir)).toEqual([]);
     expect((await readControl(dir, 1)).stop).toBeNull();
     expect(await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8')).toBe('{"v":"A"}');
+  });
+
+  it('the Stop hook clears a stop on every video, also one this session never worked on, and goes back only on its own', async () => {
+    const { deps } = await fakeDeps();
+    const { dir } = await project();
+    const other = await newVideo(dir, { title: 'Other', about: '', mention: '', hide: '', footage: [] });
+    await writeFile(join(dir, 'episodes', String(other), 'episode.json'), '{"v":"X"}');
+    // Left over from an Esc or a crash: a stop with a pause on a video no session of this turn touched.
+    await writeControl(dir, other, { stop: { at: new Date().toISOString() }, paused: true, pauseNow: true });
+    await writeSessionState(dir, 's1', { video: 1 });
+    await runHook('stop', input(dir, { hook_event_name: 'Stop' }), deps);
+    expect(await readControl(dir, other)).toMatchObject({ stop: null, paused: false, pauseNow: false });
+    expect(await versions(dir, other)).toEqual([]);
+    expect(await readFile(join(dir, 'episodes', String(other), 'episode.json'), 'utf8')).toBe('{"v":"X"}');
+    // The next request's first tool on it runs.
+    expect((await runHook('pre', input(dir, { tool_name: E('check'), tool_input: { video: other } }), deps)).stdout).toBe(ALLOW);
+  });
+
+  it('a new session never inherits a stop; a pause stays', async () => {
+    const { deps } = await fakeDeps();
+    const { dir } = await project();
+    await writeControl(dir, 1, { stop: { at: new Date().toISOString() }, paused: true });
+    await runHook('session-start', input(dir, { session_id: 's2', hook_event_name: 'SessionStart' }), deps);
+    expect(await readControl(dir, 1)).toMatchObject({ stop: null, paused: true });
   });
 
   it('post takes a checkpoint after an engine stage, none after a timeline write, and a delivery after cut', async () => {

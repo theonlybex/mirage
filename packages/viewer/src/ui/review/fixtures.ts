@@ -22,6 +22,7 @@ export const rough = version({ id: 'd1' });
 export const guide = version({ id: 'd2', delivery: 2, label: 'Guide cut (record your voice-over over this)', createdAt: at(30), render: { mode: 'guide', file: 'video.mp4', captions: null } });
 export const before = version({ id: 'b1', kind: 'before', label: 'Before this edit', delivery: null, render: null, videoUrl: undefined, createdAt: at(10) });
 export const checkpoint = version({ id: 'c1', kind: 'checkpoint', label: 'Timeline checked', delivery: null, render: null, videoUrl: undefined, createdAt: at(20) });
+export const backup = version({ id: 'k1', kind: 'backup', label: 'Before going back to “Timeline checked”', sessionId: null, delivery: null, render: null, videoUrl: undefined, createdAt: at(25) });
 
 export const note = (over: Partial<NoteView> & { id: string }): NoteView => ({
   versionId: 'd1',

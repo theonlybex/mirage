@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DELIVERY_LABEL } from './labels.js';
 import { lockEpisode } from './render-episode.js';
-import { listVersions, MAX_CHECKPOINTS, restoreVersion, snapshotVersion } from './versions.js';
+import { listVersions, MAX_BACKUPS, MAX_CHECKPOINTS, restoreVersion, snapshotVersion } from './versions.js';
 
 async function project(): Promise<{ dir: string; ep: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'mirage-versions-'));
@@ -78,7 +78,8 @@ describe('versions', () => {
     await rm(join(ep, 'summary.md'));
     const { restored, backup } = await restoreVersion(dir, 1, old.id);
     expect(restored.id).toBe(old.id);
-    expect(backup).toMatchObject({ kind: 'checkpoint', label: 'Before going back to “Rough ready”', hasEpisode: true, hasSummary: false });
+    expect(backup).toMatchObject({ kind: 'backup', label: 'Before going back to “Rough ready”', hasEpisode: true, hasSummary: false, sessionId: null });
+    expect(backup.id).toMatch(/-backup-[0-9a-f]{4}$/);
     expect(await readFile(join(ep, 'episode.json'), 'utf8')).toBe('old\n');
     expect(await readFile(join(ep, 'summary.md'), 'utf8')).toBe('old summary\n');
     expect(await readFile(join(ep, 'rough.mp4'), 'utf8')).toBe('render');
@@ -166,6 +167,18 @@ describe('versions', () => {
     expect(ids).toContain(cps[3]);
     expect(ids).toContain(cps[cps.length - 1]);
     expect(await readdir(join(ep, 'versions'))).toHaveLength(2 + MAX_CHECKPOINTS);
+  });
+
+  it('saves a go-back\'s backup as a backup, never a checkpoint, and keeps only the newest 20 backups', async () => {
+    const { dir, ep } = await project();
+    await writeFile(join(ep, 'episode.json'), '{}\n');
+    const cp = await snapshotVersion(dir, 1, { kind: 'checkpoint', label: 'Timeline checked' });
+    const backups: string[] = [];
+    for (let i = 0; i < MAX_BACKUPS + 2; i++) backups.push((await restoreVersion(dir, 1, cp.id)).backup.id);
+    expect(MAX_BACKUPS).toBe(20);
+    const all = await listVersions(dir, 1);
+    expect(all.filter((v) => v.kind === 'checkpoint').map((v) => v.id)).toEqual([cp.id]);
+    expect(all.filter((v) => v.kind === 'backup').map((v) => v.id)).toEqual(backups.slice(2));
   });
 
   it('can restore the oldest checkpoint even when that prunes it', async () => {

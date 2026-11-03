@@ -9,12 +9,14 @@ import { episodeDir, lockEpisode, type EpisodeMode } from './render-episode.js';
 
 /** Checkpoints kept per episode; older ones are deleted. Before-versions and deliveries are kept forever. */
 export const MAX_CHECKPOINTS = 50;
+/** Backups (what was there before a go-back) kept per episode; older ones are deleted. */
+export const MAX_BACKUPS = 20;
 
 const DEFAULT_WAIT_MS = 30_000;
 const RETRY_MS = 250;
 /** Saved: the two files an edit changes. Renders, the catalog, notes and footage are never copied or touched. */
 const STATE_FILES = ['episode.json', 'summary.md'] as const;
-const ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery)-[0-9a-f]{4}$/;
+const ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
 
 const versionsDir = (project: string, n: number) => join(episodeDir(project, n), 'versions');
 
@@ -139,7 +141,8 @@ async function snapshotLocked(
     };
     await writeJsonFile(join(tmp, 'meta.json'), VersionMetaSchema, meta, `episodes/${n}/versions/${id}/meta.json`);
     await rename(tmp, join(root, id));
-    if (o.kind === 'checkpoint') await pruneCheckpoints(project, n);
+    if (o.kind === 'checkpoint') await prune(project, n, 'checkpoint', MAX_CHECKPOINTS);
+    if (o.kind === 'backup') await prune(project, n, 'backup', MAX_BACKUPS);
     return meta;
   } catch (e) {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
@@ -147,9 +150,10 @@ async function snapshotLocked(
   }
 }
 
-async function pruneCheckpoints(project: string, n: number): Promise<void> {
-  const checkpoints = (await listLocked(project, n)).filter((v) => v.kind === 'checkpoint');
-  for (const old of checkpoints.slice(0, Math.max(0, checkpoints.length - MAX_CHECKPOINTS))) {
+/** Deletes all but the newest `keep` versions of `kind`. */
+async function prune(project: string, n: number, kind: VersionKind, keep: number): Promise<void> {
+  const ofKind = (await listLocked(project, n)).filter((v) => v.kind === kind);
+  for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
     await rm(join(versionsDir(project, n), old.id), { recursive: true, force: true });
   }
 }
@@ -174,7 +178,7 @@ export async function listVersions(project: string, n: number): Promise<VersionM
 
 /**
  * Puts a saved version's episode.json and summary.md back (a file the version did not have is removed). What is there now
- * is saved first, as a checkpoint, so going back can itself be undone. Renders, the catalog, notes, footage and other versions are not touched.
+ * is saved first, as a backup, so going back can itself be undone. Renders, the catalog, notes, footage and other versions are not touched.
  */
 export async function restoreVersion(
   project: string,
@@ -188,7 +192,7 @@ export async function restoreVersion(
     const from = join(versionsDir(project, n), id);
     // Read before saving the backup: that save can delete this very version when it is the oldest checkpoint.
     const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join(from, f))));
-    const backup = await snapshotLocked(project, n, { kind: 'checkpoint', label: `Before going back to “${restored.label}”` });
+    const backup = await snapshotLocked(project, n, { kind: 'backup', label: `Before going back to “${restored.label}”` });
     const dir = episodeDir(project, n);
     for (const [i, f] of STATE_FILES.entries()) {
       const b = bytes[i];

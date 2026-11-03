@@ -611,6 +611,8 @@ describe('API', () => {
 
   it('pause now and resume with a correction write control.json', async () => {
     await start();
+    // Claude's turn is still going (its newest step has no turn-end after it): a hook will hand over the correction.
+    await appendStep(sessionDir(t.project, 1, 's1'), { at: new Date().toISOString(), id: 't1', tool: 'Read', label: 'Reading catalog.json', status: 'done' });
     const afterStep = await api('/api/control', { body: { video: 1, pause: 'after-step' } });
     expect(afterStep.status).toBe(200);
     expect(await readControl(t.project, 1)).toMatchObject({ paused: true, pauseNow: false });
@@ -621,6 +623,20 @@ describe('API', () => {
     expect(JSON.parse(await readFile(join(t.project, 'episodes', '1', 'control.json'), 'utf8'))).toMatchObject({ version: 1, paused: false, pauseNow: false, correction: 'Make the intro shorter', stop: null });
     // the hooks deliver this correction themselves: nothing is said to Claude
     expect(lines).toHaveLength(1);
+  });
+
+  it('resume with text after the turn ended says the correction to Claude and stores nothing', async () => {
+    await start();
+    const dir = sessionDir(t.project, 1, 's1');
+    await appendStep(dir, { at: new Date(Date.now() - 2000).toISOString(), id: 't1', tool: 'Read', label: 'Reading catalog.json', status: 'running' });
+    await api('/api/control', { body: { video: 1, pause: 'now' } });
+    await appendStep(dir, { at: new Date().toISOString(), type: 'turn-end' });
+    const r = await api('/api/control', { body: { video: 1, resume: { correction: 'Use the drone shot' } } });
+    expect(r.status).toBe(200);
+    expect(lines).toEqual([lines[0], 'Mirage viewer: the person says about video 1: “Use the drone shot”']);
+    expect(r.json).toMatchObject({ paused: false, pauseNow: false, correction: null });
+    expect(await readControl(t.project, 1)).toMatchObject({ paused: false, pauseNow: false, correction: null });
+    expect(JSON.parse(await readFile(join(t.project, 'episodes', '1', 'control.json'), 'utf8')).correction).toBeNull();
   });
 
   it('resumes without a correction', async () => {

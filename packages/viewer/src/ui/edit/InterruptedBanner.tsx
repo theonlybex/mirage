@@ -27,9 +27,11 @@ export function newestVersion(versions: readonly VersionView[] | null, kinds: re
   return (versions ?? []).filter((v) => kinds.includes(v.kind)).reduce<VersionView | null>((a, v) => (!a || time(v.createdAt) > time(a.createdAt) ? v : a), null);
 }
 
-/** Where "go back to the last finished step" goes: the newest checkpoint, else the newest "before this edit" version. */
-export const restorePoint = (versions: readonly VersionView[] | null): VersionView | null =>
-  newestVersion(versions, ['checkpoint']) ?? newestVersion(versions, ['before']);
+/**
+ * Where "go back to the last finished step" goes, as the Stop hook does: the newest checkpoint or "before this edit"
+ * version. Never a backup: going back to what was there before a go-back would undo it.
+ */
+export const restorePoint = (versions: readonly VersionView[] | null): VersionView | null => newestVersion(versions, ['checkpoint', 'before']);
 
 type BannerProps = {
   steps: readonly StepLine[];

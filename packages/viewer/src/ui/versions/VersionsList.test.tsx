@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { before, checkpoint, guide, rough } from '../review/fixtures.js';
+import { backup, before, checkpoint, guide, rough } from '../review/fixtures.js';
 import { VersionsList } from './VersionsList.js';
 
 afterEach(cleanup);
@@ -32,6 +32,20 @@ describe('VersionsList', () => {
     expect(screen.getAllByRole('listitem')).toHaveLength(4);
     fireEvent.click(screen.getByRole('switch', { name: 'Show steps' }));
     expect(screen.queryByText(/Timeline checked/)).toBeNull();
+  });
+
+  it('shows the backups made when going back under "Show steps", with their label', () => {
+    render(<VersionsList video={1} versions={[rough, before, checkpoint, backup]} onPlay={() => {}} post={vi.fn()} />);
+    expect(screen.queryByText(/Before going back to/)).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Show steps' }));
+    const item = screen.getAllByRole('listitem')[0]!;
+    expect(item.querySelector('.version__title')!.textContent).toMatch(/^Before going back to “Timeline checked” · .+/);
+    expect(within(item).getByText('What was there before going back')).toBeTruthy();
+    expect(within(item).getByRole('button', { name: 'Go back to this version' })).toBeTruthy();
+    cleanup();
+    // Only a backup so far: the switch is offered.
+    render(<VersionsList video={1} versions={[backup]} onPlay={() => {}} post={vi.fn()} />);
+    expect(screen.getByRole('switch', { name: 'Show steps' })).toBeTruthy();
   });
 
   it('Play opens the version in Review; only versions with a video have it', () => {
