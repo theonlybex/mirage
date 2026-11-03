@@ -27338,7 +27338,7 @@ var MusicTrackSchema = strictObject2({
 var MusicLibrarySchema = strictObject2({ version: external_exports.literal(1), tracks: external_exports.array(MusicTrackSchema) });
 
 // packages/shared/src/schemas/version.ts
-var VersionKindSchema = external_exports.enum(["before", "checkpoint", "delivery"]);
+var VersionKindSchema = external_exports.enum(["before", "checkpoint", "delivery", "backup"]);
 var VersionMetaSchema = strictObject2({
   version: external_exports.literal(1),
   id: external_exports.string().min(1),
@@ -27396,6 +27396,11 @@ var SessionStateSchema = strictObject2({
   overnight: strictObject2({ videos: external_exports.array(external_exports.number().int().positive()), startedAt: external_exports.string() }).nullable(),
   awakePid: external_exports.number().int().nullable()
 });
+var SESSION_ID_PATTERN = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._-]*$/;
+var ClaudeProcessSchema = strictObject2({
+  sessionId: external_exports.string().regex(SESSION_ID_PATTERN),
+  updatedAt: external_exports.string()
+});
 
 // packages/shared/src/schemas/video.ts
 var VideoSchema = strictObject2({
@@ -27411,6 +27416,7 @@ var VideoSchema = strictObject2({
 
 // packages/shared/src/schemas/notes.ts
 var unit = external_exports.number().min(0).max(1);
+var NOTE_STILL = /^notes\/n[1-9]\d*\.jpg$/;
 var NoteSchema = strictObject2({
   /** n1, n2, … */
   id: external_exports.string().regex(/^n[1-9]\d*$/),
@@ -27419,8 +27425,8 @@ var NoteSchema = strictObject2({
   t: external_exports.number().min(0),
   text: external_exports.string().min(1).max(2e3),
   box: strictObject2({ x: unit, y: unit, w: unit, h: unit }).nullable(),
-  /** The frame grabbed at `t`, relative to the episode folder. */
-  still: external_exports.string(),
+  /** The frame grabbed at `t`, relative to the episode folder: notes/n<k>.jpg, never a path anywhere else. */
+  still: external_exports.string().regex(NOTE_STILL),
   createdAt: external_exports.string(),
   /** The send round that took it to Claude; null until sent. */
   round: external_exports.number().int().positive().nullable()
@@ -27998,10 +28004,11 @@ import { randomBytes, randomUUID as randomUUID3 } from "node:crypto";
 import { access as access3, copyFile, link, mkdir, readdir as readdir2, readFile as readFile3, rename as rename2, rm as rm2, writeFile as writeFile3 } from "node:fs/promises";
 import { join as join4 } from "node:path";
 var MAX_CHECKPOINTS = 50;
+var MAX_BACKUPS = 20;
 var DEFAULT_WAIT_MS = 3e4;
 var RETRY_MS = 250;
 var STATE_FILES = ["episode.json", "summary.md"];
-var ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery)-[0-9a-f]{4}$/;
+var ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
 var versionsDir = (project2, n2) => join4(episodeDir(project2, n2), "versions");
 async function readBytes(path6) {
   try {
@@ -28106,7 +28113,8 @@ async function snapshotLocked(project2, n2, o2) {
     };
     await writeJsonFile(join4(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
     await rename2(tmp, join4(root, id));
-    if (o2.kind === "checkpoint") await pruneCheckpoints(project2, n2);
+    if (o2.kind === "checkpoint") await prune(project2, n2, "checkpoint", MAX_CHECKPOINTS);
+    if (o2.kind === "backup") await prune(project2, n2, "backup", MAX_BACKUPS);
     return meta3;
   } catch (e) {
     await rm2(tmp, { recursive: true, force: true }).catch(() => {
@@ -28114,9 +28122,9 @@ async function snapshotLocked(project2, n2, o2) {
     throw e;
   }
 }
-async function pruneCheckpoints(project2, n2) {
-  const checkpoints = (await listLocked(project2, n2)).filter((v) => v.kind === "checkpoint");
-  for (const old of checkpoints.slice(0, Math.max(0, checkpoints.length - MAX_CHECKPOINTS))) {
+async function prune(project2, n2, kind, keep) {
+  const ofKind = (await listLocked(project2, n2)).filter((v) => v.kind === kind);
+  for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
     await rm2(join4(versionsDir(project2, n2), old.id), { recursive: true, force: true });
   }
 }
@@ -28129,7 +28137,7 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
     if (!restored) throw new MirageError("BAD_INPUT", `episodes/${n2} has no saved version "${id}"`, "List the versions and pick one of those.");
     const from = join4(versionsDir(project2, n2), id);
     const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join4(from, f))));
-    const backup = await snapshotLocked(project2, n2, { kind: "checkpoint", label: `Before going back to \u201C${restored.label}\u201D` });
+    const backup = await snapshotLocked(project2, n2, { kind: "backup", label: `Before going back to \u201C${restored.label}\u201D` });
     const dir = episodeDir(project2, n2);
     for (const [i2, f] of STATE_FILES.entries()) {
       const b = bytes[i2];
@@ -28141,7 +28149,7 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
 }
 
 // packages/core/src/mirage/session-files.ts
-import { appendFile, link as link2, mkdir as mkdir2, readdir as readdir3, readFile as readFile4, rename as rename3, rm as rm3, stat as stat3 } from "node:fs/promises";
+import { appendFile, link as link2, mkdir as mkdir2, readdir as readdir3, readFile as readFile4, rename as rename3, rm as rm3, stat as stat3, utimes, writeFile as writeFile4 } from "node:fs/promises";
 import { dirname as dirname2, join as join5, resolve as resolve2 } from "node:path";
 async function readLines(path6, schema) {
   let text;
@@ -28187,20 +28195,45 @@ async function readControlFile(path6) {
     return null;
   }
 }
-async function claimedControl(project2, n2) {
+var CLAIM_STALE_MS = 6e4;
+var claimedAt = (name, mtime) => {
+  const m = /^control\.json\.take-(\d{13})-/.exec(name);
+  return m ? Number(m[1]) : mtime;
+};
+async function writeControlIfNone(path6, control2) {
+  try {
+    await writeFile4(path6, JSON.stringify(ControlSchema.parse(control2), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
+}
+async function claimedControl(project2, n2, written) {
   const dir = episodeDir(project2, n2);
   const names = (await readdir3(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
   let best = null;
+  const stale = [];
   for (const name of names) {
+    const info = await stat3(join5(dir, name)).catch(() => null);
+    if (!info) continue;
+    if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
+    if (written) continue;
     const control2 = await readControlFile(join5(dir, name));
-    if (!control2) continue;
-    const mtime = (await stat3(join5(dir, name)).catch(() => null))?.mtimeMs ?? 0;
-    if (!best || mtime > best.mtime) best = { control: control2, mtime };
+    if (control2 && (!best || info.mtimeMs > best.mtime)) best = { control: control2, mtime: info.mtimeMs };
   }
-  return best ? { ...best.control, correction: null } : null;
+  const claimed = best ? { ...best.control, correction: null } : null;
+  if (stale.length) {
+    try {
+      if (claimed && stale.length === names.length) await writeControlIfNone(controlPath(project2, n2), claimed);
+      for (const name of stale) await rm3(join5(dir, name), { force: true });
+    } catch {
+    }
+  }
+  return claimed;
 }
 async function readWrittenControl(project2, n2) {
-  return await readControlFile(controlPath(project2, n2)) ?? await claimedControl(project2, n2);
+  const written = await readControlFile(controlPath(project2, n2));
+  const claimed = await claimedControl(project2, n2, written !== null);
+  return written ?? claimed;
 }
 async function readControl(project2, n2) {
   return await readWrittenControl(project2, n2) ?? defaultControl();
@@ -28282,6 +28315,7 @@ async function updateNote(project2, n2, id, patch) {
 async function deleteNote(project2, n2, id) {
   const notes = await readNotes(project2, n2);
   const note2 = find(notes, id);
+  if (!NOTE_STILL.test(note2.still)) throw new MirageError("BAD_INPUT", `Note ${id} has a still outside notes/.`, "Check notes.json.");
   await saveNotes(project2, n2, notes.filter((x) => x.id !== id));
   await rm4(join7(episodeDir(project2, n2), note2.still), { force: true });
 }
@@ -28313,6 +28347,12 @@ async function noteStatuses(project2, n2) {
 
 // packages/core/src/mirage/report.ts
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
+
+// packages/core/src/mirage/one-line.ts
+function oneLine(text, max = 1e3) {
+  const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
+}
 
 // packages/viewer/src/lifecycle.ts
 import { fstatSync } from "node:fs";
@@ -28399,7 +28439,7 @@ import { join as join13, resolve as resolve8 } from "node:path";
 
 // packages/viewer/src/server/api.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { access as access5, constants as constants7, mkdir as mkdir5, readdir as readdir7, rename as rename4, rm as rm6, stat as stat6, writeFile as writeFile4 } from "node:fs/promises";
+import { access as access5, constants as constants7, mkdir as mkdir5, readdir as readdir7, rename as rename4, rm as rm6, stat as stat6, writeFile as writeFile5 } from "node:fs/promises";
 import { extname as extname2, isAbsolute as isAbsolute2, join as join11 } from "node:path";
 
 // packages/viewer/src/server/events.ts
@@ -28545,6 +28585,14 @@ async function sessionDirs(project2, n2) {
   return entries.filter((e) => e.isDirectory()).map((e) => join10(root, e.name)).sort();
 }
 var atOf = (s) => Date.parse(s.at) || 0;
+async function mergedSteps(dirs) {
+  const all = (await Promise.all(dirs.map((d) => readSteps(d)))).flat();
+  return all.sort((a2, b) => atOf(a2) - atOf(b));
+}
+async function inTurn(project2, n2) {
+  const last = (await mergedSteps(await sessionDirs(project2, n2))).at(-1);
+  return last !== void 0 && !("type" in last);
+}
 var NEVER2 = (/* @__PURE__ */ new Date(0)).toISOString();
 async function controlView(project2, n2) {
   return await readWrittenControl(project2, n2) ?? { version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: NEVER2 };
@@ -28581,10 +28629,7 @@ var EventHub = class {
     const dirs = await sessionDirs(project2, n2);
     await Promise.all([
       part("timeline", () => this.timeline(n2)),
-      part("steps", async () => {
-        const all = (await Promise.all(dirs.map((d) => readSteps(d)))).flat();
-        return all.sort((a2, b) => atOf(a2) - atOf(b)).slice(-STEP_LIMIT);
-      }),
+      part("steps", async () => (await mergedSteps(dirs)).slice(-STEP_LIMIT)),
       part("progress", async () => {
         const all = (await Promise.all(dirs.map((d) => readProgress(d)))).filter((p) => p !== null);
         return all.sort((a2, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a2.updatedAt) || 0))[0] ?? null;
@@ -28876,10 +28921,7 @@ var AUDIO_LIMIT = 25 << 20;
 var TEXT_LIMIT = 2e3;
 var SAY_LIMIT = 1e3;
 var SPEECH_NOT_READY = "Speech recognition is still being set up. Try again in a minute, or type the note.";
-function oneLine(text, max = SAY_LIMIT) {
-  const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
-}
+var oneLine2 = (text, max = SAY_LIMIT) => oneLine(text, max);
 function errorResult(e) {
   if (e instanceof HttpError) return { status: e.status, body: { error: e.message } };
   if (e instanceof external_exports.ZodError) return { status: 400, body: { error: describeError(e).message } };
@@ -28966,8 +29008,9 @@ async function control(ctx, req) {
   if (!b.resume) throw new HttpError(400, "Say what to do: pause, resume or stop.");
   const correction = b.resume.correction?.trim() || null;
   const current = await readControl(project2, b.video);
-  if (current.paused) return { status: 200, body: await writeControl(project2, b.video, { paused: false, pauseNow: false, correction }) };
-  if (correction) ctx.say(`Mirage viewer: the person says about video ${b.video}: \u201C${oneLine(correction)}\u201D`);
+  const hookWillTake = current.paused && await inTurn(project2, b.video);
+  if (correction && !hookWillTake) ctx.say(`Mirage viewer: the person says about video ${b.video}: \u201C${oneLine2(correction)}\u201D`);
+  if (current.paused) return { status: 200, body: await writeControl(project2, b.video, { paused: false, pauseNow: false, correction: hookWillTake ? correction : null }) };
   return { status: 200, body: current };
 }
 async function addVideoNote(ctx, req) {
@@ -28985,7 +29028,7 @@ async function sendVideoNotes(ctx, req) {
   const sent = await sendNotes(ctx.project, video);
   if (!sent.length) return { status: 200, body: { sent: 0, round: null } };
   const versions = await listVersions(ctx.project, video);
-  const labels = [...new Set(sent.map((x) => oneLine(versions.find((v) => v.id === x.versionId)?.label ?? x.versionId, 200)))];
+  const labels = [...new Set(sent.map((x) => oneLine2(versions.find((v) => v.id === x.versionId)?.label ?? x.versionId, 200)))];
   ctx.say(`Mirage viewer: the person sent ${sent.length} note(s) on video ${video} (${labels.join(", ")}). Use the mirage:notes skill for video ${video}.`);
   return { status: 200, body: { sent: sent.length, round: sent[0].round } };
 }
@@ -29003,7 +29046,7 @@ async function voiceNote(ctx, req, url2) {
   const id = randomUUID4();
   const webm = join11(dir, `voice-${id}.webm`);
   const wav = join11(dir, `voice-${id}.wav`);
-  await writeFile4(webm, audio);
+  await writeFile5(webm, audio);
   try {
     await ctx.tools.extractWav(webm, wav);
     const transcript = await ctx.tools.transcribe(wav, { transcriber: ctx.transcriber });
@@ -29015,7 +29058,7 @@ async function voiceNote(ctx, req, url2) {
     await rm6(wav, { force: true });
   }
 }
-var sayVoiceover = (ctx, video, path6) => ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${video}: \u201C${oneLine(path6)}\u201D. Use the mirage:voiceover skill.`);
+var sayVoiceover = (ctx, video, path6) => ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${video}: \u201C${oneLine2(path6)}\u201D. Use the mirage:voiceover skill.`);
 async function voiceover(ctx, req) {
   const boundary = multipartBoundary(req.headers["content-type"]);
   if (boundary !== null) return voiceoverUpload(ctx, req, boundary);
@@ -29044,7 +29087,7 @@ async function claimName(dir, name) {
   for (let i2 = 1; i2 < 1e3; i2++) {
     const path6 = join11(dir, i2 === 1 ? name : `${stem} (${i2})${ext}`);
     try {
-      await writeFile4(path6, "", { flag: "wx" });
+      await writeFile5(path6, "", { flag: "wx" });
       return path6;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;

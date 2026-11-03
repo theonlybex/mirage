@@ -5,7 +5,7 @@ import type { IncomingMessage } from 'node:http';
 import { extname, isAbsolute, join } from 'node:path';
 import {
   addNote, deleteNote, describeError, episodeDir, listVersions, MirageError, readNotes, readVideo, restoreVersion, sendNotes,
-  updateNote, videoStage, writeControl, readControl, JsonFileError, type MediaTools,
+  updateNote, videoStage, writeControl, readControl, JsonFileError, oneLine as coreOneLine, type MediaTools,
 } from '@wordedits/core';
 import { SidecarError } from '@wordedits/sidecars';
 import { z } from 'zod';
@@ -32,11 +32,8 @@ const TEXT_LIMIT = 2000;
 const SAY_LIMIT = 1000;
 const SPEECH_NOT_READY = 'Speech recognition is still being set up. Try again in a minute, or type the note.';
 
-/** A person's text as it goes into a line to Claude: one line, short, and unable to close its own quotes. */
-export function oneLine(text: string, max = SAY_LIMIT): string {
-  const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
-}
+/** A person's text as it goes into a line to Claude: one line, short, and unable to close its own quotes (core's, shared with the hooks). */
+export const oneLine = (text: string, max = SAY_LIMIT): string => coreOneLine(text, max);
 
 /** How an error is answered: our own with their status; the engine's by kind; the rest 500. */
 export function errorResult(e: unknown): ApiResult {

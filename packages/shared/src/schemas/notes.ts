@@ -4,6 +4,9 @@ import { strictObject } from './strict.js';
 
 const unit = z.number().min(0).max(1);
 
+/** Where a note's still may be, relative to the episode folder. */
+export const NOTE_STILL = /^notes\/n[1-9]\d*\.jpg$/;
+
 /** A note the user pinned to a moment (and maybe a box) of a version of a video. */
 export const NoteSchema = strictObject({
   /** n1, n2, … */
@@ -13,8 +16,8 @@ export const NoteSchema = strictObject({
   t: z.number().min(0),
   text: z.string().min(1).max(2000),
   box: strictObject({ x: unit, y: unit, w: unit, h: unit }).nullable(),
-  /** The frame grabbed at `t`, relative to the episode folder. */
-  still: z.string(),
+  /** The frame grabbed at `t`, relative to the episode folder: notes/n<k>.jpg, never a path anywhere else. */
+  still: z.string().regex(NOTE_STILL),
   createdAt: z.string(),
   /** The send round that took it to Claude; null until sent. */
   round: z.number().int().positive().nullable(),

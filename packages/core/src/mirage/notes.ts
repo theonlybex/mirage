@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { NoteSchema, NotesFileSchema, type LogEntry, type Note } from '@wordedits/shared';
+import { NOTE_STILL, NoteSchema, NotesFileSchema, type LogEntry, type Note } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { MirageError } from './errors.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
@@ -68,6 +68,8 @@ export async function updateNote(project: string, n: number, id: string, patch: 
 export async function deleteNote(project: string, n: number, id: string): Promise<void> {
   const notes = await readNotes(project, n);
   const note = find(notes, id);
+  // The schema already holds stills to notes/n<k>.jpg; checked again here because this removes a file.
+  if (!NOTE_STILL.test(note.still)) throw new MirageError('BAD_INPUT', `Note ${id} has a still outside notes/.`, 'Check notes.json.');
   await saveNotes(project, n, notes.filter((x) => x.id !== id));
   await rm(join(episodeDir(project, n), note.still), { force: true });
 }

@@ -23,31 +23,6 @@ Mac only for now (macOS 26 or later). Windows comes later.
 
 **Licence.** Mirage is AGPL-3.0-or-later. Contributions are welcome under the same licence, with a DCO sign-off (`git commit -s`); see `CONTRIBUTING.md`.
 
-## Make an episode from the command line (macOS 26+)
-
-```bash
-pnpm install && pnpm build:native
-pnpm mirage init ~/Mirage/weather-app --title "Weather app"
-pnpm mirage ingest ~/Mirage/weather-app ~/Movies/weather-app/batch-1
-# put music in ~/Mirage/weather-app/music, then:
-pnpm mirage music ~/Mirage/weather-app
-```
-
-Paths may be relative to the folder you run `pnpm` from; every command but `init` needs a folder made by `init`, and `init` never touches an existing project.
-
-`music` writes `music/library.json` with each track's tempo. Set every track's `mood` (`punchy`, `light`, `tension`, `upbeat`, `riser`, `reveal`, `relaxed`) and `licence` there (Claude picks music by mood). Ingest extracts still frames from every clip into `frames/`, and Claude reads them (they are sent to Anthropic) to describe your footage: don't record screens showing secrets.
-
-Then ask Claude (in this repo) to make episode 1: it describes your clips, writes `episodes/1/episode.json`, and runs `pnpm mirage cut` so you can watch the rough cut. When the cut is right it writes the narration lines (`slots`) and renders `guide.mp4`. Play the guide, narrate along in one take, then:
-
-```bash
-pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/voiceover.m4a
-pnpm mirage render ~/Mirage/weather-app 1
-```
-
-If some lines were missing, record just those (under a new file name, not over the first recording) and add them with `pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/missing.m4a --add`. `episodes/1/final.mp4` and `final.srt` are ready to upload. The workflow Claude follows is the plugin's `edit` skill, in `plugin/skills/edit/SKILL.md`.
-
-Design spec: `docs/superpowers/specs/2026-09-28-wordedits-design.md`. Plans: `docs/superpowers/plans/`.
-
 ## Develop
 
 ```bash
@@ -61,6 +36,26 @@ pnpm build:plugin     # rebuilds plugin/dist (the engine, hooks and viewer bundl
 `pnpm install` runs the `ffmpeg-static` postinstall script because `pnpm-workspace.yaml` allows builds for `ffmpeg-static` and `esbuild` (pnpm 12 blocks postinstall scripts otherwise).
 
 FFmpeg resolution order: `WORDEDITS_FFMPEG_DIR`, then PATH, then the `ffmpeg-static` package.
+
+`pnpm build:plugin` also writes `plugin/LICENSE` and `plugin/THIRD_PARTY_NOTICES.txt` (the licence of every npm package bundled into `plugin/dist`).
+
+### Developer CLI
+
+For working on the engine without Claude Code, the same steps run from the command line (macOS 26+). People making videos use the plugin; Claude runs these steps through its engine tools, never through `pnpm`.
+
+```bash
+pnpm build:native
+pnpm mirage init ~/Mirage/weather-app --title "Weather app"
+pnpm mirage ingest ~/Mirage/weather-app ~/Movies/weather-app/batch-1
+pnpm mirage music ~/Mirage/weather-app        # with tracks in ~/Mirage/weather-app/music
+pnpm mirage cut ~/Mirage/weather-app 1        # after writing episodes/1/episode.json
+pnpm mirage vo ~/Mirage/weather-app 1 ~/Desktop/voiceover.m4a
+pnpm mirage render ~/Mirage/weather-app 1
+```
+
+Paths may be relative to the folder you run `pnpm` from; every command but `init` needs a folder made by `init`, and `init` never touches an existing project. The workflow Claude follows is the plugin's `edit` skill, in `plugin/skills/edit/SKILL.md`.
+
+Design: `docs/superpowers/specs/2026-11-02-mirage-plugin-design.md` (the plugin) and `docs/superpowers/specs/2026-11-02-mirage-product-design.md` (the product). Plans: `docs/superpowers/plans/`.
 
 ## Layout
 

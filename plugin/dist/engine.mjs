@@ -913,11 +913,11 @@ var require_codegen = __commonJS({
         const rhs = this.rhs === void 0 ? "" : ` = ${this.rhs}`;
         return `${varKind} ${this.name}${rhs};` + _n;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants9) {
         if (!names[this.name.str])
           return;
         if (this.rhs)
-          this.rhs = optimizeExpr(this.rhs, names, constants8);
+          this.rhs = optimizeExpr(this.rhs, names, constants9);
         return this;
       }
       get names() {
@@ -934,10 +934,10 @@ var require_codegen = __commonJS({
       render({ _n }) {
         return `${this.lhs} = ${this.rhs};` + _n;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants9) {
         if (this.lhs instanceof code_1.Name && !names[this.lhs.str] && !this.sideEffects)
           return;
-        this.rhs = optimizeExpr(this.rhs, names, constants8);
+        this.rhs = optimizeExpr(this.rhs, names, constants9);
         return this;
       }
       get names() {
@@ -998,8 +998,8 @@ var require_codegen = __commonJS({
       optimizeNodes() {
         return `${this.code}` ? this : void 0;
       }
-      optimizeNames(names, constants8) {
-        this.code = optimizeExpr(this.code, names, constants8);
+      optimizeNames(names, constants9) {
+        this.code = optimizeExpr(this.code, names, constants9);
         return this;
       }
       get names() {
@@ -1028,12 +1028,12 @@ var require_codegen = __commonJS({
         }
         return nodes.length > 0 ? this : void 0;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants9) {
         const { nodes } = this;
         let i2 = nodes.length;
         while (i2--) {
           const n2 = nodes[i2];
-          if (n2.optimizeNames(names, constants8))
+          if (n2.optimizeNames(names, constants9))
             continue;
           subtractNames(names, n2.names);
           nodes.splice(i2, 1);
@@ -1086,12 +1086,12 @@ var require_codegen = __commonJS({
           return void 0;
         return this;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants9) {
         var _a3;
-        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants8);
-        if (!(super.optimizeNames(names, constants8) || this.else))
+        this.else = (_a3 = this.else) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants9);
+        if (!(super.optimizeNames(names, constants9) || this.else))
           return;
-        this.condition = optimizeExpr(this.condition, names, constants8);
+        this.condition = optimizeExpr(this.condition, names, constants9);
         return this;
       }
       get names() {
@@ -1114,10 +1114,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.iteration})` + super.render(opts);
       }
-      optimizeNames(names, constants8) {
-        if (!super.optimizeNames(names, constants8))
+      optimizeNames(names, constants9) {
+        if (!super.optimizeNames(names, constants9))
           return;
-        this.iteration = optimizeExpr(this.iteration, names, constants8);
+        this.iteration = optimizeExpr(this.iteration, names, constants9);
         return this;
       }
       get names() {
@@ -1153,10 +1153,10 @@ var require_codegen = __commonJS({
       render(opts) {
         return `for(${this.varKind} ${this.name} ${this.loop} ${this.iterable})` + super.render(opts);
       }
-      optimizeNames(names, constants8) {
-        if (!super.optimizeNames(names, constants8))
+      optimizeNames(names, constants9) {
+        if (!super.optimizeNames(names, constants9))
           return;
-        this.iterable = optimizeExpr(this.iterable, names, constants8);
+        this.iterable = optimizeExpr(this.iterable, names, constants9);
         return this;
       }
       get names() {
@@ -1198,11 +1198,11 @@ var require_codegen = __commonJS({
         (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
         return this;
       }
-      optimizeNames(names, constants8) {
+      optimizeNames(names, constants9) {
         var _a3, _b;
-        super.optimizeNames(names, constants8);
-        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants8);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants8);
+        super.optimizeNames(names, constants9);
+        (_a3 = this.catch) === null || _a3 === void 0 ? void 0 : _a3.optimizeNames(names, constants9);
+        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants9);
         return this;
       }
       get names() {
@@ -1503,7 +1503,7 @@ var require_codegen = __commonJS({
     function addExprNames(names, from) {
       return from instanceof code_1._CodeOrName ? addNames(names, from.names) : names;
     }
-    function optimizeExpr(expr, names, constants8) {
+    function optimizeExpr(expr, names, constants9) {
       if (expr instanceof code_1.Name)
         return replaceName(expr);
       if (!canOptimize(expr))
@@ -1518,14 +1518,14 @@ var require_codegen = __commonJS({
         return items;
       }, []));
       function replaceName(n2) {
-        const c3 = constants8[n2.str];
+        const c3 = constants9[n2.str];
         if (c3 === void 0 || names[n2.str] !== 1)
           return n2;
         delete names[n2.str];
         return c3;
       }
       function canOptimize(e) {
-        return e instanceof code_1._Code && e._items.some((c3) => c3 instanceof code_1.Name && names[c3.str] === 1 && constants8[c3.str] !== void 0);
+        return e instanceof code_1._Code && e._items.some((c3) => c3 instanceof code_1.Name && names[c3.str] === 1 && constants9[c3.str] !== void 0);
       }
     }
     function subtractNames(names, from) {
@@ -4414,50 +4414,50 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize2(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative2, options, skipNormalization) {
+    function resolveComponent(base, relative3, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize2(base, options), options);
-        relative2 = parse3(serialize2(relative2, options), options);
+        relative3 = parse3(serialize2(relative3, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative2.scheme) {
-        target.scheme = relative2.scheme;
-        target.userinfo = relative2.userinfo;
-        target.host = relative2.host;
-        target.port = relative2.port;
-        target.path = removeDotSegments(relative2.path || "");
-        target.query = relative2.query;
+      if (!options.tolerant && relative3.scheme) {
+        target.scheme = relative3.scheme;
+        target.userinfo = relative3.userinfo;
+        target.host = relative3.host;
+        target.port = relative3.port;
+        target.path = removeDotSegments(relative3.path || "");
+        target.query = relative3.query;
       } else {
-        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
-          target.userinfo = relative2.userinfo;
-          target.host = relative2.host;
-          target.port = relative2.port;
-          target.path = removeDotSegments(relative2.path || "");
-          target.query = relative2.query;
+        if (relative3.userinfo !== void 0 || relative3.host !== void 0 || relative3.port !== void 0) {
+          target.userinfo = relative3.userinfo;
+          target.host = relative3.host;
+          target.port = relative3.port;
+          target.path = removeDotSegments(relative3.path || "");
+          target.query = relative3.query;
         } else {
-          if (!relative2.path) {
+          if (!relative3.path) {
             target.path = base.path;
-            if (relative2.query !== void 0) {
-              target.query = relative2.query;
+            if (relative3.query !== void 0) {
+              target.query = relative3.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative2.path[0] === "/") {
-              target.path = removeDotSegments(relative2.path);
+            if (relative3.path[0] === "/") {
+              target.path = removeDotSegments(relative3.path);
             } else {
               const baseHasAuthority = base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0;
               if (baseHasAuthority && !base.path) {
-                target.path = "/" + relative2.path;
+                target.path = "/" + relative3.path;
               } else if (!base.path) {
-                target.path = relative2.path;
+                target.path = relative3.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative3.path;
               }
               target.path = base.scheme === void 0 && !baseHasAuthority && target.path[0] !== "/" ? removeDotSegmentsRelative(target.path) : removeDotSegments(target.path);
             }
-            target.query = relative2.query;
+            target.query = relative3.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -4465,7 +4465,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative2.fragment;
+      target.fragment = relative3.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -36197,7 +36197,7 @@ var MusicTrackSchema = strictObject2({
 var MusicLibrarySchema = strictObject2({ version: external_exports.literal(1), tracks: external_exports.array(MusicTrackSchema) });
 
 // packages/shared/src/schemas/version.ts
-var VersionKindSchema = external_exports.enum(["before", "checkpoint", "delivery"]);
+var VersionKindSchema = external_exports.enum(["before", "checkpoint", "delivery", "backup"]);
 var VersionMetaSchema = strictObject2({
   version: external_exports.literal(1),
   id: external_exports.string().min(1),
@@ -36255,6 +36255,11 @@ var SessionStateSchema = strictObject2({
   overnight: strictObject2({ videos: external_exports.array(external_exports.number().int().positive()), startedAt: external_exports.string() }).nullable(),
   awakePid: external_exports.number().int().nullable()
 });
+var SESSION_ID_PATTERN = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._-]*$/;
+var ClaudeProcessSchema = strictObject2({
+  sessionId: external_exports.string().regex(SESSION_ID_PATTERN),
+  updatedAt: external_exports.string()
+});
 
 // packages/shared/src/schemas/video.ts
 var VideoSchema = strictObject2({
@@ -36270,6 +36275,7 @@ var VideoSchema = strictObject2({
 
 // packages/shared/src/schemas/notes.ts
 var unit = external_exports.number().min(0).max(1);
+var NOTE_STILL = /^notes\/n[1-9]\d*\.jpg$/;
 var NoteSchema = strictObject2({
   /** n1, n2, … */
   id: external_exports.string().regex(/^n[1-9]\d*$/),
@@ -36278,8 +36284,8 @@ var NoteSchema = strictObject2({
   t: external_exports.number().min(0),
   text: external_exports.string().min(1).max(2e3),
   box: strictObject2({ x: unit, y: unit, w: unit, h: unit }).nullable(),
-  /** The frame grabbed at `t`, relative to the episode folder. */
-  still: external_exports.string(),
+  /** The frame grabbed at `t`, relative to the episode folder: notes/n<k>.jpg, never a path anywhere else. */
+  still: external_exports.string().regex(NOTE_STILL),
   createdAt: external_exports.string(),
   /** The send round that took it to Claude; null until sent. */
   round: external_exports.number().int().positive().nullable()
@@ -38955,10 +38961,11 @@ import { randomBytes, randomUUID as randomUUID6 } from "node:crypto";
 import { access as access3, copyFile, link, mkdir as mkdir5, readdir as readdir4, readFile as readFile5, rename as rename4, rm as rm6, writeFile as writeFile5 } from "node:fs/promises";
 import { join as join9 } from "node:path";
 var MAX_CHECKPOINTS = 50;
+var MAX_BACKUPS = 20;
 var DEFAULT_WAIT_MS = 3e4;
 var RETRY_MS = 250;
 var STATE_FILES = ["episode.json", "summary.md"];
-var ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery)-[0-9a-f]{4}$/;
+var ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
 var versionsDir = (project2, n2) => join9(episodeDir(project2, n2), "versions");
 async function readBytes(path6) {
   try {
@@ -39063,7 +39070,8 @@ async function snapshotLocked(project2, n2, o2) {
     };
     await writeJsonFile(join9(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
     await rename4(tmp, join9(root, id));
-    if (o2.kind === "checkpoint") await pruneCheckpoints(project2, n2);
+    if (o2.kind === "checkpoint") await prune(project2, n2, "checkpoint", MAX_CHECKPOINTS);
+    if (o2.kind === "backup") await prune(project2, n2, "backup", MAX_BACKUPS);
     return meta3;
   } catch (e) {
     await rm6(tmp, { recursive: true, force: true }).catch(() => {
@@ -39071,9 +39079,9 @@ async function snapshotLocked(project2, n2, o2) {
     throw e;
   }
 }
-async function pruneCheckpoints(project2, n2) {
-  const checkpoints = (await listLocked(project2, n2)).filter((v) => v.kind === "checkpoint");
-  for (const old of checkpoints.slice(0, Math.max(0, checkpoints.length - MAX_CHECKPOINTS))) {
+async function prune(project2, n2, kind, keep) {
+  const ofKind = (await listLocked(project2, n2)).filter((v) => v.kind === kind);
+  for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
     await rm6(join9(versionsDir(project2, n2), old.id), { recursive: true, force: true });
   }
 }
@@ -39086,7 +39094,7 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
     if (!restored) throw new MirageError("BAD_INPUT", `episodes/${n2} has no saved version "${id}"`, "List the versions and pick one of those.");
     const from = join9(versionsDir(project2, n2), id);
     const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join9(from, f))));
-    const backup = await snapshotLocked(project2, n2, { kind: "checkpoint", label: `Before going back to \u201C${restored.label}\u201D` });
+    const backup = await snapshotLocked(project2, n2, { kind: "backup", label: `Before going back to \u201C${restored.label}\u201D` });
     const dir = episodeDir(project2, n2);
     for (const [i2, f] of STATE_FILES.entries()) {
       const b = bytes[i2];
@@ -39098,7 +39106,8 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
 }
 
 // packages/core/src/mirage/session-files.ts
-import { appendFile, link as link2, mkdir as mkdir6, readdir as readdir5, readFile as readFile6, rename as rename5, rm as rm7, stat as stat4 } from "node:fs/promises";
+import { readFileSync as readFileSync3 } from "node:fs";
+import { appendFile, link as link2, mkdir as mkdir6, readdir as readdir5, readFile as readFile6, rename as rename5, rm as rm7, stat as stat4, utimes, writeFile as writeFile6 } from "node:fs/promises";
 import { dirname as dirname2, join as join10, resolve as resolve7 } from "node:path";
 var SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 function checkSessionId(id) {
@@ -39129,20 +39138,45 @@ async function readControlFile(path6) {
     return null;
   }
 }
-async function claimedControl(project2, n2) {
+var CLAIM_STALE_MS = 6e4;
+var claimedAt = (name, mtime) => {
+  const m = /^control\.json\.take-(\d{13})-/.exec(name);
+  return m ? Number(m[1]) : mtime;
+};
+async function writeControlIfNone(path6, control) {
+  try {
+    await writeFile6(path6, JSON.stringify(ControlSchema.parse(control), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
+}
+async function claimedControl(project2, n2, written) {
   const dir = episodeDir(project2, n2);
   const names = (await readdir5(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
   let best = null;
+  const stale = [];
   for (const name of names) {
+    const info = await stat4(join10(dir, name)).catch(() => null);
+    if (!info) continue;
+    if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
+    if (written) continue;
     const control = await readControlFile(join10(dir, name));
-    if (!control) continue;
-    const mtime = (await stat4(join10(dir, name)).catch(() => null))?.mtimeMs ?? 0;
-    if (!best || mtime > best.mtime) best = { control, mtime };
+    if (control && (!best || info.mtimeMs > best.mtime)) best = { control, mtime: info.mtimeMs };
   }
-  return best ? { ...best.control, correction: null } : null;
+  const claimed = best ? { ...best.control, correction: null } : null;
+  if (stale.length) {
+    try {
+      if (claimed && stale.length === names.length) await writeControlIfNone(controlPath(project2, n2), claimed);
+      for (const name of stale) await rm7(join10(dir, name), { force: true });
+    } catch {
+    }
+  }
+  return claimed;
 }
 async function readWrittenControl(project2, n2) {
-  return await readControlFile(controlPath(project2, n2)) ?? await claimedControl(project2, n2);
+  const written = await readControlFile(controlPath(project2, n2));
+  const claimed = await claimedControl(project2, n2, written !== null);
+  return written ?? claimed;
 }
 async function readControl(project2, n2) {
   return await readWrittenControl(project2, n2) ?? defaultControl();
@@ -39163,6 +39197,18 @@ async function writeSessionState(project2, sessionId, patch) {
   await mkdir6(dirname2(path6), { recursive: true });
   await writeJsonFile(path6, SessionStateSchema, next, `.mirage/sessions/${sessionId}.json`);
   return next;
+}
+function claudeProcessPath(project2, pid) {
+  if (!Number.isInteger(pid) || pid <= 0) throw new MirageError("BAD_INPUT", `"${pid}" is not a process id`, "A process id is a whole number above 0.");
+  return join10(resolve7(project2), ".mirage", "claude", `${pid}.json`);
+}
+function readClaudeProcess(project2, pid) {
+  try {
+    const r = ClaudeProcessSchema.safeParse(JSON.parse(readFileSync3(claudeProcessPath(project2, pid), "utf8")));
+    return r.success ? r.data.sessionId : null;
+  } catch {
+    return null;
+  }
 }
 
 // packages/core/src/mirage/video.ts
@@ -39296,9 +39342,9 @@ function voReport(report, n2) {
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
 // packages/mcp/src/server.ts
-import { existsSync as existsSync7, readdirSync, statSync as statSync3 } from "node:fs";
-import { access as access5, constants as constants7, readdir as readdir8 } from "node:fs/promises";
-import { join as join14, resolve as resolve9 } from "node:path";
+import { existsSync as existsSync7, readdirSync, realpathSync, statSync as statSync3 } from "node:fs";
+import { access as access6, constants as constants8, readdir as readdir8 } from "node:fs/promises";
+import { isAbsolute as isAbsolute2, join as join14, relative as relative2, resolve as resolve9, sep } from "node:path";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v3/helpers/util.js
 var util;
@@ -47346,7 +47392,7 @@ var EMPTY_COMPLETION_RESULT = {
 
 // packages/mcp/src/preflight.ts
 import { execFile, spawn as spawn2 } from "node:child_process";
-import { readdir as readdir7, stat as stat5, statfs } from "node:fs/promises";
+import { access as access5, constants as constants7, readdir as readdir7, stat as stat5, statfs } from "node:fs/promises";
 import { join as join13 } from "node:path";
 import { promisify as promisify3 } from "node:util";
 var GB = 1024 ** 3;
@@ -47360,6 +47406,7 @@ async function preflight(o2) {
   for (const tool of ["ffmpeg", "ffprobe"]) {
     if (!await deps.which(tool)) problems.push(`${tool} isn't installed. Run /mirage:setup.`);
   }
+  if (!await deps.transcriber()) problems.push("The speech helper isn't built yet. Run /mirage:status.");
   return { ok: problems.length === 0, problems };
 }
 var execFileAsync = promisify3(execFile);
@@ -47389,7 +47436,8 @@ function realPreflightDeps() {
       const video2 = await readVideo(project2, n2).catch(() => null);
       return (await Promise.all((video2?.footage ?? []).map(folderBytes))).reduce((a2, b) => a2 + b, 0);
     },
-    which: (cmd) => locate(cmd).then(() => true, () => false)
+    which: (cmd) => locate(cmd).then(() => true, () => false),
+    transcriber: () => access5(transcriberPath(), constants7.X_OK).then(() => true, () => false)
   };
 }
 function startCaffeinate() {
@@ -47450,7 +47498,6 @@ async function runLong(o2) {
 }
 
 // packages/mcp/src/server.ts
-var DAY_MS = 24 * 36e5;
 var SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 function newestSessionId(project2) {
   const dir = join14(resolve9(project2), ".mirage", "sessions");
@@ -47470,10 +47517,18 @@ function newestSessionId(project2) {
     } catch {
       continue;
     }
-    if (Date.now() - mtime > DAY_MS) continue;
     if (!best || mtime > best.mtime) best = { id, mtime };
   }
   return best?.id ?? null;
+}
+function footageProblem(folder, project2) {
+  if (!existsSync7(folder)) return `\u2716 ${folder} does not exist`;
+  if (!statSync3(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
+  const rel = relative2(realpathSync(folder), realpathSync(project2));
+  if (rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute2(rel)) {
+    return `\u2716 ${folder} holds this project. Make a new folder for the series, open Claude Code there, and add the clips folder from there.`;
+  }
+  return null;
 }
 var ok = (lines) => ({ content: [{ type: "text", text: Array.isArray(lines) ? lines.join("\n") : lines }] });
 var STOPPED = "\u2716 Stopped by the person before it finished. Nothing was changed.";
@@ -47505,7 +47560,8 @@ function createEngineServer(ctx) {
   const { tools } = ctx;
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
-  const knownSession = ctx.sessionId ?? (() => newestSessionId(project2));
+  const ppid = ctx.ppid ?? process.ppid;
+  const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project2, ppid) ?? newestSessionId(project2));
   const sid = () => knownSession() ?? "unknown";
   const server = new McpServer({ name: "engine", version: "0.0.1" });
   function tool(name, description, inputSchema, run2, needsProject = true) {
@@ -47550,8 +47606,11 @@ function createEngineServer(ctx) {
     },
     async (a2) => {
       const folders = a2.footage.map((f) => resolveUserPath(f, project2));
-      const missing = folders.filter((f) => !existsSync7(f));
-      if (missing.length) return { content: [{ type: "text", text: missing.map((f) => `\u2716 ${f} does not exist`).join("\n") }], isError: true };
+      const refused = folders.flatMap((f) => {
+        const why = footageProblem(f, project2);
+        return why ? [why] : [];
+      });
+      if (refused.length) return { content: [{ type: "text", text: refused.join("\n") }], isError: true };
       const n2 = await newVideo(project2, { title: a2.title, about: a2.about, mention: a2.mention ?? "", hide: a2.hide ?? "", footage: folders });
       await writeSessionState(project2, sid(), { video: n2 });
       return ok(`video ${n2} created`);
@@ -47688,7 +47747,7 @@ function createEngineServer(ctx) {
     const viewer = await readJsonFile(join14(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
     lines.push(viewer && alive2(viewer.pid) ? `Viewer: running at ${viewer.url}` : "Viewer: not running");
     for (const t of ["ffmpeg", "ffprobe"]) lines.push(`${t}: ${await deps.which(t) ? "ok" : "missing"}`);
-    lines.push(`transcriber: ${await access5(transcriberPath(), constants7.X_OK).then(() => true, () => false) ? "ok" : "missing"}`);
+    lines.push(`transcriber: ${await access6(transcriberPath(), constants8.X_OK).then(() => true, () => false) ? "ok" : "missing"}`);
     lines.push(Number(process.versions.node.split(".")[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
   }, false);

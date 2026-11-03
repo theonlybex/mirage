@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { NoteSchema } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { addNote, deleteNote, noteStatuses, readNotes, sendNotes, updateNote } from './notes.js';
 import { appendLog, sessionDir } from './session-files.js';
@@ -52,6 +53,19 @@ describe('notes', () => {
     await add(dir, tools);
     await deleteNote(dir, 1, 'n2');
     expect((await add(dir, tools)).id).toBe('n4');
+  });
+
+  it('a still is notes/n<k>.jpg and nothing else: deleteNote refuses a notes.json pointing anywhere else, and removes nothing', async () => {
+    const dir = await project();
+    const note = { id: 'n1', versionId: 'v1', t: 1, text: 'x', box: null, still: 'notes/n1.jpg', createdAt: new Date().toISOString(), round: null };
+    expect(NoteSchema.safeParse(note).success).toBe(true);
+    for (const still of ['../../mirage.json', 'notes/../video.json', '/etc/hosts', 'notes/n1.png', 'notes/n0.jpg', 'notes/n1.jpg/x', 'video.json']) {
+      expect(NoteSchema.safeParse({ ...note, still }).success, still).toBe(false);
+    }
+    await writeFile(join(dir, 'mirage.json'), '{"keep":true}');
+    await writeFile(join(dir, 'episodes', '1', 'notes.json'), JSON.stringify({ version: 1, notes: [{ ...note, still: '../../mirage.json' }] }));
+    await expect(deleteNote(dir, 1, 'n1')).rejects.toThrow();
+    expect(await readFile(join(dir, 'mirage.json'), 'utf8')).toBe('{"keep":true}');
   });
 
   it('saves nothing when the still cannot be grabbed or the note is invalid', async () => {
