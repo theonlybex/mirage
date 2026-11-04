@@ -111,4 +111,8 @@ ctl() { curl -s -X POST "$BASE/api/control" -H "x-mirage-key: $KEY" -H 'content-
 
 ### Results
 
-Not run yet.
+Run 2026-11-03 with Claude Code 2.1.284 (terminal) and the desktop app (Claude Code 2.1.309).
+
+- **1. Plugin loads (partial).** `claude -p --plugin-dir ./plugin --output-format stream-json` reports `plugin:mirage:engine` as `connected`, the 17 engine tools and the six `mirage:*` skills. The plugin's data folder is `~/.claude/plugins/data/mirage-inline`, and no `hook-errors.log` appeared. The model turn didn't run because the terminal `claude` sign-in had expired, so `/mirage:status` is still to do.
+- **4. Browser pane: passed.** The desktop app's browser pane opened `http://127.0.0.1:<port>/?k=…` from a real engine, viewer and hooks run (the e2e driver's set-up). The video list and the Edit tab showed, a new step appeared live 40 s later through the event stream, and the rough cut played on Review (`readyState` 4). No fallback is needed.
+- **5. Node from the Dock: fixed.** This app's own `claude` gets a full PATH (it includes `~/.local/node/bin`). With launchd's short PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), though, `scripts/node` found no Node: this Mac's Node is in `~/.local/node/bin`, which wasn't on its list. It now looks there last, with a test, and `/mirage:setup` says where it looks (commit e2bdea4).
