@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Runs the Node.js 22 or later it can find, with all the arguments given: Mirage's hooks, engine and viewer start through
 # this, so they work whether or not Node is on the PATH Claude Code was started with.
-# Looked at in order: PATH, /opt/homebrew/bin/node, /usr/local/bin/node, the newest ~/.nvm/versions/node/*/bin/node, ~/.volta/bin/node.
+# Looked at in order: PATH, /opt/homebrew/bin/node, /usr/local/bin/node, the newest ~/.nvm/versions/node/*/bin/node,
+# ~/.volta/bin/node, ~/.local/node/bin/node.
 # MIRAGE_NODE_FIXED replaces the two fixed locations (a space-separated list); the tests use it.
 
 # Whether $1 is a Node of version 22 or later.
@@ -35,7 +36,9 @@ find_node() {
       done
     )
     if [ -n "$p" ]; then NODE=$p; return 0; fi
-    if usable "$home/.volta/bin/node"; then NODE=$home/.volta/bin/node; return 0; fi
+    for p in "$home/.volta/bin/node" "$home/.local/node/bin/node"; do
+      if usable "$p"; then NODE=$p; return 0; fi
+    done
   fi
   return 1
 }

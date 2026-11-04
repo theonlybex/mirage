@@ -68,6 +68,8 @@ node --version    # needs v22 or later
   - Then `brew install node`.
 - **Windows:** `winget install OpenJS.NodeJS.LTS`.
 
+**If `node --version` works in the terminal but Mirage still says it needs Node:** the Claude desktop app, opened from the Dock, may not see the terminal's PATH. Mirage then looks in `/opt/homebrew/bin`, `/usr/local/bin`, the newest nvm Node, `~/.volta/bin` and `~/.local/node/bin`. Run `command -v node`. If it's somewhere else, Homebrew's Node (`brew install node`) is the simplest fix.
+
 ---
 
 ## Step 2 · Claude Code (job 1, the editor; required now)

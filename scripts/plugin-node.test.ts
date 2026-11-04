@@ -86,6 +86,14 @@ describe('plugin/scripts/node', () => {
     expect((await run({ home })).out).toBe('v22.1.0 a script.mjs two\n');
   });
 
+  it('falls back last to a Node unpacked in ~/.local/node', async () => {
+    const home = await tmp();
+    await fakeNode(join(home, '.local/node/bin/node'), 'v24.18.0');
+    expect((await run({ home })).out).toBe('v24.18.0 a script.mjs two\n');
+    await fakeNode(join(home, '.volta/bin/node'), 'v23.0.0');
+    expect((await run({ home })).out).toBe('v23.0.0 a script.mjs two\n');
+  });
+
   it('ignores a "node" that prints nothing like a version', async () => {
     const bin = await tmp();
     await fakeNode(join(bin, 'node'), 'banana');
