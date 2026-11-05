@@ -40,7 +40,7 @@ It proves:
 
 **What it doesn't prove:** anything about Claude Code itself. It doesn't show that Claude Code expands the variables, runs the hooks and monitor, honours the PreToolUse decision and timeout, or turns a monitor line into a turn the way the driver assumes. The checks below cover that.
 
-## Real Claude Code checks (not run yet — needs the person's go-ahead)
+## Real Claude Code checks (run 2026-11-03 and 2026-11-04; results below)
 
 These spend a little of the person's own plan usage, so they wait for a yes. Run them from the worktree, with `plugin/` built (`pnpm build:plugin`). On this machine ffmpeg isn't on PATH. Start Claude Code with `WORDEDITS_FFMPEG_DIR` set to a folder holding `ffmpeg` and `ffprobe`, or install ffmpeg (`brew install ffmpeg`).
 
@@ -51,7 +51,7 @@ URL=$(node -p "require('./.mirage/viewer.json').url"); BASE=${URL%%/\?k=*}; KEY=
 ctl() { curl -s -X POST "$BASE/api/control" -H "x-mirage-key: $KEY" -H 'content-type: application/json' -d "$1"; echo; }
 ```
 
-- [ ] **1. The plugin loads; the engine connects.**
+- [x] **1. The plugin loads; the engine connects.**
   - Steps:
     ```sh
     PLUGIN="$PWD/plugin"          # in the worktree
@@ -65,7 +65,7 @@ ctl() { curl -s -X POST "$BASE/api/control" -H "x-mirage-key: $KEY" -H 'content-
     - No `${CLAUDE_PLUGIN_DATA}/hook-errors.log` appears.
   - If it fails: §7 has no fallback for this one. It's a blocker, fixed in this task. Run `claude --debug --plugin-dir "$PLUGIN"` to see why the server or hooks didn't start, and check that `claude plugin validate ./plugin` passes. Look for a variable not expanded, or Node not found (see check 5).
 
-- [ ] **2. A PreToolUse hold of 11 minutes lets the step run afterwards.**
+- [x] **2. A PreToolUse hold of 11 minutes lets the step run afterwards.**
   - Steps:
     1. In a Mirage project with a video (make one with `/mirage:edit` on two short clips, or reuse the one from check 3), with Claude Code idle:
        ```sh
@@ -93,12 +93,12 @@ ctl() { curl -s -X POST "$BASE/api/control" -H "x-mirage-key: $KEY" -H 'content-
   - Expected: a new turn starts on its own in both, with Claude acting on the line. Write down terminal: yes/no, desktop app: yes/no.
   - If it fails (the line waits until the person types): use §7's fallback, the "Tell Claude: …" text. When Claude is idle, the viewer shows the text to paste into Claude Code (with a Copy button) instead of relying on the line. This applies to sent notes, corrections, a dropped voice-over and overnight. The fix lands in the viewer page (`packages/viewer/src/ui`, the notes, correction and voice-over controls) and in `api.ts`'s answers, with tests and a `pnpm build:plugin`.
 
-- [ ] **4. The desktop app's browser pane opens the viewer.**
+- [x] **4. The desktop app's browser pane opens the viewer.**
   - Steps: in the desktop app, in a Mirage project, run `/mirage:edit` (or ask "open Mirage's viewer"). Claude opens the `http://127.0.0.1:<port>/?k=…` address in the browser pane.
   - Expected: the page loads in the pane, the video list or Edit tab shows, and the timeline updates live.
   - If it fails (the pane refuses `127.0.0.1`, or loads it without the event stream): use §7's fallback, the system browser. The edit skill and the viewer's first line say to run `open "<url>"` in the desktop app too. The fix lands in `plugin/skills/edit/SKILL.md` and the line in `packages/viewer/src/server/server.ts`, with a `pnpm build:plugin`.
 
-- [ ] **5. With the desktop app launched from the Dock, `scripts/node` finds Node.**
+- [x] **5. With the desktop app launched from the Dock, `scripts/node` finds Node.**
   - Steps:
     1. Quit the Claude desktop app completely, then start it from the Dock (not from a terminal), so it gets launchd's short PATH.
     2. Open a Mirage project folder in the Code tab, then run `/mcp` and `/mirage:status`.
@@ -111,8 +111,14 @@ ctl() { curl -s -X POST "$BASE/api/control" -H "x-mirage-key: $KEY" -H 'content-
 
 ### Results
 
-Run 2026-11-03 with Claude Code 2.1.284 (terminal) and the desktop app (Claude Code 2.1.309).
+Run 2026-11-03 and 2026-11-04 with Claude Code 2.1.284–2.1.318 (terminal, signed in with a Claude plan, model haiku) and the desktop app (Claude Code 2.1.309). Nested runs used `env -i` with just `HOME`, `USER`, `TERM`, `SHELL`, `PATH` and `WORDEDITS_FFMPEG_DIR`: the desktop app's own `ANTHROPIC_*`/`CLAUDE_CODE_*` variables otherwise break a nested `claude`'s sign-in.
 
-- **1. Plugin loads (partial).** `claude -p --plugin-dir ./plugin --output-format stream-json` reports `plugin:mirage:engine` as `connected`, the 17 engine tools and the six `mirage:*` skills. The plugin's data folder is `~/.claude/plugins/data/mirage-inline`, and no `hook-errors.log` appeared. The model turn didn't run because the terminal `claude` sign-in had expired, so `/mirage:status` is still to do.
+- **1. Plugin loads: passed.** `plugin:mirage:engine` is `connected`, with the 17 engine tools and the six `mirage:*` skills. The plugin's data folder is `~/.claude/plugins/data/mirage-inline`, and no `hook-errors.log` appeared. `/mirage:status` called `mcp__plugin_mirage_engine__status` ("No Mirage project here yet", ffmpeg and ffprobe ok, transcriber missing, Node v24.18.0 ok), ran `xcode-select -p`, and explained the result.
+- **2. Long hold: passed.** With `pause: after-step` set, Claude's `check` call was held by the PreToolUse hook for 677 s (over 11 minutes). Claude Code didn't time the hook out or cancel the turn. After `resume`, `check` ran and the session finished 4 s later. No 9-minute re-armed hold is needed.
+- **3. Monitor line wakes an idle session: passed in the terminal; desktop app not confirmed.**
+  - **Terminal (interactive `claude --plugin-dir`): yes.** The monitor started the viewer once the folder was trusted, and its first line reached Claude. With Claude idle, a correction through `/api/control` started a new turn by itself: Claude loaded `mirage:notes` and `mirage:edit`, trimmed the opening item from 5 s to 3 s and re-rendered the rough cut.
+  - **Plugin monitors don't start in `-p` mode** (documented), **nor in `--input-format stream-json --output-format stream-json` without `-p`.** The desktop app runs Claude Code in that stream-json mode. If the desktop app's Code tab doesn't start plugin monitors either, there is no viewer there at all, not just no wake-up. That needs a real desktop session with Mirage installed from a marketplace (`--plugin-dir` can't be passed there). If it fails, §7's "Tell Claude: …" fallback isn't enough on its own: the viewer would also need starting another way (for example by the engine, or by the edit skill running the viewer command in the background).
+- **4. Browser pane: passed.** The desktop app's browser pane opened `http://127.0.0.1:<port>/?k=…` from a real engine, viewer and hooks run (the e2e driver's set-up). The video list and the Edit tab showed, a new step appeared live 40 s later through the event stream, and the rough cut played on Review (`readyState` 4). No fallback is needed.
+- **5. Node from the Dock: fixed.** This app's own `claude` gets a full PATH (it includes `~/.local/node/bin`). With launchd's short PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), though, `scripts/node` found no Node: this Mac's Node is in `~/.local/node/bin`, which wasn't on its list. It now looks there last, with a test, and `/mirage:setup` says where it looks (commit e2bdea4). A real Dock-launched desktop session with Mirage installed is still to do, together with check 3's desktop half.
 - **4. Browser pane: passed.** The desktop app's browser pane opened `http://127.0.0.1:<port>/?k=…` from a real engine, viewer and hooks run (the e2e driver's set-up). The video list and the Edit tab showed, a new step appeared live 40 s later through the event stream, and the rough cut played on Review (`readyState` 4). No fallback is needed.
 - **5. Node from the Dock: fixed.** This app's own `claude` gets a full PATH (it includes `~/.local/node/bin`). With launchd's short PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), though, `scripts/node` found no Node: this Mac's Node is in `~/.local/node/bin`, which wasn't on its list. It now looks there last, with a test, and `/mirage:setup` says where it looks (commit e2bdea4).

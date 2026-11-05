@@ -18,7 +18,7 @@ Call `mcp__plugin_mirage_engine__status` (no input) and explain what it says in 
 - `Viewer: running at <url>`: offer to open it (in the Claude desktop app, the browser pane; in the terminal, `open "<url>"` with Bash). `Viewer: not running`: it starts the next time they open Claude Code in this folder.
 - The tool lines:
   - `ffmpeg: missing` or `ffprobe: missing`: Mirage can't read or render video. Suggest `/mirage:setup`.
-  - `transcriber: missing`: run `xcode-select -p` with Bash. If it fails, say "Speech recognition needs Xcode Command Line Tools: run `xcode-select --install`". If it works, the speech helper is built when Claude Code starts (about 30 seconds the first time): suggest starting a new session in a minute.
+  - `transcriber: missing`: run `xcode-select -p` with Bash. If it fails, say "Speech recognition needs Xcode Command Line Tools: run `xcode-select --install`". If it works, the speech helper is built when Claude Code starts in a Mirage project (about 30 seconds the first time): suggest starting a new session in a minute.
   - `Node: … is too old`: Mirage needs Node 22 or newer. Suggest `/mirage:setup`.
 
 If everything is fine, say so in one line.
