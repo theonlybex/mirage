@@ -9,7 +9,7 @@ import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
-import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover } from './voiceover.js';
 
@@ -90,6 +90,16 @@ describe('itemChunkArgs', () => {
     const h = ep([{ id: 'h', beat: 'problem', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep', hold: 0.5 }]);
     const g = itemChunkArgs(layoutTimeline(h), { width: 960, height: 540, fps: 30 }, sourcesFor(h, cat), '/w/c.mov');
     expect(g[g.indexOf('-filter_complex') + 1]).toContain('aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2.5,asetpts=PTS-STARTPTS[a0]');
+  });
+});
+
+describe('previewSize', () => {
+  it('keeps the output shape, with its longer side 960 and both sides even', () => {
+    expect(previewSize(1920, 1080)).toEqual([960, 540]);
+    expect(previewSize(1080, 1920)).toEqual([540, 960]);
+    expect(previewSize(1080, 1080)).toEqual([960, 960]);
+    expect(previewSize(1080, 1350)).toEqual([768, 960]);
+    expect(previewSize(640, 360)).toEqual([640, 360]);
   });
 });
 

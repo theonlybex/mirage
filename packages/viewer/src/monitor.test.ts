@@ -44,6 +44,20 @@ describe('startWhenProject', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it('waits while ready() says no, then starts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-monitor-'));
+    await writeFile(join(dir, 'mirage.json'), '{}');
+    let ready = false;
+    const start = vi.fn(async () => fakeViewer());
+    const m = startWhenProject({ project: dir, intervalMs: 20, start, ready: () => ready });
+    await sleep(100);
+    expect(start).not.toHaveBeenCalled();
+    ready = true;
+    await m.started;
+    expect(start).toHaveBeenCalledTimes(1);
+    await m.stop();
+  });
+
   it('closes a viewer that was still starting when stop() came', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-monitor-'));
     await writeFile(join(dir, 'mirage.json'), '{}');

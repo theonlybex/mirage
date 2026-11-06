@@ -150,6 +150,13 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
   ];
 }
 
+/** The rough cut's size: the output's shape with its longer side at most 960, both sides even (1920×1080 → 960×540, 1080×1920 → 540×960). */
+export function previewSize(width: number, height: number): [number, number] {
+  const scale = Math.min(1, 960 / Math.max(width, height));
+  const even = (n: number) => Math.max(2, Math.round((n * scale) / 2) * 2);
+  return [even(width), even(height)];
+}
+
 /** Time allowed for one chunk: decoding grows with the source seconds read, encoding with the output seconds written. */
 export function chunkTimeoutMs(chunk: LaidItem[], fps: number): number {
   const srcSec = chunk.reduce((s, l) => s + (l.item.src.out - l.item.src.in), 0);
@@ -384,7 +391,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   const D = laid[laid.length - 1].end;
   const fps = ep.output.fps;
   const final = o.mode === 'final';
-  const [W, H] = final ? [ep.output.width, ep.output.height] : [960, 540];
+  const [W, H] = final ? [ep.output.width, ep.output.height] : previewSize(ep.output.width, ep.output.height);
   const dir = episodeDir(project, o.episode);
   // Everything below is checked before any rendering, so a missing file fails fast.
   const musicDir = resolve(o.musicDir ?? join(project, 'music'));

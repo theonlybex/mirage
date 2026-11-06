@@ -516,7 +516,7 @@ var require_cross_spawn = __commonJS({
     var cp = __require("child_process");
     var parse3 = require_parse();
     var enoent = require_enoent();
-    function spawn3(command, args, options) {
+    function spawn4(command, args, options) {
       const parsed = parse3(command, args, options);
       const spawned = cp.spawn(parsed.command, parsed.args, parsed.options);
       enoent.hookChildProcess(spawned, parsed);
@@ -528,8 +528,8 @@ var require_cross_spawn = __commonJS({
       result.error = result.error || enoent.verifyENOENTSync(result.status, parsed);
       return result;
     }
-    module.exports = spawn3;
-    module.exports.spawn = spawn3;
+    module.exports = spawn4;
+    module.exports.spawn = spawn4;
     module.exports.sync = spawnSync2;
     module.exports._parse = parse3;
     module.exports._enoent = enoent;
@@ -38630,6 +38630,11 @@ function itemChunkArgs(laid, o2, sources, output2) {
     output2
   ];
 }
+function previewSize(width, height) {
+  const scale = Math.min(1, 960 / Math.max(width, height));
+  const even2 = (n2) => Math.max(2, Math.round(n2 * scale / 2) * 2);
+  return [even2(width), even2(height)];
+}
 function chunkTimeoutMs(chunk, fps) {
   const srcSec = chunk.reduce((s, l) => s + (l.item.src.out - l.item.src.in), 0);
   const outSec = chunk.reduce((s, l) => s + l.frames / fps, 0);
@@ -38790,7 +38795,7 @@ async function renderLocked(o2) {
   const D = laid[laid.length - 1].end;
   const fps = ep.output.fps;
   const final = o2.mode === "final";
-  const [W, H] = final ? [ep.output.width, ep.output.height] : [960, 540];
+  const [W, H] = final ? [ep.output.width, ep.output.height] : previewSize(ep.output.width, ep.output.height);
   const dir = episodeDir(project2, o2.episode);
   const musicDir = resolve3(o2.musicDir ?? join7(project2, "music"));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
@@ -39504,10 +39509,33 @@ function voReport(report, n2) {
 // packages/core/src/mirage/report.ts
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
+// packages/mcp/src/fallback-viewer.ts
+import { spawn as spawn2 } from "node:child_process";
+import { existsSync as existsSync7 } from "node:fs";
+import { dirname as dirname3, join as join15 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+function fallbackViewerArgs(o2) {
+  if (o2.env.MIRAGE_FALLBACK_VIEWER === "0") return null;
+  const exists3 = o2.exists ?? existsSync7;
+  const script = join15(o2.here, "viewer.mjs");
+  const ui = join15(o2.here, "viewer-ui");
+  if (!exists3(script) || !exists3(ui)) return null;
+  const data = o2.env.MIRAGE_PLUGIN_DATA;
+  return [script, "--project", o2.project, "--ui", ui, ...data ? ["--data", data] : [], "--fallback"];
+}
+function startFallbackViewer(project2) {
+  const args = fallbackViewerArgs({ here: dirname3(fileURLToPath3(import.meta.url)), project: project2, env: process.env });
+  if (!args) return;
+  const child = spawn2(process.execPath, args, { stdio: ["pipe", "ignore", "inherit"], windowsHide: true });
+  child.on("error", (e) => console.error(`mirage engine: the viewer didn't start: ${e.message}`));
+  child.unref();
+  child.stdin?.unref();
+}
+
 // packages/mcp/src/server.ts
-import { existsSync as existsSync7, readdirSync, realpathSync, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync8, readdirSync, realpathSync, statSync as statSync3 } from "node:fs";
 import { readdir as readdir8 } from "node:fs/promises";
-import { isAbsolute as isAbsolute2, join as join16, relative as relative2, resolve as resolve9, sep } from "node:path";
+import { isAbsolute as isAbsolute2, join as join17, relative as relative2, resolve as resolve9, sep } from "node:path";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v3/helpers/util.js
 var util;
@@ -47554,9 +47582,9 @@ var EMPTY_COMPLETION_RESULT = {
 };
 
 // packages/mcp/src/preflight.ts
-import { execFile, spawn as spawn2 } from "node:child_process";
+import { execFile, spawn as spawn3 } from "node:child_process";
 import { readdir as readdir7, stat as stat5, statfs } from "node:fs/promises";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 import { promisify as promisify3 } from "node:util";
 var GB = 1024 ** 3;
 async function preflight(o2) {
@@ -47577,7 +47605,7 @@ var execFileAsync = promisify3(execFile);
 async function folderBytes(dir) {
   let total = 0;
   for (const e of await readdir7(dir, { withFileTypes: true }).catch(() => [])) {
-    const path6 = join15(dir, e.name);
+    const path6 = join16(dir, e.name);
     if (e.isDirectory()) total += await folderBytes(path6);
     else if (e.isFile()) total += (await stat5(path6).catch(() => null))?.size ?? 0;
   }
@@ -47608,7 +47636,7 @@ function realPreflightDeps() {
   };
 }
 function startCaffeinate() {
-  const child = spawn2("caffeinate", ["-i", "-w", String(process.pid)], { detached: true, stdio: "ignore" });
+  const child = spawn3("caffeinate", ["-i", "-w", String(process.pid)], { detached: true, stdio: "ignore" });
   child.on("error", () => {
   });
   child.unref();
@@ -47667,7 +47695,7 @@ async function runLong(o2) {
 // packages/mcp/src/server.ts
 var SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 function newestSessionId(project2) {
-  const dir = join16(resolve9(project2), ".mirage", "sessions");
+  const dir = join17(resolve9(project2), ".mirage", "sessions");
   let best = null;
   let names;
   try {
@@ -47680,7 +47708,7 @@ function newestSessionId(project2) {
     if (!id || id === "unknown" || id.includes("..")) continue;
     let mtime;
     try {
-      mtime = statSync3(join16(dir, name)).mtimeMs;
+      mtime = statSync3(join17(dir, name)).mtimeMs;
     } catch {
       continue;
     }
@@ -47689,7 +47717,7 @@ function newestSessionId(project2) {
   return best?.id ?? null;
 }
 function footageProblem(folder, project2) {
-  if (!existsSync7(folder)) return `\u2716 ${folder} does not exist`;
+  if (!existsSync8(folder)) return `\u2716 ${folder} does not exist`;
   if (!statSync3(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
   const rel = relative2(realpathSync(folder), realpathSync(project2));
   if (rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute2(rel)) {
@@ -47742,7 +47770,7 @@ function createEngineServer(ctx) {
     }));
   }
   async function newestVideo() {
-    const numbers = (await readdir8(join16(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+    const numbers = (await readdir8(join17(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }
   async function report(n2, lines) {
@@ -47794,8 +47822,8 @@ function createEngineServer(ctx) {
     }
   });
   tool("music", "Find the tempo and mood of the tracks in the project's music folder.", {}, async () => {
-    const dir = join16(project2, "music");
-    if (!existsSync7(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
+    const dir = join17(project2, "music");
+    if (!existsSync8(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
     return report(await sessionVideo(), musicReport(dir, await analyzeLibrary(dir, tools)));
   });
   tool("check", "Check the timeline of a video against the catalog and music, snap montages to the beat, and list it.", { video }, async ({ video: n2 }) => report(n2, checkReport(await checkEpisode(project2, n2))));
@@ -47865,7 +47893,7 @@ function createEngineServer(ctx) {
       inRound.map((x) => [
         `Note ${x.id} at ${x.t.toFixed(1)} s: ${x.text}`,
         ...x.box ? [`(about the area ${pct(x.box.x)}%\u2013${pct(x.box.x + x.box.w)}% across, ${pct(x.box.y)}%\u2013${pct(x.box.y + x.box.h)}% down)`] : [],
-        `Still: ${join16(episodeDir(project2, n2), x.still)}`
+        `Still: ${join17(episodeDir(project2, n2), x.still)}`
       ].join("\n")).join("\n\n")
     );
   });
@@ -47905,13 +47933,13 @@ function createEngineServer(ctx) {
     });
     if (meta3 === null) lines.push(`No Mirage project here yet (${project2}). Use new_project to start one.`);
     else if (meta3) lines.push(`Project: ${meta3.title}`);
-    const numbers = (await readdir8(join16(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+    const numbers = (await readdir8(join17(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
     for (const n2 of numbers) {
       const { stage, deliveries } = await videoStage(project2, n2);
       const title = (await readVideo(project2, n2).catch(() => null))?.title;
       lines.push(`Video ${n2}${title ? ` \u201C${title}\u201D` : ""}: ${stage} \xB7 ${deliveries} ${deliveries === 1 ? "delivery" : "deliveries"}`);
     }
-    const viewer = await readJsonFile(join16(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
+    const viewer = await readJsonFile(join17(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
     lines.push(viewer && alive2(viewer.pid) ? `Viewer: running at ${viewer.url}` : "Viewer: not running");
     for (const t of ["ffmpeg", "ffprobe"]) lines.push(`${t}: ${await deps.which(t) ? "ok" : "missing"}`);
     const speech = await deps.transcriber();
@@ -47928,3 +47956,4 @@ createEngineServer({ project, tools: await realMediaTools() }).connect(new Stdio
   console.error(`mirage engine: ${e instanceof Error ? e.message : String(e)}`);
   process.exit(1);
 });
+startFallbackViewer(project);

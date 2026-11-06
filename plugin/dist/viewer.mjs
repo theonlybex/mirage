@@ -537,7 +537,7 @@ var require_cross_spawn = __commonJS({
 });
 
 // packages/viewer/src/main.ts
-import { dirname as dirname3, join as join16, resolve as resolve9 } from "node:path";
+import { dirname as dirname3, join as join17, resolve as resolve9 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // packages/sidecars/src/errors.ts
@@ -27755,7 +27755,7 @@ function whisperLanguage(locale) {
 var SPECIAL = /^\[_[A-Z]+(?:_\d+)?_?\]$/;
 var CONTENT = /[\p{L}\p{N}]/u;
 var CLAUSE_END = /[.,!?;:…。！？、，]["'”’)\]]*$/u;
-var num2 = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
+var num2 = (v, fallback2) => typeof v === "number" && Number.isFinite(v) ? v : fallback2;
 function wordsFromWhisperJson(latin1Json) {
   const doc = JSON.parse(latin1Json);
   const segments = Array.isArray(doc.transcription) ? doc.transcription : [];
@@ -28502,6 +28502,26 @@ function oneLine(text, max = 1e3) {
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
 
+// packages/viewer/src/fallback.ts
+import { readFileSync as readFileSync3 } from "node:fs";
+import { join as join10 } from "node:path";
+var isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+};
+function otherViewer(project2, self, alive2 = isAlive) {
+  try {
+    const info = ViewerInfoSchema.safeParse(JSON.parse(readFileSync3(join10(project2, ".mirage", "viewer.json"), "utf8")));
+    return info.success && info.data.pid !== self && alive2(info.data.pid);
+  } catch {
+    return false;
+  }
+}
+
 // packages/viewer/src/lifecycle.ts
 import { fstatSync } from "node:fs";
 function stdinIsPipe(fstat = fstatSync) {
@@ -28545,7 +28565,7 @@ function watchLifecycle(o2) {
 
 // packages/viewer/src/monitor.ts
 import { existsSync as existsSync3 } from "node:fs";
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 function startWhenProject(o2) {
   let stopped = false;
   let timer;
@@ -28559,7 +28579,7 @@ function startWhenProject(o2) {
   started.catch(() => {
   });
   const check2 = () => {
-    if (stopped || running || !existsSync3(join10(o2.project, "mirage.json"))) return;
+    if (stopped || running || !existsSync3(join11(o2.project, "mirage.json")) || o2.ready && !o2.ready()) return;
     if (timer) clearInterval(timer);
     running = o2.start();
     running.then(resolveStarted, rejectStarted);
@@ -28583,17 +28603,17 @@ import { mkdir as mkdir6, readFile as readFile8, rm as rm8 } from "node:fs/promi
 import { createServer } from "node:http";
 import { Readable as Readable5 } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { join as join15, resolve as resolve8 } from "node:path";
+import { join as join16, resolve as resolve8 } from "node:path";
 
 // packages/viewer/src/server/api.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { mkdir as mkdir5, readdir as readdir7, rename as rename4, rm as rm7, stat as stat6, writeFile as writeFile5 } from "node:fs/promises";
-import { extname as extname2, isAbsolute as isAbsolute2, join as join13 } from "node:path";
+import { extname as extname2, isAbsolute as isAbsolute2, join as join14 } from "node:path";
 
 // packages/viewer/src/server/events.ts
 import { watch } from "node:fs";
 import { readdir as readdir6, readFile as readFile6, stat as stat5 } from "node:fs/promises";
-import { join as join12, resolve as resolve6 } from "node:path";
+import { join as join13, resolve as resolve6 } from "node:path";
 
 // packages/viewer/src/server/media.ts
 import { createReadStream as createReadStream2 } from "node:fs";
@@ -28665,7 +28685,7 @@ async function handleMedia(req, roots) {
 }
 
 // packages/viewer/src/server/timeline-view.ts
-import { join as join11, resolve as resolve5 } from "node:path";
+import { join as join12, resolve as resolve5 } from "node:path";
 var emptyView = (status) => ({ status, title: "", durationSec: 0, items: [], overlays: [], music: [], slots: [], voice: [] });
 function parse3(text) {
   if (text === null) return void 0;
@@ -28680,7 +28700,7 @@ function thumbFor(project2, catalog, clipId, src) {
   const mid = (src.in + src.out) / 2;
   let best = null;
   for (const f of frames) if (!best || Math.abs(f.t - mid) < Math.abs(best.t - mid)) best = f;
-  return best ? mediaPath(resolve5(join11(project2, best.file))) : null;
+  return best ? mediaPath(resolve5(join12(project2, best.file))) : null;
 }
 function buildTimelineView(project2, raw, previous) {
   if (raw.episode === null) return emptyView("empty");
@@ -28719,18 +28739,18 @@ async function noteViews(project2, n2) {
   const [notes, statuses] = await Promise.all([readNotes(project2, n2), noteStatuses(project2, n2)]);
   return notes.map((x) => ({ ...x, ...statuses[x.id], stillUrl: noteStillUrl(project2, n2, x) }));
 }
-var noteStillUrl = (project2, n2, note2) => mediaPath(join12(episodeDir(project2, n2), note2.still));
+var noteStillUrl = (project2, n2, note2) => mediaPath(join13(episodeDir(project2, n2), note2.still));
 async function versionViews(project2, n2) {
   return (await listVersions(project2, n2)).map((v) => ({
     ...v,
-    ...v.render ? { videoUrl: mediaPath(join12(episodeDir(project2, n2), "versions", v.id, v.render.file)) } : {}
+    ...v.render ? { videoUrl: mediaPath(join13(episodeDir(project2, n2), "versions", v.id, v.render.file)) } : {}
   }));
 }
 var readText = (path6) => readFile6(path6, "utf8").catch(() => null);
 async function sessionDirs(project2, n2) {
-  const root = join12(episodeDir(project2, n2), "sessions");
+  const root = join13(episodeDir(project2, n2), "sessions");
   const entries = await readdir6(root, { withFileTypes: true }).catch(() => []);
-  return entries.filter((e) => e.isDirectory()).map((e) => join12(root, e.name)).sort();
+  return entries.filter((e) => e.isDirectory()).map((e) => join13(root, e.name)).sort();
 }
 var atOf = (s) => Date.parse(s.at) || 0;
 async function mergedSteps(dirs) {
@@ -28753,8 +28773,8 @@ var EventHub = class {
   views = /* @__PURE__ */ new Map();
   /** The timeline of video `n`. Rebuilt only when episode.json or catalog.json changed; while the episode is broken, the last good one stays. */
   async timeline(n2) {
-    const episode = await readText(join12(episodeDir(this.project, n2), "episode.json"));
-    const catalogFile = join12(resolve6(this.project), "catalog.json");
+    const episode = await readText(join13(episodeDir(this.project, n2), "episode.json"));
+    const catalogFile = join13(resolve6(this.project), "catalog.json");
     const info = await stat5(catalogFile).catch(() => null);
     const key = `${episode}\0${info ? `${info.mtimeMs}:${info.size}` : ""}`;
     const last = this.views.get(n2);
@@ -28788,7 +28808,7 @@ var EventHub = class {
       part("report", async () => {
         let best = null;
         for (const d of dirs) {
-          const path6 = join12(d, "report.md");
+          const path6 = join13(d, "report.md");
           const info = await stat5(path6).catch(() => null);
           if (info?.isFile() && (!best || info.mtimeMs > best.mtime)) best = { path: path6, mtime: info.mtimeMs };
         }
@@ -29128,7 +29148,7 @@ async function requireVideo(project2, n2) {
   if (!ok) throw new HttpError(404, `There is no video ${n2}.`);
 }
 async function videoNumbers(project2) {
-  const names = await readdir7(join13(project2, "episodes")).catch(() => []);
+  const names = await readdir7(join14(project2, "episodes")).catch(() => []);
   return names.filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
 }
 async function listVideos(project2) {
@@ -29166,7 +29186,7 @@ async function addVideoNote(ctx, req) {
   await requireVideo(ctx.project, b.video);
   const version2 = (await listVersions(ctx.project, b.video)).find((v) => v.id === b.versionId);
   if (!version2?.render) throw new HttpError(400, "Notes go on a version that has a video.");
-  const videoPath2 = join13(episodeDir(ctx.project, b.video), "versions", version2.id, version2.render.file);
+  const videoPath2 = join14(episodeDir(ctx.project, b.video), "versions", version2.id, version2.render.file);
   const added = await addNote(ctx.project, b.video, { versionId: version2.id, videoPath: videoPath2, t: b.t, text: b.text, box: b.box ?? null, tools: ctx.tools });
   return { status: 200, body: { ...added, stillUrl: noteStillUrl(ctx.project, b.video, added) } };
 }
@@ -29187,11 +29207,11 @@ async function voiceNote(ctx, req, url2) {
   if (!audio.length) throw new HttpError(400, "The recording is empty.");
   const notReady = new HttpError(503, SPEECH_NOT_READY);
   if (!await ctx.speechReady()) throw notReady;
-  const dir = join13(episodeDir(ctx.project, n2), "notes");
+  const dir = join14(episodeDir(ctx.project, n2), "notes");
   await mkdir5(dir, { recursive: true });
   const id = randomUUID4();
-  const webm = join13(dir, `voice-${id}.webm`);
-  const wav = join13(dir, `voice-${id}.wav`);
+  const webm = join14(dir, `voice-${id}.webm`);
+  const wav = join14(dir, `voice-${id}.wav`);
   await writeFile5(webm, audio);
   try {
     await ctx.tools.extractWav(webm, wav);
@@ -29231,7 +29251,7 @@ async function claimName(dir, name) {
   const ext = extname2(name);
   const stem = name.slice(0, name.length - ext.length);
   for (let i2 = 1; i2 < 1e3; i2++) {
-    const path6 = join13(dir, i2 === 1 ? name : `${stem} (${i2})${ext}`);
+    const path6 = join14(dir, i2 === 1 ? name : `${stem} (${i2})${ext}`);
     try {
       await writeFile5(path6, "", { flag: "wx" });
       return path6;
@@ -29256,9 +29276,9 @@ async function voiceoverUpload(ctx, req, boundary) {
       if (!RECORDING_EXTENSIONS.includes(extname2(name).slice(1).toLowerCase())) {
         throw new HttpError(400, "That doesn\u2019t look like a recording. Drop an audio or video file, such as .m4a, .mp3, .wav or .mov.");
       }
-      dir = join13(episodeDir(ctx.project, video), "voiceover");
+      dir = join14(episodeDir(ctx.project, video), "voiceover");
       await mkdir5(dir, { recursive: true });
-      return join13(dir, `.upload-${randomUUID4()}`);
+      return join14(dir, `.upload-${randomUUID4()}`);
     }
   });
   const { file: file2 } = await read.catch(async (e) => {
@@ -29354,7 +29374,7 @@ async function handleApi(ctx, req, url2) {
 
 // packages/viewer/src/server/static.ts
 import { readFile as readFile7, realpath as realpath2, stat as stat7 } from "node:fs/promises";
-import { extname as extname3, join as join14, resolve as resolve7, sep as sep2 } from "node:path";
+import { extname as extname3, join as join15, resolve as resolve7, sep as sep2 } from "node:path";
 var TYPES2 = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -29382,7 +29402,7 @@ var keyCss = (css, key) => css.replace(
   (m, q, url2) => /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(url2) ? m : `url(${q}${withKey(url2, key)}${q})`
 );
 async function servePage(uiDir2, key) {
-  const html = await readFile7(join14(uiDir2, "index.html"), "utf8").catch(() => null);
+  const html = await readFile7(join15(uiDir2, "index.html"), "utf8").catch(() => null);
   return html === null ? { status: 404 } : { status: 200, type: TYPES2[".html"], body: keyHtml(html, key) };
 }
 async function serveAsset(uiDir2, name, key) {
@@ -29513,8 +29533,8 @@ async function startViewer(o2) {
   }
   if (!bound) throw new Error(`No free port for the Mirage viewer between ${first} and ${last}.`);
   const url2 = `http://127.0.0.1:${port}/?k=${key}`;
-  const info = join15(project2, ".mirage", "viewer.json");
-  await mkdir6(join15(project2, ".mirage"), { recursive: true });
+  const info = join16(project2, ".mirage", "viewer.json");
+  await mkdir6(join16(project2, ".mirage"), { recursive: true });
   await writeJsonFile(info, ViewerInfoSchema, { url: url2, pid: process.pid }, ".mirage/viewer.json");
   say(`Mirage viewer: ${url2}  (open it for the person: in the Claude desktop app use the browser pane; otherwise run: open "${url2}")`);
   let closing = null;
@@ -29538,10 +29558,12 @@ function arg(name) {
   return i2 >= 0 ? process.argv[i2 + 1] : void 0;
 }
 var project = resolve9(arg("project") ?? process.env.MIRAGE_PROJECT ?? process.cwd());
-var uiDir = resolve9(arg("ui") ?? join16(dirname3(fileURLToPath3(import.meta.url)), "..", "dist-ui"));
-var pluginData = resolve9(arg("data") ?? process.env.CLAUDE_PLUGIN_DATA ?? join16(project, ".mirage"));
+var uiDir = resolve9(arg("ui") ?? join17(dirname3(fileURLToPath3(import.meta.url)), "..", "dist-ui"));
+var pluginData = resolve9(arg("data") ?? process.env.CLAUDE_PLUGIN_DATA ?? join17(project, ".mirage"));
+var fallback = process.argv.includes("--fallback");
 var monitor = startWhenProject({
   project,
+  ready: fallback ? () => !otherViewer(project, process.pid) : void 0,
   start: async () => startViewer({ project, uiDir, pluginData, say: (line) => void process.stdout.write(`${line}
 `), tools: await realMediaTools() })
 });
@@ -29557,5 +29579,6 @@ var end = () => {
   void monitor.stop().finally(() => process.exit(0));
 };
 var dispose = watchLifecycle({ stop: end, stdin: process.stdin });
+if (fallback) setInterval(() => otherViewer(project, process.pid) && end(), 2e3).unref();
 for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"]) process.on(signal, end);
 process.stdout.on("error", end);

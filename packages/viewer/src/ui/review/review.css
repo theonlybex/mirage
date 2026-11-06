@@ -117,6 +117,9 @@
 }
 .player__frame {
   position: relative;
+  /* As wide as the column, but no taller than most of the window: a vertical video stays whole on screen, centred. */
+  width: min(100%, calc(72dvh * var(--video-ratio, 1.7778)));
+  margin-inline: auto;
   border-radius: var(--md-sys-shape-corner-large);
 }
 .player__frame:focus-visible {
@@ -125,7 +128,7 @@
 .player__stage {
   position: relative;
   overflow: hidden;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--video-ratio, 16 / 9);
   border-radius: var(--md-sys-shape-corner-large);
   background: var(--md-sys-color-scrim);
   isolation: isolate;
@@ -383,6 +386,18 @@
   height: 100%;
   object-fit: cover;
 }
+/* With a still, the frame takes the still's own shape (a vertical one stands up), so a marked area stays on its spot. */
+.composer__still:has(img) {
+  justify-self: start;
+  width: fit-content;
+  aspect-ratio: auto;
+}
+.composer__still:has(img) img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 208px;
+}
 .composer__main {
   display: flex;
   flex-direction: column;
@@ -568,6 +583,18 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* A still of another shape than 16:9 keeps its own, inside the same height, so a marked area stays on its spot. */
+.note-item__thumb:has(img) {
+  justify-self: center;
+  width: fit-content;
+  aspect-ratio: auto;
+}
+.note-item__thumb:has(img) img {
+  width: auto;
+  height: auto;
+  max-width: 112px;
+  max-height: 63px;
 }
 .note-item__thumb .note-box {
   border-width: 1.5px;

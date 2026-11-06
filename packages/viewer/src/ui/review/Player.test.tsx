@@ -33,6 +33,19 @@ function setup() {
   return { post, video, pause, surface, gesture, add };
 }
 
+describe('Player shape', () => {
+  it('takes the picture shape from the video once it loads, 16:9 until then', () => {
+    const { container } = render(<Player video={1} version={rough} notes={[]} post={vi.fn()} />);
+    const frame = container.querySelector<HTMLElement>('.player__frame')!;
+    expect(frame.style.getPropertyValue('--video-ratio')).toBe(String(16 / 9));
+    const video = container.querySelector('video')!;
+    Object.defineProperty(video, 'videoWidth', { value: 1080, configurable: true });
+    Object.defineProperty(video, 'videoHeight', { value: 1920, configurable: true });
+    fireEvent(video, new Event('loadedmetadata'));
+    expect(frame.style.getPropertyValue('--video-ratio')).toBe(String(1080 / 1920));
+  });
+});
+
 describe('timecode', () => {
   it('is m:ss, with hours past the hour', () => {
     expect(timecode(4.2)).toBe('0:04');

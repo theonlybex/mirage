@@ -137,7 +137,7 @@ describe('manifests', () => {
 
   it('points the engine at the project', () => {
     const s = json(join(PLUGIN, '.mcp.json')).mcpServers.engine;
-    expect(s.env).toEqual({ MIRAGE_PROJECT: '${CLAUDE_PROJECT_DIR}' });
+    expect(s.env).toEqual({ MIRAGE_PROJECT: '${CLAUDE_PROJECT_DIR}', MIRAGE_PLUGIN_DATA: '${CLAUDE_PLUGIN_DATA}' });
   });
 
   it('ships the node launcher executable', () => {

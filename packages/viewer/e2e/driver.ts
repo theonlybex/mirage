@@ -131,7 +131,8 @@ export class Driver {
     const transport = new StdioClientTransport({
       command: expand(server.command, vars),
       args: server.args.map((a) => expand(a, vars)),
-      env: { ...this.env, ...Object.fromEntries(Object.entries(server.env).map(([k, v]) => [k, expand(v, vars)])) },
+      // The driver starts the monitor's viewer itself, so the engine's stand-in stays off.
+      env: { ...this.env, ...Object.fromEntries(Object.entries(server.env).map(([k, v]) => [k, expand(v, vars)])), MIRAGE_FALLBACK_VIEWER: '0' },
       cwd: this.project,
       stderr: 'pipe',
     });

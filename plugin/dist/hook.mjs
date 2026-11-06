@@ -31934,6 +31934,11 @@ function itemChunkArgs(laid, o2, sources, output2) {
     output2
   ];
 }
+function previewSize(width, height) {
+  const scale = Math.min(1, 960 / Math.max(width, height));
+  const even2 = (n2) => Math.max(2, Math.round(n2 * scale / 2) * 2);
+  return [even2(width), even2(height)];
+}
 function chunkTimeoutMs(chunk, fps) {
   const srcSec = chunk.reduce((s, l) => s + (l.item.src.out - l.item.src.in), 0);
   const outSec = chunk.reduce((s, l) => s + l.frames / fps, 0);
@@ -32090,7 +32095,7 @@ async function renderLocked(o2) {
   const D = laid[laid.length - 1].end;
   const fps = ep.output.fps;
   const final = o2.mode === "final";
-  const [W, H] = final ? [ep.output.width, ep.output.height] : [960, 540];
+  const [W, H] = final ? [ep.output.width, ep.output.height] : previewSize(ep.output.width, ep.output.height);
   const dir = episodeDir(project, o2.episode);
   const musicDir = resolve4(o2.musicDir ?? join8(project, "music"));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
@@ -33256,6 +33261,7 @@ __export(src_exports2, {
   oneLine: () => oneLine,
   onsetEnvelope: () => onsetEnvelope,
   placedStatus: () => placedStatus,
+  previewSize: () => previewSize,
   readClaudeProcess: () => readClaudeProcess,
   readControl: () => readControl,
   readJsonFile: () => readJsonFile,

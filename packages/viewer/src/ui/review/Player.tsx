@@ -71,6 +71,8 @@ export function Player({ video, version, notes, seek = null, post = apiPost, sen
   const [note, setNote] = useState<{ t: number; box: Box | null; still: string | null } | null>(null);
   const [failed, setFailed] = useState(false);
   const [idle, setIdle] = useState(false);
+  // The picture's shape (width / height), so a vertical video gets a vertical frame; 16:9 until the video says.
+  const [ratio, setRatio] = useState(16 / 9);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // A smooth timecode while playing (timeupdate only comes about four times a second).
@@ -191,6 +193,7 @@ export function Player({ video, version, notes, seek = null, post = apiPost, sen
         onKeyDown={onKeyDown}
         onPointerMove={wake}
         data-toolbar-hidden={hidden || undefined}
+        style={{ '--video-ratio': ratio } as CSSProperties}
       >
         <div className="player__stage">
           <video
@@ -201,6 +204,7 @@ export function Player({ video, version, notes, seek = null, post = apiPost, sen
             playsInline
             onLoadedMetadata={(e) => {
               const v = e.currentTarget;
+              if (v.videoWidth > 0 && v.videoHeight > 0) setRatio(v.videoWidth / v.videoHeight);
               setDuration(Number.isFinite(v.duration) ? v.duration : 0);
               if (pendingSeek.current !== null) {
                 goTo(pendingSeek.current);
