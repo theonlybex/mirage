@@ -37,14 +37,17 @@ function found(tool: string, o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platf
   return dirs.some((dir) => isFile(p.join(dir, name)));
 }
 
-/** Which of the tools Mirage needs are missing, in the order the engine needs them. `env`, `platform` and `home` are arguments so tests control them. */
-export function missingTools(o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string }): MissingTool[] {
+/**
+ * Which of the tools Mirage needs are missing, in the order the engine needs them. `env`, `platform` and `home` are
+ * arguments so tests control them; `whisperDirs` replaces the installers' folders where whisper-cli is also looked for.
+ */
+export function missingTools(o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string; whisperDirs?: string[] }): MissingTool[] {
   const p = o.platform === 'win32' ? path.win32 : path.posix;
   const missing: MissingTool[] = [];
   for (const tool of ['ffmpeg', 'ffprobe'] as const) {
     if (!found(tool, o, o.env.WORDEDITS_FFMPEG_DIR, [])) missing.push(tool);
   }
-  if (!found('whisper-cli', o, o.env.WORDEDITS_WHISPER_DIR, installerDirs(o.env, o.platform, o.home))) missing.push('whisper-cli');
+  if (!found('whisper-cli', o, o.env.WORDEDITS_WHISPER_DIR, o.whisperDirs ?? installerDirs(o.env, o.platform, o.home))) missing.push('whisper-cli');
   const model = o.env.WORDEDITS_WHISPER_MODEL || p.join(o.home, '.local', 'share', 'whisper-cpp', 'models', DEFAULT_MODEL);
   if (!isFile(model)) missing.push('speech-model');
   return missing;
@@ -57,7 +60,7 @@ function describeMissing(missing: MissingTool[]): { list: string; several: boole
   const model = missing.includes('speech-model');
   const names: string[] = [];
   if (ffmpeg) names.push(ffmpeg);
-  if (whisper && model) names.push('whisper.cpp and its speech model');
+  if (whisper && model) names.push('whisper.cpp with its speech model');
   else if (whisper) names.push('whisper.cpp');
   else if (model) names.push("whisper.cpp's speech model");
   const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : (names[0] ?? '');

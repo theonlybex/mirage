@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -14,14 +14,6 @@ const FIRST_NOTICE_FFPROBE_AND_MODEL =
   'At the start of your first reply, before anything else, ask the person whether Mirage may install them now. ' +
   'Use the mirage:setup skill: it says in one plain sentence what each tool is for and about how big it is, and how to install it. ' +
   'Install only what they agree to. If they say not now, call mcp__plugin_mirage_engine__setup_later.';
-
-/**
- * whisper-cli is also looked for in the installers' folders, which a test can't empty: on a machine with Homebrew's
- * whisper-cpp, a PATH without it still finds it. These are the tools expected missing there.
- */
-const INSTALLER_DIRS = WIN ? [] : ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin'];
-const whisperInstalled = INSTALLER_DIRS.some((d) => existsSync(join(d, 'whisper-cli')));
-const withoutWhisper = (...tools: MissingTool[]): MissingTool[] => tools.filter((t) => t !== 'whisper-cli' || !whisperInstalled);
 
 let root: string;
 let dataDir: string;
@@ -48,16 +40,16 @@ describe('missingTools', () => {
     writeFileSync(modelFile, '');
     const platform = process.platform;
 
-    expect(missingTools({ env: { PATH: bin }, platform, home })).toEqual(['speech-model']);
-    expect(missingTools({ env: { PATH: '' }, platform, home })).toEqual(withoutWhisper('ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model'));
-    expect(missingTools({ env: { PATH: '', WORDEDITS_FFMPEG_DIR: bin, WORDEDITS_WHISPER_DIR: bin, WORDEDITS_WHISPER_MODEL: modelFile }, platform, home })).toEqual([]);
+    expect(missingTools({ env: { PATH: bin }, platform, home, whisperDirs: [] })).toEqual(['speech-model']);
+    expect(missingTools({ env: { PATH: '' }, platform, home, whisperDirs: [] })).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model']);
+    expect(missingTools({ env: { PATH: '', WORDEDITS_FFMPEG_DIR: bin, WORDEDITS_WHISPER_DIR: bin, WORDEDITS_WHISPER_MODEL: modelFile }, platform, home, whisperDirs: [] })).toEqual([]);
 
     // the default model place
     mkdirSync(join(home, '.local', 'share', 'whisper-cpp', 'models'), { recursive: true });
     writeFileSync(model, '');
-    expect(missingTools({ env: { PATH: bin }, platform, home })).toEqual([]);
+    expect(missingTools({ env: { PATH: bin }, platform, home, whisperDirs: [] })).toEqual([]);
     // an override that is set must hold the model itself, not fall back to the default place
-    expect(missingTools({ env: { PATH: bin, WORDEDITS_WHISPER_MODEL: join(root, 'nope.bin') }, platform, home })).toEqual(['speech-model']);
+    expect(missingTools({ env: { PATH: bin, WORDEDITS_WHISPER_MODEL: join(root, 'nope.bin') }, platform, home, whisperDirs: [] })).toEqual(['speech-model']);
   });
 
   it('looks only in an override folder once it is set, as the engine does', () => {
@@ -65,29 +57,36 @@ describe('missingTools', () => {
     const empty = folderWith('empty');
     const home = join(root, 'home');
     const env = { PATH: bin, WORDEDITS_FFMPEG_DIR: empty, WORDEDITS_WHISPER_DIR: empty };
-    expect(missingTools({ env, platform: process.platform, home })).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model']);
+    expect(missingTools({ env, platform: process.platform, home, whisperDirs: [] })).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model']);
+  });
+
+  it('also looks for whisper-cli in the folders passed as whisperDirs', () => {
+    const inst = folderWith('installer', 'whisper-cli');
+    const env = { PATH: '' };
+    expect(missingTools({ env, platform: process.platform, home: root, whisperDirs: [inst] })).toEqual(['ffmpeg', 'ffprobe', 'speech-model']);
+    expect(missingTools({ env, platform: process.platform, home: root, whisperDirs: [] })).toContain('whisper-cli');
   });
 
   it('names only the one of ffmpeg and ffprobe that is missing', () => {
     const bin = folderWith('bin', 'ffmpeg', 'whisper-cli');
-    expect(missingTools({ env: { PATH: bin }, platform: process.platform, home: root })).toEqual(['ffprobe', 'speech-model']);
+    expect(missingTools({ env: { PATH: bin }, platform: process.platform, home: root, whisperDirs: [] })).toEqual(['ffprobe', 'speech-model']);
   });
 
   it('does not take a folder for an executable', () => {
     const bin = folderWith('bin');
     mkdirSync(join(bin, WIN ? 'ffmpeg.exe' : 'ffmpeg'));
-    expect(missingTools({ env: { PATH: bin }, platform: process.platform, home: root })).toContain('ffmpeg');
+    expect(missingTools({ env: { PATH: bin }, platform: process.platform, home: root, whisperDirs: [] })).toContain('ffmpeg');
   });
 
   it('uses ; as the PATH separator on win32 and : elsewhere', () => {
     const a = folderWith('a', 'ffmpeg');
     const b = folderWith('b', 'ffprobe');
     if (WIN) {
-      expect(missingTools({ env: { PATH: `${a};${b}` }, platform: 'win32', home: root })).toEqual(['whisper-cli', 'speech-model']);
+      expect(missingTools({ env: { PATH: `${a};${b}` }, platform: 'win32', home: root, whisperDirs: [] })).toEqual(['whisper-cli', 'speech-model']);
     } else {
-      expect(missingTools({ env: { PATH: `${a}:${b}` }, platform: 'darwin', home: root })).toEqual(withoutWhisper('whisper-cli', 'speech-model'));
+      expect(missingTools({ env: { PATH: `${a}:${b}` }, platform: 'darwin', home: root, whisperDirs: [] })).toEqual(['whisper-cli', 'speech-model']);
       // a ';' is just part of a folder name on this platform
-      expect(missingTools({ env: { PATH: `${a};${b}` }, platform: 'darwin', home: root })).toContain('ffmpeg');
+      expect(missingTools({ env: { PATH: `${a};${b}` }, platform: 'darwin', home: root, whisperDirs: [] })).toContain('ffmpeg');
     }
   });
 });
@@ -128,9 +127,10 @@ describe('setupNotice', () => {
     expect(notice(['ffprobe'])).toContain('until FFmpeg (ffprobe) is installed');
     expect(notice(['whisper-cli'])).toContain('until whisper.cpp is installed');
     expect(notice(['speech-model'])).toContain("until whisper.cpp's speech model is installed");
-    expect(notice(['whisper-cli', 'speech-model'])).toContain('until whisper.cpp and its speech model are installed');
+    expect(notice(['whisper-cli', 'speech-model'])).toContain('until whisper.cpp with its speech model are installed');
     expect(notice(['whisper-cli', 'speech-model'])).toContain('install them now');
-    expect(notice(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg and whisper.cpp and its speech model are installed');
+    expect(notice(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg and whisper.cpp with its speech model are installed');
+    expect(notice(['ffmpeg', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg and whisper.cpp with its speech model are installed');
     expect(notice(['ffmpeg', 'speech-model'])).toContain("until FFmpeg and whisper.cpp's speech model are installed");
   });
 });
