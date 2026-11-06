@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./setup-state": {
+      "types": "./src/setup-state.ts",
+      "default": "./src/setup-state.ts"
     }
   },
   "dependencies": {
