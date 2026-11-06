@@ -135,11 +135,19 @@ unless following the cursor to something small.
 - Built-in sounds, generated with FFmpeg's own audio sources the first time they're used and cached in Mirage's data
   folder (no download, no licence): `whoosh`, `swoosh-out`, `hit` (a low boom), `riser` (2 s, ends on `at`), `pop`,
   `ding`, `click`, `scratch` (record scratch).
-- **The person listens before any ship** (their decision). The builder can't hear, so part 3 stops at a checkpoint: it
-  hands the person each built-in sound as a WAV (two or three variants of each where the sound design is uncertain)
-  and a short test render with them placed on cuts and a punchline. Only the sounds the person approves ship; the rest
-  are dropped (anti-goal), and the skill lists only the approved ones. Their notes ("too thin", "louder") go into
-  another round before the part is finished. The rest of part 3 (`sfx/` files, music dips, `check`) doesn't wait on it.
+- **No separate listening step** (the person's decision): they won't review sounds one by one; they review the
+  finished edit, and a sound they don't like comes back as a note on that edit. Since nobody hears the built-in sounds
+  before they're used, the builder keeps them safe by design:
+  - simple, classic designs that are hard to get wrong (filtered-noise whooshes, a low sine boom, a short pop, a
+    two-partial bell), rather than ambitious ones; `scratch` ships only if it can be made from a clear recipe, else
+    it's left out;
+  - measured, not heard: each sound's peak level, length and loudness are checked by test, with no clipping, no
+    clicks at the start or end (fades), and nothing below 40 Hz or harsh above 12 kHz;
+  - placed quietly by default (−6 dB under speech) and sparingly (the `check` limit below);
+  - the person's own files in `sfx/` always win: when a file there has the same name as a built-in sound
+    (`sfx/whoosh.wav`), it is used instead.
+- When the person's note says "no sound effects" (or similar), Claude removes the `sfx` list; nothing else depends on
+  it.
 - `at` is where the sound's peak lands (a riser's end, a hit's attack), so Claude places it on the frame of the cut or
   the punchline. `gainDb` 0 or less, default −6 relative to speech loudness.
 - SFX get their own bus: not ducked under speech, mixed after the music ducking, through the existing limiter.
@@ -204,8 +212,20 @@ Beats: **hook** (frame 0: the claim, or the thing about to happen; no title, no 
 - Claude writes 1080×1920 and `captions: { "style": "pop", "position": "middle" }` into a new short's `episode.json`.
 - The skill describes the loop: the last line or sound leads back into the first shot (a question the hook answers,
   a sentence cut so the hook finishes it, the same motion at both ends).
-- A short can be cut from any project's footage, including a vlog's: a new video with `format: "short"` and the same
-  footage folders.
+- **The person's release plan** (their words): one big video, plus a few shorts from it, posted to YouTube Shorts and
+  the same files to Instagram Reels. So:
+  - **Shorts from a big video:** `new_video` takes `from: <n>` (the big video's number) with `format: "short"`: the
+    short gets the same footage folders, answers (`about`, `mention`, `hide`) and catalog, and Claude starts from the
+    big video's best moments (its headline, reveals, laughs, the most-replayed kind of moment from the playbook)
+    instead of cataloguing again. Each short is its own video number, with its own notes and versions. The edit skill
+    offers "a few shorts from this?" when a big video is finished, proposing 3–5 moments, each in one line, for the
+    person to pick.
+  - **One file for both apps:** every short is made to work on both. Instagram's buttons and caption cover more of the
+    picture than YouTube's, so Mirage keeps text and faces out of both apps' covered areas: about the bottom 20%, the
+    top 10% and the right 15% of a 1080×1920 frame. `check` warns when an overlay, a card's text or a `middle`
+    caption would fall there. Length stays 20–45 s, inside both apps' limits.
+  - **Delivery:** the finished short is copied with the person's existing rule (into `Finished/Youtube/Shorts`, named
+    after its title); the same file is what they upload to Instagram, so no second export.
 
 ### Vlog
 Beats in order (from the playbook, measured on the classic vlogs):
@@ -303,8 +323,7 @@ Each part ships on its own, with tests, in this order (the earlier ones are what
 1. Part 8 (asking before setup) — small, and every new user meets it first.
 2. Part 1 (captions) with the bundled fonts.
 3. Part 2 (animated zooms).
-4. Part 3 (sound effects and music dips), with the listening checkpoint: the build carries on with part 7 while the
-   person listens.
+4. Part 3 (sound effects and music dips).
 5. Part 7 (cards and new overlays).
 6. Part 5 (formats: short, then vlog), using 1–3 and 7.
 7. Part 4 (J/L-cuts) — the most render work, least needed for Shorts.
@@ -330,7 +349,10 @@ After each: `pnpm test`, `pnpm typecheck`, `pnpm build:plugin`, a real render sh
 - Names of internal functions and files.
 
 ## My calls in this document (for the person to check)
-- Built-in sound effects are generated, not downloaded; your own files go in `sfx/`.
+- Built-in sound effects are generated, not downloaded, kept simple and quiet since nobody listens to them one by one;
+  your own files in `sfx/` replace them by name.
+- Shorts are made from the big video's footage with `from: <n>`, and one file serves both YouTube Shorts and
+  Instagram Reels by keeping text out of both apps' button areas.
 - Two bundled fonts so captions look the same on every computer.
 - `final.srt` stays normal phrase captions whatever style is burned in.
 - Old episodes, the Short already made among them, keep today's captions; new shorts get pop captions because Claude
