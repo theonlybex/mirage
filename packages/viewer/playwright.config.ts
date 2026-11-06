@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // The plugin's end-to-end tests (`pnpm --filter @wordedits/viewer test:e2e`): the built plugin/ driven as Claude Code would,
 // with the viewer page in Chromium. Not part of `pnpm test`. Run `pnpm build:plugin` first: they use plugin/dist.
 import { defineConfig } from '@playwright/test';

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useLayoutEffect, useRef } from 'react';
 import type { StepLine } from '../../view-types.js';
 import { Icon } from '../components/Icon.js';

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Talking to the viewer server: the session key, JSON calls, media addresses and the live events of one video.
 import { useEffect, useState } from 'react';
 import type { EventType, VideoEvents } from '../view-types.js';

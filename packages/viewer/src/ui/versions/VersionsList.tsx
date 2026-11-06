@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useState } from 'react';
 import type { VersionView } from '../../view-types.js';
 import { post as apiPost, type Post } from '../api.js';

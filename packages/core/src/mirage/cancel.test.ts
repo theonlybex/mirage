@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { SidecarError } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
 import { asCancelled } from './cancel.js';

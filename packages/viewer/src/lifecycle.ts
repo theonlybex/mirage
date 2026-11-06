@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { fstatSync } from 'node:fs';
 
 /** Whether stdin (fd 0) is a pipe or a socket, i.e. something whose end means the parent let go. /dev/null, a file or a closed fd are not. */

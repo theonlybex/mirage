@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { postForm } from '../api.js';
 import { Button } from '../components/Button.js';

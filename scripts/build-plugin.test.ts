@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -46,7 +46,7 @@ describe('buildPlugin', () => {
     expect(files.filter((f) => !f.startsWith('assets/') && f !== 'index.html')).toEqual([]);
   });
 
-  it('lists every bundled npm package in THIRD_PARTY_NOTICES.txt with its licence text, and ships the AGPL licence', () => {
+  it('lists every bundled npm package in THIRD_PARTY_NOTICES.txt with its licence text, and ships the MIT licence', () => {
     const notices = readFileSync(join(built, 'THIRD_PARTY_NOTICES.txt'), 'utf8');
     // Every file under node_modules that went into a bundle (esbuild's metafile inputs and the page's modules) names a package.
     const packages = new Set<string>();
@@ -101,7 +101,7 @@ describe('manifests', () => {
 
   it('plugin.json is the Mirage manifest', () => {
     const m = json(join(PLUGIN, '.claude-plugin/plugin.json'));
-    expect(m).toMatchObject({ name: 'mirage', displayName: 'Mirage', version: '0.1.0', license: 'AGPL-3.0-or-later' });
+    expect(m).toMatchObject({ name: 'mirage', displayName: 'Mirage', version: '0.1.0', license: 'MIT' });
   });
 
   it('the marketplace lists the plugin by relative path', () => {

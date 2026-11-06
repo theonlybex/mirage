@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // The Mirage viewer as the plugin's monitor: `main.mjs --project <dir> --ui <dir> --data <dir>`. Everything it prints to stdout
 // is a line for Claude, so nothing else is printed there; trouble goes to stderr. Outside a Mirage project it prints nothing and
 // waits for one. It ends on SIGTERM/SIGHUP/SIGINT, when stdin (if it is a pipe) ends, when its parent goes away, or when

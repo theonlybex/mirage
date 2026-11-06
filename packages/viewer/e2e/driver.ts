@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Plays Claude Code's part for the end-to-end tests, without a model: it runs the plugin's hook script for every event (JSON
 // on stdin, as hooks/hooks.json says), talks to the engine over MCP stdio (as .mcp.json says), writes files itself for
 // Write, and starts the viewer the way monitors/monitors.json does, reading its stdout lines. Everything runs from plugin/,

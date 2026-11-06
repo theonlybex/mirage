@@ -17,7 +17,7 @@ The engine (old spec §14) and the design language (old spec §15) also still st
 
 The user decided (2026-11-02):
 - **Mirage uses the person's own Claude Code.** Mirage becomes a Claude Code plugin plus a viewer page, not an app with its own Claude setup.
-- **Licence:** AGPL-3.0.
+- **Licence:** MIT (changed from AGPL-3.0 on 2026-11-05).
 - **Platform:** Mac first; Windows later.
 - **Format:** build-story videos only for now.
 - **Overnight:** the guide cut is delivered overnight, and the voice-over is recorded in the morning.
@@ -54,7 +54,7 @@ The user decided (2026-11-02):
 - **Claude Code:** the person's own, desktop app (Code tab) or terminal, signed in with a plan or their own API key. Some features need the plan sign-in: the Chrome browser, and the HyperFrames plugin's browser capture.
 - **Runtime:** the plugin's code runs on Node 22+, installed by setup. The parts are shipped as single bundled `.mjs` files inside the plugin, so installing it needs no `npm install`.
 - **Licence:**
-  - Mirage is **AGPL-3.0-or-later**. Contributions use a **DCO** sign-off (`Signed-off-by:`).
+  - Mirage is **MIT**-licensed (it was AGPL-3.0-or-later until 2026-11-05). Contributions use a **DCO** sign-off (`Signed-off-by:`).
   - Nothing is copied from the WeAreNoCode kit.
   - FFmpeg, HyperFrames and Parakeet are installed separately by setup. Mirage doesn't redistribute them.
 - **Privacy:** footage stays on the machine. Frames, transcripts and audio go to Anthropic through Claude Code, and the edit skill says so once per project.
@@ -219,7 +219,7 @@ Each phase gets its own plan, build and review.
 
 | # | Phase | What people get | Built, bundled or connected |
 |---|---|---|---|
-| 1 | **The plugin and the viewer** | Marketplace and plugin. `setup` skill. `edit`, `notes`, `voiceover`, `overnight` and `status` skills on today's build-story engine. Engine as MCP tools, with cancellation and versions. Hooks: pause, stop, file guard, auto-approve, steps, checkpoints. Viewer: live timeline, steps, progress, pause/stop/correct, player with notes (typed, spoken, boxed), versions, voice-over drop, morning report. Overnight with keep-awake. AGPL licence, DCO, README. WordEdits leftovers removed. | Build: plugin, engine tools, hooks, viewer. Connect: the 7 tools. |
+| 1 | **The plugin and the viewer** | Marketplace and plugin. `setup` skill. `edit`, `notes`, `voiceover`, `overnight` and `status` skills on today's build-story engine. Engine as MCP tools, with cancellation and versions. Hooks: pause, stop, file guard, auto-approve, steps, checkpoints. Viewer: live timeline, steps, progress, pause/stop/correct, player with notes (typed, spoken, boxed), versions, voice-over drop, morning report. Overnight with keep-awake. Licence (MIT since 2026-11-05; first AGPL), DCO, README. WordEdits leftovers removed. | Build: plugin, engine tools, hooks, viewer. Connect: the 7 tools. |
 | 2 | **Base filtering, recording coach, talking-head route** | Always-on quality checks with a report (old §6.2). Recording-coach card (§6.3). Import checks, SD-card copy with verification, camera/screen/mic sync. The talking-head and tutorial route. | Build into the engine. Transcription: Apple on Mac, Parakeet via HyperFrames as an option. |
 | 3 | **Your style** | Style interview (research doc §2), with channel and reference measuring. The one-page style file. Animation level and allowed formats. Proposed rules after each round of notes, kept with one tap in the viewer. | Build (skill, style file, viewer screens) |
 | 4 | **Graphics, sound, B-roll** | Format library on HyperFrames (lower lines, logo cards, diagrams, counters, browser cutaways…) drawn from the style. Sound effects. Research B-roll through Chrome. Stock B-roll. Epidemic Sound music. | Connect: HyperFrames plugin, Chrome, Epidemic, a Pexels MCP. Build: format library, engine compositing. |
@@ -268,7 +268,7 @@ Phase 1 must already beat the CLI. The person never types a command, sees the ed
 1. **Monitors and the PreToolUse hold are new Claude Code features.** The spike (§7) comes first, and every use has a fallback.
 2. **Overnight permission prompts.** Mirage's own steps are auto-approved by the hook, but another tool could still wait on a prompt. The overnight skill asks for auto mode, and the report says where it waited if it did.
 3. **Plugin updates while a session runs.** `${CLAUDE_PLUGIN_ROOT}` changes on update. Running processes keep their old files, and the next session uses the new ones.
-4. **AGPL and contributors.** AGPL puts some companies off contributing. That's accepted, because the user wants protection over reach.
+4. **MIT and copies.** Since 2026-11-05 Mirage is MIT: anyone may copy it, close it or sell it. The user chose reach over the protection AGPL gave.
 5. **The Chrome browser needs plan sign-in.** On an API key, research B-roll (Phase 4) falls back to plain page captures.
 
 ## 9. Windows (later, not Phase 1)
@@ -287,7 +287,7 @@ The viewer, the plugin layout and the skills don't change.
 **By the user**
 - Plugin + viewer page.
 - Use the person's own Claude Code.
-- AGPL.
+- MIT licence (was AGPL until 2026-11-05).
 - Mac first.
 - Build-story only for now.
 - Guide cut overnight, voice-over in the morning.

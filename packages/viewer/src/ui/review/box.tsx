@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { CSSProperties } from 'react';
 
 /** A part of the picture, as fractions of its width and height (0..1). */

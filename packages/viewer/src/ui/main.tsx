@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import './theme/fonts.css';
 import './theme/tokens.css';
 import './theme/base.css';

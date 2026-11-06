@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Material 3 Expressive motion (old spec §15): springs for space and effects, and the cubic curves used without them.
 
 export type Spring = { stiffness: number; damping: number };

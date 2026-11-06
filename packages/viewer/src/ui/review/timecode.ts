@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 /** Seconds as a player shows them: `m:ss`, or `h:mm:ss` from an hour; whole seconds, rounded down. */
 export function timecode(seconds: number): string {

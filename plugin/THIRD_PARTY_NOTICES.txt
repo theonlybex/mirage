@@ -1,4 +1,4 @@
-Mirage is licensed under the GNU Affero General Public License v3.0 or later (see LICENSE).
+Mirage is licensed under the MIT License (see LICENSE).
 
 The files in dist/ also contain the third-party packages below, each under its own licence. Each is listed with its
 version, its licence and the licence text it ships with. The font and icons of the viewer page have their licences in

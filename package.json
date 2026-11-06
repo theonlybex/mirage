@@ -1,7 +1,7 @@
 {
   "name": "wordedits",
   "private": true,
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22"

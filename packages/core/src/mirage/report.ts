@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { LogEntry, StepLine, VersionMeta } from '@wordedits/shared';
 
 const NEXT_AFTER_GUIDE = "Record the voice-over: open the video in Mirage's viewer, go to Review, and follow the steps there.";

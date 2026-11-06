@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { IconButton } from './components/IconButton.js';
 import { useRoute } from './route.js';
 import { TopAppBar } from './shell/TopAppBar.js';

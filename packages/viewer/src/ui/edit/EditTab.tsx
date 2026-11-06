@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { LiveVideo } from '../api.js';
 import { post, useNow } from '../api.js';
 import { InterruptedBanner } from './InterruptedBanner.js';

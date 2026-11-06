@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ENTER_MS, EXIT_MS } from '../theme/motion.js';
 

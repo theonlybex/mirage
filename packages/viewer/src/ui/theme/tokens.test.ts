@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
 import { springEasing, SPRINGS } from './motion.js';
 import css from './tokens.css?raw';

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseMarkdown, Report } from './Report.js';

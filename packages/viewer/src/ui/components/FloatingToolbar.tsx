@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { ReactNode } from 'react';
 
 /** An M3 Expressive floating toolbar: a pill on surface-container-high with a shadow (the one place shadows are used). */

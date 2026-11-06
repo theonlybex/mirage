@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { VersionView } from '../../view-types.js';
 
 /** A version's date and time as the person reads it. */

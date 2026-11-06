@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
+<!-- SPDX-License-Identifier: MIT -->
 # Mirage plugin: end-to-end and real Claude Code checks
 
 Plan: `docs/superpowers/plans/2026-11-02-mirage-plugin-phase-1.md`, Task 12. Spec: `docs/superpowers/specs/2026-11-02-mirage-plugin-design.md` (§5.3, §7).

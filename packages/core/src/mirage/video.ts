@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { access, mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { VideoSchema, type Video } from '@wordedits/shared';

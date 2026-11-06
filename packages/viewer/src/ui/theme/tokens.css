@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: AGPL-3.0-or-later */
+/* SPDX-License-Identifier: MIT */
 /*
  * Mirage's Material 3 tokens (old spec §15). Colour: static TonalSpot scheme from seed #3B6EA8, standard contrast.
  * Dark is the default; light is `data-theme="light"` on <html>. `--mirage-color-*` are Mirage's own extended colours

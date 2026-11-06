@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // The Claude Code hooks of the Mirage plugin. Outside a Mirage project (see findProject) every event returns at once with
 // nothing to print; the engine (@wordedits/core) is imported only inside one.
 import { createHash } from 'node:crypto';

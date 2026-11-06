@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Versions and notes for the Review and Versions tests.
 import type { NoteView, VersionView } from '../../view-types.js';
 

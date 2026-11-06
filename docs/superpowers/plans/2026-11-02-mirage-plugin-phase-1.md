@@ -53,7 +53,7 @@
 - **Copy:** plain words, no editing jargon. Every error says what happened and what to do.
 - **Licence:** AGPL-3.0-or-later.
   - Every `package.json` has `"license": "AGPL-3.0-or-later"`.
-  - New source files start with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
+  - New source files start with `// SPDX-License-Identifier: MIT`.
   - Commits are signed off (`git commit -s`) and end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Tests:** renderer tests carry `// @vitest-environment jsdom` on line 1. The root vitest `include` is `packages/*/src/**/*.test.{ts,tsx}` and `scripts/**/*.test.ts`.
 

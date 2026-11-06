@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useCallback, useEffect, useState } from 'react';
 import type { VideoSummary } from '../../view-types.js';
 import { get } from '../api.js';

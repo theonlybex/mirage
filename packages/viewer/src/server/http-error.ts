@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 /** An error that becomes this HTTP status and `{ error }`. */
 export class HttpError extends Error {

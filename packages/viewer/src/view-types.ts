@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // What the viewer server sends the page, in one place both sides compile against. Types only: no Node, no DOM.
 import type { Control, LogEntry, Note, Progress, StepLine, VersionMeta } from '@wordedits/shared';
 

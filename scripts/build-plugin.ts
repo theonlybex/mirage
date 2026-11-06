@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Builds the generated half of plugin/: the engine, hook and viewer bundles (dist/*.mjs), the viewer page (dist/viewer-ui/),
 // the speech helper source (native/transcribe.swift), the licence (LICENSE) and the notices of every bundled npm package
 // (THIRD_PARTY_NOTICES.txt). The output is the same on every run (no dates, no absolute paths in the banner), so a test can
@@ -60,7 +60,7 @@ export function thirdPartyNotices(inputs: Iterable<string>): string {
     [RULE, key, `License: ${p.licence}`, '', p.texts.length ? p.texts.join(`\n\n${'-'.repeat(80)}\n`) : `(The package ships no licence file; its package.json says ${p.licence}.)`].join('\n'),
   );
   return [
-    'Mirage is licensed under the GNU Affero General Public License v3.0 or later (see LICENSE).',
+    'Mirage is licensed under the MIT License (see LICENSE).',
     '',
     'The files in dist/ also contain the third-party packages below, each under its own licence. Each is listed with its',
     'version, its licence and the licence text it ships with. The font and icons of the viewer page have their licences in',

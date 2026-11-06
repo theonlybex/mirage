@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { execFile, spawn } from 'node:child_process';
 import { access, constants, readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';

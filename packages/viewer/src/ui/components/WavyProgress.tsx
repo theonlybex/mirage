@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 
 type WavyProgressProps = {

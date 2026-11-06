@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 
 /**
  * A person's text as it goes into a line to Claude (the viewer's notifications, the SessionStart context): one line, at

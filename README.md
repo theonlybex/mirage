@@ -21,7 +21,7 @@ Mac only for now (macOS 26 or later). Windows comes later.
 
 **Overnight.** For long renders, keep the Mac plugged in with the lid open, and switch Claude Code to auto mode (press Shift+Tab until it says "auto") so nothing waits for a yes while you sleep. The screen can be off.
 
-**Licence.** Mirage is AGPL-3.0-or-later. Contributions are welcome under the same licence, with a DCO sign-off (`git commit -s`); see `CONTRIBUTING.md`.
+**Licence.** Mirage is MIT-licensed. Contributions are welcome under the same licence, with a DCO sign-off (`git commit -s`); see `CONTRIBUTING.md`.
 
 ## Develop
 

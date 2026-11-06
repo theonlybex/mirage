@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Where things go on the live timeline: ruler ticks, rows for overlapping pills, colours per beat, and times as text.
 
 /** Seconds as m:ss (or h:mm:ss), for the ruler and labels. */

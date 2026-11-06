@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // A small streaming reader for multipart/form-data with short text fields and at most one file, which goes straight to
 // disk (never whole into memory). Enough for the page's own uploads; not a general-purpose parser.
 import { createWriteStream, type WriteStream } from 'node:fs';

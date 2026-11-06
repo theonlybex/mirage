@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Pure decisions of the hooks: what a tool call is called, which video it belongs to, whether it changes the video, and
 // whether a file write is denied or auto-approved. Only node:fs/node:path here, so a hook outside a project loads fast.
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';

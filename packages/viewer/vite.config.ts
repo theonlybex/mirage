@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Builds the viewer page into dist-ui/. The server only serves index.html and assets/, adding the session key to each
 // src/href in the page and each url() in a stylesheet, so: everything goes under assets/ (no public/ folder), the
 // script is one file (no chunks, no dynamic import()), and the font and icons are bundled (the page may load nothing

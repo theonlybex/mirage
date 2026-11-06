@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Which Mirage project a hook event belongs to. Only node:fs/node:path, so main.ts can ask before loading anything else.
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

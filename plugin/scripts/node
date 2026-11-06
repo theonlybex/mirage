@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: MIT
 # Runs the Node.js 22 or later it can find, with all the arguments given: Mirage's hooks, engine and viewer start through
 # this, so they work whether or not Node is on the PATH Claude Code was started with.
 # Looked at in order: PATH, /opt/homebrew/bin/node, /usr/local/bin/node, the newest ~/.nvm/versions/node/*/bin/node,

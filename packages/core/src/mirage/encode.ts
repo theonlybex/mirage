@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { Encoder } from '../media-tools.js';
 
 export function bitrateFor(width: number, height: number, fps: number): string {

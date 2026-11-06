@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { Progress } from '../../view-types.js';
 import { Button } from '../components/Button.js';
 import { Icon } from '../components/Icon.js';

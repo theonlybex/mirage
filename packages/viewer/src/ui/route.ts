@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Pages by the address's #fragment, so the session key in the query stays put: `#/` and `#/v/<n>/<tab>`.
 import { useSyncExternalStore } from 'react';
 

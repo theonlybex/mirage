@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useEffect, useState, type ReactNode } from 'react';
 import { useEvents } from '../api.js';
 import { Chip } from '../components/Chip.js';

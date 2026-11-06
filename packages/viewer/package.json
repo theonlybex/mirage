@@ -2,7 +2,7 @@
   "name": "@wordedits/viewer",
   "version": "0.0.1",
   "private": true,
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "vite build",

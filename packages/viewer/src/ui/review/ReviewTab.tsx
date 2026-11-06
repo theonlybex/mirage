@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { useEffect, useId, useState } from 'react';
 import type { NoteView, VersionView } from '../../view-types.js';
 import type { LiveVideo } from '../api.js';

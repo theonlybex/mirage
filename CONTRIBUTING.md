@@ -1,6 +1,6 @@
 # Contributing to Mirage
 
-Mirage is licensed under the GNU Affero General Public License, version 3 or later (AGPL-3.0-or-later). The full text is in `LICENSE`.
+Mirage is licensed under the MIT License. The full text is in `LICENSE`.
 
 ## Licence of contributions
 
@@ -12,7 +12,7 @@ git commit -s
 
 That appends a `Signed-off-by:` line to the commit message. The sign-off refers to the Developer Certificate of Origin 1.1, which you can read at https://developercertificate.org.
 
-New source files start with `// SPDX-License-Identifier: AGPL-3.0-or-later`.
+New source files start with `// SPDX-License-Identifier: MIT`.
 
 ## Before you open a pull request
 

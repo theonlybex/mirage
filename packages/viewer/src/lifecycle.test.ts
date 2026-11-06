@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { stdinIsPipe, watchLifecycle } from './lifecycle.js';

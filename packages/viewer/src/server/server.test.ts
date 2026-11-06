@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { request as httpRequest } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';

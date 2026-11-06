@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { Button } from '../components/Button.js';
 import { Card } from '../components/Card.js';
 import { Chip } from '../components/Chip.js';

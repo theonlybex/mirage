@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { ReactNode } from 'react';
 import { Icon, type IconName } from './Icon.js';
 

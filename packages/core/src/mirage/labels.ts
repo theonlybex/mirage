@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { EpisodeMode } from './render-episode.js';
 
 /** What each kind of render is called to the person watching. */

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NOTE_STILL, NoteSchema, NotesFileSchema, type LogEntry, type Note } from '@wordedits/shared';

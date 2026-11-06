@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // The plugin end to end, without a model: the driver plays Claude Code (hooks, the engine over MCP, Write, the viewer
 // monitor) on a temp project, and the viewer page is used in Chromium as the person would.
 import { spawn } from 'node:child_process';

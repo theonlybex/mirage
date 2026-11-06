@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Viewer } from './server/server.js';

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 import type { Episode } from '@wordedits/shared';
 import type { IngestResult } from './ingest.js';
 import { loadCatalog } from './ingest.js';

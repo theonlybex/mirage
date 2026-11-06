@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Every Material Symbol the page uses. Adding one: put its name here, then run `pnpm --filter @wordedits/viewer icons`,
 // which writes its outlined and filled paths into icon-paths.generated.ts. A name used but not listed is a type error.
 
