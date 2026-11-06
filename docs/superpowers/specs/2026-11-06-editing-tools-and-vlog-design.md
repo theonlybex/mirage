@@ -194,7 +194,7 @@ L-cut to let a laugh or a reaction ring under the next shot. Not inside fast mon
 `new_video` takes it; the edit skill asks for it with the three questions it asks now (or infers it from what the
 person says, and says which it picked).
 
-The beat list grows. `BeatSchema` gains `hook`, `payoff`, `loop` (short) and `title-card`, `premise`, `bit`, `headline`,
+The beat list grows. `BeatSchema` gains `hook`, `payoff`, `tease`, `pointer`, `loop` (short) and `title-card`, `premise`, `bit`, `headline`,
 `sponsor`, `plugs`, `tag` (vlog). `check` warns when an item's beat isn't one of its video's format (an existing
 build-story episode is never refused for this).
 
@@ -205,21 +205,36 @@ build-story episode is never refused for this).
   style when the person asks for long vlogs.
 
 ### Short
-Beats: **hook** (frame 0: the claim, or the thing about to happen; no title, no logo, no "hey guys") → **payoff** →
-**loop** (ends mid-beat so the restart flows into the hook).
-- `check` warns when the first item starts with silence longer than 0.5 s or with a `title`/`cold-open` beat, when the
-  last music cue fades out at the end, and when there's an `outro`.
+Two kinds, both opening on a **hook** (frame 0: the claim, or the thing about to happen; no title, no logo, no "hey
+guys"):
+- **Teaser** (the default for a short made from a big video; see the release plan below): hook → **tease** (the
+  build, cut right before the payoff) → **pointer** (1–2 s pointing to the full video).
+- **Standalone** (a short with no big video behind it): hook → **payoff** → **loop** (ends mid-beat so the restart
+  flows into the hook).
+- `check` warns when the first item starts with silence longer than 0.5 s or with a `title`/`cold-open` beat, and when
+  there's an `outro`; for a standalone short also when the last music cue fades out at the end; for a teaser when it
+  has no `pointer`.
 - Claude writes 1080×1920 and `captions: { "style": "pop", "position": "middle" }` into a new short's `episode.json`.
 - The skill describes the loop: the last line or sound leads back into the first shot (a question the hook answers,
   a sentence cut so the hook finishes it, the same motion at both ends).
 - **The person's release plan** (their words): one big video, plus a few shorts from it, posted to YouTube Shorts and
-  the same files to Instagram Reels. So:
+  the same files to Instagram Reels. **The shorts are there mostly to bring people to the big video.** So:
+  - **Teaser shorts (the default for a short made `from` a big video):** hook → build → **cut right before the
+    payoff**, then a 1–2 s ending that points to the full video (a line said on camera if the footage has one, else a
+    `bold` card or overlay such as "Full video on my channel"). The payoff stays in the big video: a short never shows
+    the headline's reveal. Beats `hook` → `tease` → `pointer` (above); no loop. A short that tells one complete
+    small moment (a side gag, not the headline) is fine too when the person picks it; it still ends with the pointer.
+  - **The link:** the short's `summary.md` says what to set when posting: on YouTube, the short's "Related video"
+    set to the big video (so viewers get a tap-through link); on Instagram, which has no link on Reels, a caption
+    line pointing to the full video and the link in the bio. It also says to post the shorts after the big video is
+    live, so the link exists. Mirage doesn't post anything itself.
+  - **Titles for shorts** come from the big video's question ("Did he actually say yes?"), never the answer.
   - **Shorts from a big video:** `new_video` takes `from: <n>` (the big video's number) with `format: "short"`: the
     short gets the same footage folders, answers (`about`, `mention`, `hide`) and catalog, and Claude starts from the
     big video's best moments (its headline, reveals, laughs, the most-replayed kind of moment from the playbook)
     instead of cataloguing again. Each short is its own video number, with its own notes and versions. The edit skill
-    offers "a few shorts from this?" when a big video is finished, proposing 3–5 moments, each in one line, for the
-    person to pick.
+    offers "a few shorts from this?" when a big video is finished, proposing 3–5 moments, each in one line with where
+    it cuts off, for the person to pick.
   - **One file for both apps:** every short is made to work on both. Instagram's buttons and caption cover more of the
     picture than YouTube's, so Mirage keeps text and faces out of both apps' covered areas: about the bottom 20%, the
     top 10% and the right 15% of a 1080×1920 frame. `check` warns when an overlay, a card's text or a `middle`
@@ -353,6 +368,8 @@ After each: `pnpm test`, `pnpm typecheck`, `pnpm build:plugin`, a real render sh
   your own files in `sfx/` replace them by name.
 - Shorts are made from the big video's footage with `from: <n>`, and one file serves both YouTube Shorts and
   Instagram Reels by keeping text out of both apps' button areas.
+- Shorts made from a big video are teasers by default: they stop before the payoff and end pointing to the full
+  video (1–2 s).
 - Two bundled fonts so captions look the same on every computer.
 - `final.srt` stays normal phrase captions whatever style is burned in.
 - Old episodes, the Short already made among them, keep today's captions; new shorts get pop captions because Claude
