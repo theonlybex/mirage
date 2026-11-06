@@ -115,8 +115,9 @@ export interface SpokenLine {
 
 /**
  * Joins the spoken lines into one recording, in the order given, with NARRATION_GAPS of silence (each sentence trimmed to
- * its voice), and the transcript of that recording: the written words, timed by where each sentence's voice is. Each
- * line's last word ends a sentence, so the fit never reads two lines as one.
+ * its voice), and the transcript of that recording: the written words, timed by where each sentence's voice is. In the
+ * transcript each line is one sentence (only its last word ends one): the fit never reads two lines as one, and a line of
+ * many sentences is still one span to match (the fit lets a span cover at most six sentences).
  */
 export function assembleNarration(lines: SpokenLine[], sampleRate: number, gaps = NARRATION_GAPS): { samples: Float32Array; transcript: Transcript; lines: { slot: string; start: number; end: number }[] } {
   const pieces: Float32Array[] = [];
@@ -135,6 +136,7 @@ export function assembleNarration(lines: SpokenLine[], sampleRate: number, gaps 
     if (k > 0) silence(gaps.line);
     const lineStart = at;
     let spoken = 0;
+    const lineFrom = words.length;
     for (const s of line.sentences) {
       const v = voicedSpan(s.samples, sampleRate);
       if (!v) continue;
@@ -149,6 +151,7 @@ export function assembleNarration(lines: SpokenLine[], sampleRate: number, gaps 
       at += to - from;
     }
     if (!spoken) return;
+    for (let i = lineFrom; i < words.length - 1; i++) words[i] = { ...words[i], w: words[i].w.replace(/[.?!…]+(?=["'”’)\]]*$)/, '') };
     const last = words[words.length - 1];
     if (!/[.?!]["'”’)\]]*$/.test(last.w)) words[words.length - 1] = { ...last, w: `${last.w}.` };
     spans.push({ slot: line.slot, start: r3(lineStart / sampleRate), end: r3(at / sampleRate) });

@@ -32486,6 +32486,7 @@ function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
     if (k > 0) silence(gaps.line);
     const lineStart = at2;
     let spoken = 0;
+    const lineFrom = words.length;
     for (const s of line.sentences) {
       const v = voicedSpan(s.samples, sampleRate);
       if (!v) continue;
@@ -32500,6 +32501,7 @@ function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
       at2 += to - from;
     }
     if (!spoken) return;
+    for (let i2 = lineFrom; i2 < words.length - 1; i2++) words[i2] = { ...words[i2], w: words[i2].w.replace(/[.?!…]+(?=["'”’)\]]*$)/, "") };
     const last = words[words.length - 1];
     if (!/[.?!]["'”’)\]]*$/.test(last.w)) words[words.length - 1] = { ...last, w: `${last.w}.` };
     spans.push({ slot: line.slot, start: r37(lineStart / sampleRate), end: r37(at2 / sampleRate) });

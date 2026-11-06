@@ -115,7 +115,7 @@ describe('assembleNarration', () => {
       { slot: 'n2', sentences: [{ text: 'Then toggle it.', samples: fakeAudio('Then toggle it.') }, { text: 'Done!', samples: fakeAudio('Done!') }] },
     ];
     const r = assembleNarration(lines, RATE, { lead: 0.3, sentence: 0.3, line: 0.8 });
-    expect(r.transcript.words.map((w) => w.w)).toEqual(['Open', 'settings.', 'Then', 'toggle', 'it.', 'Done!']);
+    expect(r.transcript.words.map((w) => w.w)).toEqual(['Open', 'settings.', 'Then', 'toggle', 'it', 'Done!']);
     TranscriptSchema.parse(r.transcript);
     expect(r.lines.map((l) => l.slot)).toEqual(['n1', 'n2']);
     // Each sentence trimmed to its voice with 30 ms either side.
@@ -188,7 +188,7 @@ describe('speakNarration', () => {
     expect(ep.voiceover!.recording).toBe('episodes/1/narration-1.wav');
     expect(ep.voiceover!.lines.map((l) => l.text)).toEqual(['Open the settings.', 'Then pick a colour. It saves itself.']);
     const transcript = TranscriptSchema.parse(JSON.parse(await readFile(join(dir, 'episodes', '1', ep.voiceover!.transcripts['episodes/1/narration-1.wav']), 'utf8')));
-    expect(transcript.words.map((w) => w.w).join(' ')).toBe('Open the settings. Then pick a colour. It saves itself.');
+    expect(transcript.words.map((w) => w.w).join(' ')).toBe('Open the settings. Then pick a colour It saves itself.');
     // Each line plays from its own stretch of the recording.
     const [a, b] = ep.voiceover!.lines;
     expect(a.src.out).toBeLessThan(b.src.in);
@@ -201,6 +201,14 @@ describe('speakNarration', () => {
     expect(existsSync(join(dir, 'episodes', '1', 'narration-1.wav'))).toBe(true);
     const after = await loadEpisode(dir, 1);
     expect(after.voiceover!.lines.map((l) => [l.slot, l.recording ?? after.voiceover!.recording])).toEqual([['n1', 'episodes/1/narration-1.wav'], ['n2', 'episodes/1/narration-2.wav']]);
+  });
+
+  it('fits a line of many sentences: the transcript reads it as one', async () => {
+    const line = Array.from({ length: 13 }, (_, i) => `Panel ${i + 1} is here.`).join(' ');
+    const dir = await project([['n1', 0, 19.5, line]]);
+    const r = await speakNarration({ project: dir, episode: 1, tools, speaker: fakeSpeaker().speaker, voice: 'af_heart', speed: 1 });
+    expect(r.report.lines.map((l) => [l.slot, l.status])).toEqual([['n1', 'placed']]);
+    expect((await loadEpisode(dir, 1)).voiceover!.lines[0].text).toBe(line);
   });
 
   it('reads a line too long for its slot faster, up to 1.15×, then lets the fit hold the picture', async () => {

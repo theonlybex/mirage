@@ -150,5 +150,6 @@ main().catch((e: unknown) => {
   const { message, hint } = describeError(e);
   console.error(`\n✖ ${message}`);
   if (hint) console.error(`  ${hint}`);
-  process.exit(1);
+  // Not process.exit: with Kokoro loaded, exiting while onnxruntime's threads run aborts the process ("mutex lock failed").
+  process.exitCode = 1;
 });
