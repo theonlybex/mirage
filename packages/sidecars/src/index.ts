@@ -6,3 +6,4 @@ export { runFfmpeg, pickEncoder, makeProxy, measureLoudness, _resetEncoderCache,
 export { extractWav } from './ffmpeg.js';
 export { transcribeAudio, sentenceSegments, speechRanges } from './transcribe.js';
 export { locateWhisper, whisperModelPath, whisperSetup, wordsFromWhisperJson, dtwPreset, whisperLanguage, WHISPER, DEFAULT_MODEL, MODEL_URL } from './whisper.js';
+export { kokoroDir, kokoroSpeaker, installKokoro, locateNpm, ttsSetup, DEFAULT_VOICE, KOKORO_DOWNLOAD, KOKORO_MODEL, KOKORO_VOICES, type Speaker, type TtsState } from './kokoro.js';

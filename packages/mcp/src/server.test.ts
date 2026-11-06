@@ -10,14 +10,14 @@ import {
   type MediaTools,
 } from '@wordedits/core';
 import { EpisodeSchema } from '@wordedits/shared';
-import { SidecarError } from '@wordedits/sidecars';
+import { SidecarError, type Speaker } from '@wordedits/sidecars';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PreflightDeps } from './preflight.js';
 import { createEngineServer, newestSessionId, TOOL_NAMES, type EngineContext } from './server.js';
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
 const GB = 1024 ** 3;
-const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, transcriber: async () => null, ...over });
+const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, transcriber: async () => null, tts: async () => ({ state: 'ok' }), ...over });
 
 const clients: Client[] = [];
 afterEach(async () => {
@@ -64,7 +64,7 @@ describe('engine tools', () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names.sort()).toEqual([...TOOL_NAMES].sort());
     expect([...TOOL_NAMES]).toEqual([
-      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status',
+      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status',
     ]);
   });
 
@@ -340,6 +340,41 @@ describe('engine tools', () => {
     expect(await readLog(sessionDir(dir, 1, 'unknown'))).toHaveLength(1);
   });
 
+  it('speak reads the written lines with the voice it is given and fits them; it refuses a bad voice, speed or slot first', async () => {
+    const dir = await projectWithVideo({ slots: [{ id: 'n1', start: 0, end: 2.8, maxWords: 7, line: 'Hello there.' }] });
+    const read: string[] = [];
+    const speaker: Speaker = {
+      prepare: async (o) => o.onStep?.('Downloading the Kokoro voice model, once: 92 MB'),
+      speak: async (text, o) => {
+        read.push(`${o.voice}@${o.speed}: ${text}`);
+        const samples = new Float32Array(24000);
+        for (let i = 2400; i < 16800; i++) samples[i] = 0.3 * Math.sin(i / 10);
+        return { samples, sampleRate: 24000 };
+      },
+    };
+    const { call } = await connect(dir, { speaker });
+    const bad = await call('speak', { video: 1, voice: 'zz_robot' });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toMatch(/^✖ There is no voice zz_robot\n  Pick one of: af_heart, /);
+    expect((await call('speak', { video: 1, speed: 5 })).text).toMatch(/^✖ Speed 5 is out of range/);
+    expect((await call('speak', { video: 1, slots: ['n4'] })).text).toBe('✖ there is no slot n4\n  List slots from the slots tool.');
+    expect(read).toEqual([]);
+
+    const r = await call('speak', { video: 1, voice: 'bm_george', speed: 1.1 });
+    expect(r.isError).toBe(false);
+    const lines = r.text.split('\n');
+    expect(lines[0]).toBe('• Downloading the Kokoro voice model, once: 92 MB');
+    expect(lines).toContain('  n1  placed');
+    expect(lines.find((l) => l.startsWith('• Read 1 line with bm_george: '))).toMatch(/saved as episodes\/1\/narration-1\.wav$/);
+    expect(read).toEqual(['bm_george@1.1: Hello there.']);
+    expect((await loadEpisode(dir, 1)).voiceover!.recording).toBe('episodes/1/narration-1.wav');
+  });
+
+  it('speak says there are no lines yet', async () => {
+    const { call } = await connect(await projectWithVideo(), { speaker: { prepare: async () => {}, speak: async () => { throw new Error('nothing to read'); } } });
+    expect((await call('speak', { video: 1 })).text).toBe('✖ No narration lines are written yet\n  Run slots and write a line for each slot first.');
+  });
+
   it('versions lists deliveries as V<k> and the rest by label, with ids; restore goes back and keeps a backup', async () => {
     const dir = await projectWithVideo();
     await writeFile(join(dir, 'episodes', '1', 'rough.mp4'), 'x');
@@ -408,6 +443,11 @@ describe('engine tools', () => {
     }
     const { call } = await connect(dir, { preflightDeps: deps() });
     expect((await call('status')).text.split('\n')).toContain('transcriber: ok');
+    expect((await call('status')).text.split('\n')).toContain('tts: ok');
+    const later = await connect(dir, { preflightDeps: deps({ tts: async () => ({ state: 'fetch', text: 'not downloaded yet — speak downloads it' }) }) });
+    expect((await later.call('status')).text.split('\n')).toContain('tts: not downloaded yet — speak downloads it');
+    const never = await connect(dir, { preflightDeps: deps({ tts: async () => ({ state: 'missing', text: 'npm was not found.' }) }) });
+    expect((await never.call('status')).text.split('\n')).toContain('tts: missing — npm was not found.');
   });
 
   it('status on a folder that is not a project yet says so', async () => {

@@ -21,6 +21,7 @@ describe('stepLabel', () => {
     [E('slots'), { video: 1 }, 'Finding room for narration', 'Narration slots found'],
     [E('guide'), { video: 1 }, 'Rendering the guide video', 'Guide video rendered'],
     [E('vo'), { video: 1 }, 'Fitting your voice-over', 'Voice-over fitted'],
+    [E('speak'), { video: 1 }, 'Reading the narration aloud', 'Narration read and fitted'],
     [E('render'), { video: 1 }, 'Rendering the final video', 'Final video rendered'],
     [E('versions'), { video: 1 }, 'Checking', 'Checked'],
     [E('status'), {}, 'Checking', 'Checked'],
@@ -83,7 +84,7 @@ describe('videoOf', () => {
 describe('isChanging and isStage', () => {
   const p = '/proj';
   it('counts engine tools but the read-only ones, and saves inside episodes/ or of catalog.json', () => {
-    for (const t of ['check', 'cut', 'ingest', 'restore', 'note_status', 'new_video', 'vo']) expect(isChanging(E(t), {}, p)).toBe(true);
+    for (const t of ['check', 'cut', 'ingest', 'restore', 'note_status', 'new_video', 'vo', 'speak']) expect(isChanging(E(t), {}, p)).toBe(true);
     for (const t of ['versions', 'status', 'get_notes', 'log']) expect(isChanging(E(t), {}, p)).toBe(false);
     expect(isChanging('Write', { file_path: '/proj/episodes/1/episode.json' }, p)).toBe(true);
     expect(isChanging('Edit', { file_path: '/proj/episodes/1/notes/x.txt' }, p)).toBe(true);
@@ -95,7 +96,7 @@ describe('isChanging and isStage', () => {
   });
 
   it('isStage is true only for the engine stages', () => {
-    for (const t of ['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'render']) expect(isStage(E(t))).toBe(true);
+    for (const t of ['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']) expect(isStage(E(t))).toBe(true);
     for (const t of ['new_project', 'new_video', 'music', 'versions', 'restore', 'status', 'log', 'overnight']) expect(isStage(E(t))).toBe(false);
     expect(isStage('check')).toBe(false);
     expect(isStage('Write')).toBe(false);

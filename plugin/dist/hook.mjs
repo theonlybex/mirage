@@ -175,7 +175,7 @@ var init_policy = __esm({
     SAVE_TOOLS = /* @__PURE__ */ new Set(["Write", "Edit", "MultiEdit"]);
     FILE_TOOLS = /* @__PURE__ */ new Set([...SAVE_TOOLS, "NotebookEdit"]);
     READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log"]);
-    STAGES = /* @__PURE__ */ new Set(["ingest", "check", "cut", "slots", "guide", "vo", "render"]);
+    STAGES = /* @__PURE__ */ new Set(["ingest", "check", "cut", "slots", "guide", "vo", "speak", "render"]);
     NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video"]);
     ENGINE_LABELS = {
       new_project: ["Starting the project", "Project started"],
@@ -187,6 +187,7 @@ var init_policy = __esm({
       slots: ["Finding room for narration", "Narration slots found"],
       guide: ["Rendering the guide video", "Guide video rendered"],
       vo: ["Fitting your voice-over", "Voice-over fitted"],
+      speak: ["Reading the narration aloud", "Narration read and fitted"],
       render: ["Rendering the final video", "Final video rendered"],
       versions: ["Checking", "Checked"],
       status: ["Checking", "Checked"],
@@ -1363,12 +1364,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve10, reject) {
+        return new Promise(function(resolve11, reject) {
           isexe(path7, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve10(is);
+              resolve11(is);
             }
           });
         });
@@ -1434,27 +1435,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve10, reject) => {
+      const step = (i2) => new Promise((resolve11, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve10(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve11(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path7.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve10(subStep(p, i2, 0));
+        resolve11(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve10, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve11, reject) => {
         if (ii === pathExt.length)
-          return resolve10(step(i2 + 1));
+          return resolve11(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve10(p + ext);
+              return resolve11(p + ext);
           }
-          return resolve10(subStep(p, i2, ii + 1));
+          return resolve11(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -2534,8 +2535,8 @@ var init_deferred = __esm({
   "node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js"() {
     createDeferred = () => {
       const methods = {};
-      const promise2 = new Promise((resolve10, reject) => {
-        Object.assign(methods, { resolve: resolve10, reject });
+      const promise2 = new Promise((resolve11, reject) => {
+        Object.assign(methods, { resolve: resolve11, reject });
       });
       return Object.assign(promise2, methods);
     };
@@ -7833,11 +7834,11 @@ var init_concurrent = __esm({
       const promises = weakMap.get(stream);
       const promise2 = createDeferred();
       promises.push(promise2);
-      const resolve10 = promise2.resolve.bind(promise2);
-      return { resolve: resolve10, promises };
+      const resolve11 = promise2.resolve.bind(promise2);
+      return { resolve: resolve11, promises };
     };
-    waitForConcurrentStreams = async ({ resolve: resolve10, promises }, subprocess) => {
-      resolve10();
+    waitForConcurrentStreams = async ({ resolve: resolve11, promises }, subprocess) => {
+      resolve11();
       const [isSubprocessExit] = await Promise.race([
         Promise.allSettled([true, subprocess]),
         Promise.all([false, ...promises])
@@ -13105,7 +13106,7 @@ function isRef(value) {
 function cloneIssues(issues) {
   return issues.map((iss) => iss.path ? { ...iss, path: iss.path.slice() } : { ...iss });
 }
-function isRecursive(inst, stack, resolve10) {
+function isRecursive(inst, stack, resolve11) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -13115,7 +13116,7 @@ function isRecursive(inst, stack, resolve10) {
   let result2 = NONE;
   const check2 = (child) => {
     if (result2 !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve10);
+      const answer = isRecursive(child, stack, resolve11);
       if (answer > result2)
         result2 = answer;
     }
@@ -13126,7 +13127,7 @@ function isRecursive(inst, stack, resolve10) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve10) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve11) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -13190,7 +13191,7 @@ function isRecursive(inst, stack, resolve10) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve10 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve11 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -29853,6 +29854,45 @@ var init_transcribe = __esm({
   }
 });
 
+// packages/sidecars/src/kokoro.ts
+var KOKORO_VOICES;
+var init_kokoro = __esm({
+  "packages/sidecars/src/kokoro.ts"() {
+    "use strict";
+    init_errors();
+    KOKORO_VOICES = [
+      "af_heart",
+      "af_alloy",
+      "af_aoede",
+      "af_bella",
+      "af_jessica",
+      "af_kore",
+      "af_nicole",
+      "af_nova",
+      "af_river",
+      "af_sarah",
+      "af_sky",
+      "am_adam",
+      "am_echo",
+      "am_eric",
+      "am_fenrir",
+      "am_liam",
+      "am_michael",
+      "am_onyx",
+      "am_puck",
+      "am_santa",
+      "bf_emma",
+      "bf_isabella",
+      "bf_alice",
+      "bf_lily",
+      "bm_george",
+      "bm_lewis",
+      "bm_daniel",
+      "bm_fable"
+    ];
+  }
+});
+
 // packages/sidecars/src/index.ts
 var init_src2 = __esm({
   "packages/sidecars/src/index.ts"() {
@@ -29865,6 +29905,7 @@ var init_src2 = __esm({
     init_ffmpeg();
     init_transcribe();
     init_whisper();
+    init_kokoro();
   }
 });
 
@@ -32280,8 +32321,11 @@ async function fitLocked(o2, project, rec) {
   if (only) await checkKeptRecordings(project, ep, (l) => !only.includes(l.slot), recording, sha);
   const file2 = voTranscriptFile(sha);
   let transcript;
-  const reused = existsSync6(join9(dir, file2));
-  if (reused) {
+  const reused = !o2.transcript && existsSync6(join9(dir, file2));
+  if (o2.transcript) {
+    transcript = o2.transcript;
+    await writeJsonFile(join9(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
+  } else if (reused) {
     o2.onStep?.("Reusing the transcript of this recording");
     transcript = await readJsonFile(join9(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`);
   } else {
@@ -32358,8 +32402,242 @@ var init_voiceover_files = __esm({
   }
 });
 
-// packages/core/src/mirage/check.ts
+// packages/core/src/mirage/narration.ts
+import { existsSync as existsSync7 } from "node:fs";
+import { readdir as readdir4, rm as rm7, writeFile as writeFile4 } from "node:fs/promises";
 import { join as join10, resolve as resolve6 } from "node:path";
+function lineSentences(line) {
+  const sentences = line.trim().replace(/\s+/g, " ").split(/(?<=[.!?…]["'”’)\]]*)\s+/).filter((s) => hasWords(s));
+  return sentences.flatMap((s) => {
+    if (s.split(" ").length <= MAX_SENTENCE_WORDS) return [s];
+    const out = [];
+    let cur = "";
+    for (const clause of s.split(/(?<=[,;:—–])\s+/)) {
+      if (cur && (cur + " " + clause).split(" ").length > MAX_SENTENCE_WORDS) {
+        out.push(cur);
+        cur = clause;
+      } else cur = cur ? `${cur} ${clause}` : clause;
+    }
+    if (cur) out.push(cur);
+    return out;
+  });
+}
+function frameDb2(samples, sampleRate) {
+  const size = Math.max(1, Math.round(sampleRate * 0.01));
+  const db = [];
+  for (let i2 = 0; i2 + size <= samples.length; i2 += size) {
+    let sum = 0;
+    for (let j = i2; j < i2 + size; j++) sum += samples[j] * samples[j];
+    db.push(10 * Math.log10(sum / size + 1e-12));
+  }
+  return { db, size };
+}
+function voicedSpan(samples, sampleRate) {
+  const { db, size } = frameDb2(samples, sampleRate);
+  const peak = Math.max(-120, ...db);
+  if (peak < -60) return null;
+  const voiced = (f) => db[f] >= peak - 45;
+  let a2 = 0;
+  while (a2 < db.length && !voiced(a2)) a2++;
+  let b = db.length - 1;
+  while (b > a2 && !voiced(b)) b--;
+  const quiet = [];
+  for (let f = a2, run2 = -1; f <= b; f++) {
+    const low = db[f] < peak - 35;
+    if (low && run2 < 0) run2 = f;
+    if (!low && run2 >= 0) {
+      if (f - run2 >= 8) quiet.push([run2 * size, f * size]);
+      run2 = -1;
+    }
+  }
+  return { start: a2 * size, end: Math.min(samples.length, (b + 1) * size), quiet };
+}
+function spreadWords(text, start, end) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const total = words.reduce((n2, w) => n2 + weight(w), 0);
+  let t = start;
+  return words.map((w) => {
+    const d = (end - start) * weight(w) / total;
+    const word = { w, start: r37(t), end: r37(t + d), conf: 1 };
+    t += d;
+    return word;
+  });
+}
+function sentenceWords(text, start, end, pauses) {
+  const clauses = text.split(/(?<=[,;:—–])\s+/).filter(Boolean);
+  if (clauses.length < 2 || pauses.length < clauses.length - 1) return spreadWords(text, start, end);
+  const breaks = [...pauses].sort((a2, b) => b[1] - b[0] - (a2[1] - a2[0])).slice(0, clauses.length - 1).sort((a2, b) => a2[0] - b[0]);
+  return clauses.flatMap((c3, i2) => spreadWords(c3, i2 === 0 ? start : breaks[i2 - 1][1], i2 === clauses.length - 1 ? end : breaks[i2][0]));
+}
+function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
+  const pieces = [];
+  const words = [];
+  const segments2 = [];
+  const spans = [];
+  let at2 = 0;
+  const silence = (sec) => {
+    const n2 = Math.round(sec * sampleRate);
+    pieces.push(new Float32Array(n2));
+    at2 += n2;
+  };
+  const margin = Math.round(MARGIN_SEC * sampleRate);
+  silence(gaps.lead);
+  lines.forEach((line, k) => {
+    if (k > 0) silence(gaps.line);
+    const lineStart = at2;
+    let spoken = 0;
+    for (const s of line.sentences) {
+      const v = voicedSpan(s.samples, sampleRate);
+      if (!v) continue;
+      if (spoken++ > 0) silence(gaps.sentence);
+      const from = Math.max(0, v.start - margin);
+      const to = Math.min(s.samples.length, v.end + margin);
+      pieces.push(s.samples.subarray(from, to));
+      const sec = (x) => (at2 + x - from) / sampleRate;
+      const sw = sentenceWords(s.text, sec(v.start), sec(v.end), v.quiet.map(([a2, b]) => [sec(a2), sec(b)]));
+      words.push(...sw);
+      segments2.push({ start: r37(sec(v.start)), end: r37(sec(v.end)), text: s.text });
+      at2 += to - from;
+    }
+    if (!spoken) return;
+    const last = words[words.length - 1];
+    if (!/[.?!]["'”’)\]]*$/.test(last.w)) words[words.length - 1] = { ...last, w: `${last.w}.` };
+    spans.push({ slot: line.slot, start: r37(lineStart / sampleRate), end: r37(at2 / sampleRate) });
+  });
+  silence(gaps.lead);
+  const samples = new Float32Array(at2);
+  let o2 = 0;
+  for (const p of pieces) {
+    samples.set(p, o2);
+    o2 += p.length;
+  }
+  return { samples, transcript: { words, segments: segments2, speech: segments2.map((s) => [s.start, s.end]) }, lines: spans };
+}
+function wavBytes(samples, sampleRate) {
+  const b = Buffer.alloc(44 + samples.length * 2);
+  b.write("RIFF", 0, "ascii");
+  b.writeUInt32LE(36 + samples.length * 2, 4);
+  b.write("WAVEfmt ", 8, "ascii");
+  b.writeUInt32LE(16, 16);
+  b.writeUInt16LE(1, 20);
+  b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(sampleRate, 24);
+  b.writeUInt32LE(sampleRate * 2, 28);
+  b.writeUInt16LE(2, 32);
+  b.writeUInt16LE(16, 34);
+  b.write("data", 36, "ascii");
+  b.writeUInt32LE(samples.length * 2, 40);
+  for (let i2 = 0; i2 < samples.length; i2++) b.writeInt16LE(Math.round(Math.max(-1, Math.min(1, samples[i2])) * 32767), 44 + i2 * 2);
+  return b;
+}
+function checkSpeakOptions(voice, speed) {
+  if (!KOKORO_VOICES.includes(voice)) {
+    throw new MirageError("BAD_INPUT", `There is no voice ${voice}`, `Pick one of: ${KOKORO_VOICES.join(", ")} (af/am: American, bf/bm: British; f female, m male).`);
+  }
+  if (!Number.isFinite(speed) || speed < 0.5 || speed > 2) throw new MirageError("BAD_INPUT", `Speed ${speed} is out of range`, "Use a speed from 0.5 (slower) to 2 (faster); 1 is normal.");
+}
+async function nextNarrationFile(dir) {
+  const used = (await readdir4(dir).catch(() => [])).map((f) => /^narration-(\d+)\.wav$/.exec(f)?.[1]).filter(Boolean).map(Number);
+  return `narration-${used.length ? Math.max(...used) + 1 : 1}.wav`;
+}
+function narrationTargets(ep, only) {
+  if (!ep.slots.some((s) => hasWords(s.line))) {
+    const foreign = ep.slots.filter((s) => notEnglish(s.line)).map((s) => s.id);
+    if (foreign.length) throw englishOnlyError(foreign);
+    throw new MirageError("NOTHING_MATCHED", "No narration lines are written yet", "Run slots and write a line for each slot first.");
+  }
+  if (slotsStale(ep)) throw slotsStaleError(ep.number);
+  if (only?.length) {
+    if (cutChanged(ep)) throw cutChangedError();
+    for (const id of only) {
+      const slot = ep.slots.find((s) => s.id === id);
+      if (!slot) throw new MirageError("BAD_ITEM", `there is no slot ${id}`, "List slots from the slots tool.");
+      if (!hasWords(slot.line)) throw new MirageError("BAD_ITEM", `slot ${id} has no written line`, "Write its line first, or list slots that have one.");
+    }
+  }
+  const wanted = only?.length ? new Set(only) : null;
+  return ep.slots.filter((s) => hasWords(s.line) && (!wanted || wanted.has(s.id))).sort((a2, b) => a2.start - b.start);
+}
+async function speakNarration(o2) {
+  checkSpeakOptions(o2.voice, o2.speed);
+  const project = resolve6(o2.project);
+  const n2 = o2.episode;
+  const targets = narrationTargets(await loadEpisode(project, n2), o2.slots);
+  const english = targets.filter((s) => !notEnglish(s.line));
+  if (!english.length) throw englishOnlyError(targets.map((s) => s.id));
+  const dir = episodeDir(project, n2);
+  let wav = null;
+  try {
+    await o2.speaker.prepare({ onStep: o2.onStep, signal: o2.signal });
+    const started = Date.now();
+    const spoken = [];
+    const spedUp = [];
+    let rate = 0;
+    const read = async (line, speed) => {
+      const out = [];
+      for (const text of lineSentences(line)) {
+        o2.signal?.throwIfAborted();
+        const a2 = await o2.speaker.speak(text, { voice: o2.voice, speed, signal: o2.signal });
+        if (rate && a2.sampleRate !== rate) throw new MirageError("BAD_INPUT", "The voice changed sample rate mid-way", "Run speak again.");
+        rate = a2.sampleRate;
+        out.push({ text, samples: a2.samples });
+      }
+      return out;
+    };
+    const spokenSec = (s) => {
+      const voiced = s.map((x) => voicedSpan(x.samples, rate)).filter((v) => v !== null);
+      return voiced.reduce((t, v) => t + (v.end - v.start) / rate, 0) + Math.max(0, voiced.length - 1) * NARRATION_GAPS.sentence;
+    };
+    o2.onStep?.(`Reading ${english.length} line${english.length === 1 ? "" : "s"} with ${o2.voice}\u2026`);
+    for (const [i2, slot] of english.entries()) {
+      let sentences = await read(slot.line, o2.speed);
+      const room = slot.end - slot.start - 0.1;
+      const sec = spokenSec(sentences);
+      if (sec > room && room > 0) {
+        const faster = Math.round(Math.min(o2.speed * MAX_SPEEDUP, o2.speed * sec / room + 0.01) * 100) / 100;
+        sentences = await read(slot.line, faster);
+        spedUp.push({ slot: slot.id, speed: faster });
+      }
+      spoken.push({ slot: slot.id, sentences });
+      o2.onProgress?.((i2 + 1) / english.length * 0.9);
+    }
+    const synthSec = (Date.now() - started) / 1e3;
+    const joined = assembleNarration(spoken, rate);
+    o2.signal?.throwIfAborted();
+    const name = await nextNarrationFile(dir);
+    await writeFile4(join10(dir, name), wavBytes(joined.samples, rate), { flag: "wx" });
+    wav = join10(dir, name);
+    const fit = await fitRecording({ project, episode: n2, recording: wav, tools: o2.tools, add: !!o2.slots?.length, slots: o2.slots, transcript: joined.transcript, onStep: o2.onStep, signal: o2.signal });
+    o2.onProgress?.(1);
+    const audioSec = r37(joined.lines.reduce((t, l) => t + l.end - l.start, 0));
+    return { recording: `episodes/${n2}/${name}`, report: fit.report, episode: fit.episode, audioSec, synthSec: r37(synthSec), spedUp };
+  } catch (e) {
+    if (wav && existsSync7(wav)) await rm7(wav, { force: true });
+    throw asCancelled(e, o2.signal);
+  }
+}
+var r37, NARRATION_GAPS, MARGIN_SEC, MAX_SPEEDUP, MAX_SENTENCE_WORDS, weight;
+var init_narration = __esm({
+  "packages/core/src/mirage/narration.ts"() {
+    "use strict";
+    init_src2();
+    init_cancel2();
+    init_errors4();
+    init_render_episode();
+    init_slots();
+    init_voiceover();
+    init_voiceover_files();
+    r37 = (n2) => Math.round(n2 * 1e3) / 1e3;
+    NARRATION_GAPS = { lead: 0.3, sentence: 0.3, line: 0.8 };
+    MARGIN_SEC = 0.03;
+    MAX_SPEEDUP = 1.15;
+    MAX_SENTENCE_WORDS = 40;
+    weight = (w) => [...w].reduce((n2, c3) => n2 + (/\d/.test(c3) ? 3 : new RegExp("\\p{L}", "u").test(c3) ? 1 : 0), 0) + 1.5;
+  }
+});
+
+// packages/core/src/mirage/check.ts
+import { join as join11, resolve as resolve7 } from "node:path";
 function timelineWarnings(ep, lib, snapped) {
   const out = [];
   const D = timelineDuration(ep);
@@ -32399,13 +32677,13 @@ function timelineWarnings(ep, lib, snapped) {
   return out;
 }
 async function checkEpisode(project, n2) {
-  const root = resolve6(project);
+  const root = resolve7(project);
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n2);
   sourcesFor(ep, catalog);
   const warnings = [];
   const notes = [];
-  const musicDir = join10(root, "music");
+  const musicDir = join11(root, "music");
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
   if (ep.voiceover) {
@@ -32451,30 +32729,30 @@ var init_check = __esm({
 });
 
 // packages/core/src/mirage/project.ts
-import { existsSync as existsSync7 } from "node:fs";
-import { mkdir as mkdir4, writeFile as writeFile4 } from "node:fs/promises";
+import { existsSync as existsSync8 } from "node:fs";
+import { mkdir as mkdir4, writeFile as writeFile5 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { join as join11, resolve as resolve7 } from "node:path";
+import { join as join12, resolve as resolve8 } from "node:path";
 function resolveUserPath(p, base = process.env.INIT_CWD ?? process.cwd(), home = homedir2()) {
   if (p === "~") return home;
-  if (p.startsWith("~/")) return join11(home, p.slice(2));
-  return resolve7(base, p);
+  if (p.startsWith("~/")) return join12(home, p.slice(2));
+  return resolve8(base, p);
 }
 async function initProject(project, title) {
-  const file2 = join11(project, "mirage.json");
-  if (existsSync7(file2)) throw new MirageError("BAD_INPUT", `${project} is already a Mirage project`, "Nothing was changed; edit mirage.json to change its title.");
-  await mkdir4(join11(project, "episodes"), { recursive: true });
-  await mkdir4(join11(project, "music"), { recursive: true });
-  await writeFile4(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
+  const file2 = join12(project, "mirage.json");
+  if (existsSync8(file2)) throw new MirageError("BAD_INPUT", `${project} is already a Mirage project`, "Nothing was changed; edit mirage.json to change its title.");
+  await mkdir4(join12(project, "episodes"), { recursive: true });
+  await mkdir4(join12(project, "music"), { recursive: true });
+  await writeFile5(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
 }
 function requireProject(project) {
-  if (!existsSync7(join11(project, "mirage.json"))) {
+  if (!existsSync8(join12(project, "mirage.json"))) {
     throw new MirageError("NO_PROJECT", `no Mirage project at ${project}`, `Check the path, or create one with: pnpm mirage init ${project} --title "<title>"`);
   }
 }
 async function readProject(project) {
   try {
-    return await readJsonFile(join11(project, "mirage.json"), MirageProjectSchema, "mirage.json");
+    return await readJsonFile(join12(project, "mirage.json"), MirageProjectSchema, "mirage.json");
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -32491,8 +32769,8 @@ var init_project2 = __esm({
 
 // packages/core/src/mirage/versions.ts
 import { randomBytes, randomUUID as randomUUID6 } from "node:crypto";
-import { access as access3, copyFile, link, mkdir as mkdir5, readdir as readdir4, readFile as readFile6, rename as rename4, rm as rm7, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join12 } from "node:path";
+import { access as access3, copyFile, link, mkdir as mkdir5, readdir as readdir5, readFile as readFile6, rename as rename4, rm as rm8, writeFile as writeFile6 } from "node:fs/promises";
+import { join as join13 } from "node:path";
 async function readBytes(path7) {
   try {
     return await readFile6(path7);
@@ -32503,7 +32781,7 @@ async function readBytes(path7) {
 }
 async function writeBytesAtomic(path7, bytes) {
   const tmpPath = `${path7}.tmp-${randomUUID6()}`;
-  await writeFile5(tmpPath, bytes);
+  await writeFile6(tmpPath, bytes);
   await rename4(tmpPath, path7);
 }
 async function linkOrCopy(from, to) {
@@ -32538,14 +32816,14 @@ async function withEpisodeLock(project, n2, waitMs, fn) {
 }
 async function listLocked(project, n2) {
   const root = versionsDir(project, n2);
-  const names = await readdir4(root).catch((e) => {
+  const names = await readdir5(root).catch((e) => {
     if (e.code === "ENOENT") return [];
     throw e;
   });
   const metas = [];
   for (const name of names.filter((f) => ID_PATTERN.test(f)).sort()) {
     try {
-      const meta3 = await readJsonFile(join12(root, name, "meta.json"), VersionMetaSchema);
+      const meta3 = await readJsonFile(join13(root, name, "meta.json"), VersionMetaSchema);
       if (meta3.id === name) metas.push(meta3);
     } catch {
     }
@@ -32555,27 +32833,27 @@ async function listLocked(project, n2) {
 async function snapshotLocked(project, n2, o2) {
   const dir = episodeDir(project, n2);
   const root = versionsDir(project, n2);
-  if (o2.render && !await access3(join12(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
+  if (o2.render && !await access3(join13(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
     throw new MirageError("BAD_INPUT", `episodes/${n2}/${o2.render}.mp4 does not exist`, "Render it first.");
   }
   await mkdir5(root, { recursive: true });
-  for (const f of await readdir4(root)) if (f.startsWith(".tmp-")) await rm7(join12(root, f), { recursive: true, force: true }).catch(() => {
+  for (const f of await readdir5(root)) if (f.startsWith(".tmp-")) await rm8(join13(root, f), { recursive: true, force: true }).catch(() => {
   });
   const existing = await listLocked(project, n2);
   const now = /* @__PURE__ */ new Date();
   const id = newId(o2.kind, now);
-  const tmp = join12(root, `.tmp-${randomUUID6()}`);
+  const tmp = join13(root, `.tmp-${randomUUID6()}`);
   await mkdir5(tmp);
   try {
-    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join12(dir, f))));
-    if (episode) await writeFile5(join12(tmp, "episode.json"), episode);
-    if (summary) await writeFile5(join12(tmp, "summary.md"), summary);
+    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join13(dir, f))));
+    if (episode) await writeFile6(join13(tmp, "episode.json"), episode);
+    if (summary) await writeFile6(join13(tmp, "summary.md"), summary);
     let render = null;
     if (o2.render) {
-      await linkOrCopy(join12(dir, `${o2.render}.mp4`), join12(tmp, "video.mp4"));
+      await linkOrCopy(join13(dir, `${o2.render}.mp4`), join13(tmp, "video.mp4"));
       let captions = null;
-      if (o2.render === "final" && await readBytes(join12(dir, "final.srt")) !== null) {
-        await copyFile(join12(dir, "final.srt"), join12(tmp, "captions.srt"));
+      if (o2.render === "final" && await readBytes(join13(dir, "final.srt")) !== null) {
+        await copyFile(join13(dir, "final.srt"), join13(tmp, "captions.srt"));
         captions = "captions.srt";
       }
       render = { mode: o2.render, file: "video.mp4", captions };
@@ -32593,13 +32871,13 @@ async function snapshotLocked(project, n2, o2) {
       hasEpisode: episode !== null,
       hasSummary: summary !== null
     };
-    await writeJsonFile(join12(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
-    await rename4(tmp, join12(root, id));
+    await writeJsonFile(join13(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
+    await rename4(tmp, join13(root, id));
     if (o2.kind === "checkpoint") await prune(project, n2, "checkpoint", MAX_CHECKPOINTS);
     if (o2.kind === "backup") await prune(project, n2, "backup", MAX_BACKUPS);
     return meta3;
   } catch (e) {
-    await rm7(tmp, { recursive: true, force: true }).catch(() => {
+    await rm8(tmp, { recursive: true, force: true }).catch(() => {
     });
     throw e;
   }
@@ -32607,7 +32885,7 @@ async function snapshotLocked(project, n2, o2) {
 async function prune(project, n2, kind, keep) {
   const ofKind = (await listLocked(project, n2)).filter((v) => v.kind === kind);
   for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
-    await rm7(join12(versionsDir(project, n2), old.id), { recursive: true, force: true });
+    await rm8(join13(versionsDir(project, n2), old.id), { recursive: true, force: true });
   }
 }
 async function snapshotVersion(project, n2, o2) {
@@ -32620,14 +32898,14 @@ async function restoreVersion(project, n2, id, o2 = {}) {
   return withEpisodeLock(project, n2, o2.waitMs, async () => {
     const restored = (await listLocked(project, n2)).find((v) => v.id === id);
     if (!restored) throw new MirageError("BAD_INPUT", `episodes/${n2} has no saved version "${id}"`, "List the versions and pick one of those.");
-    const from = join12(versionsDir(project, n2), id);
-    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join12(from, f))));
+    const from = join13(versionsDir(project, n2), id);
+    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join13(from, f))));
     const backup = await snapshotLocked(project, n2, { kind: "backup", label: `Before going back to \u201C${restored.label}\u201D` });
     const dir = episodeDir(project, n2);
     for (const [i2, f] of STATE_FILES.entries()) {
       const b = bytes[i2];
-      if (b) await writeBytesAtomic(join12(dir, f), b);
-      else await rm7(join12(dir, f), { force: true });
+      if (b) await writeBytesAtomic(join13(dir, f), b);
+      else await rm8(join13(dir, f), { force: true });
     }
     return { restored, backup };
   });
@@ -32646,7 +32924,7 @@ var init_versions2 = __esm({
     RETRY_MS = 250;
     STATE_FILES = ["episode.json", "summary.md"];
     ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
-    versionsDir = (project, n2) => join12(episodeDir(project, n2), "versions");
+    versionsDir = (project, n2) => join13(episodeDir(project, n2), "versions");
     pad = (v, w) => String(v).padStart(w, "0");
   }
 });
@@ -32667,8 +32945,8 @@ var init_labels = __esm({
 // packages/core/src/mirage/session-files.ts
 import { randomUUID as randomUUID7 } from "node:crypto";
 import { readFileSync as readFileSync3 } from "node:fs";
-import { appendFile, link as link2, mkdir as mkdir6, readdir as readdir5, readFile as readFile7, rename as rename5, rm as rm8, stat as stat4, utimes, writeFile as writeFile6 } from "node:fs/promises";
-import { dirname as dirname3, join as join13, resolve as resolve8 } from "node:path";
+import { appendFile, link as link2, mkdir as mkdir6, readdir as readdir6, readFile as readFile7, rename as rename5, rm as rm9, stat as stat4, utimes, writeFile as writeFile7 } from "node:fs/promises";
+import { dirname as dirname3, join as join14, resolve as resolve9 } from "node:path";
 function checkSessionId(id) {
   if (!SESSION_ID.test(id) || id.includes("..")) throw new MirageError("BAD_INPUT", `"${id}" is not a session id`, "A session id is letters, digits, dots, dashes and underscores.");
   return id;
@@ -32720,29 +32998,29 @@ async function readControlFile(path7) {
 }
 async function writeControlIfNone(path7, control) {
   try {
-    await writeFile6(path7, JSON.stringify(ControlSchema.parse(control), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+    await writeFile7(path7, JSON.stringify(ControlSchema.parse(control), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
 }
 async function claimedControl(project, n2, written) {
   const dir = episodeDir(project, n2);
-  const names = (await readdir5(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
+  const names = (await readdir6(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
   let best = null;
   const stale = [];
   for (const name of names) {
-    const info = await stat4(join13(dir, name)).catch(() => null);
+    const info = await stat4(join14(dir, name)).catch(() => null);
     if (!info) continue;
     if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
     if (written) continue;
-    const control = await readControlFile(join13(dir, name));
+    const control = await readControlFile(join14(dir, name));
     if (control && (!best || info.mtimeMs > best.mtime)) best = { control, mtime: info.mtimeMs };
   }
   const claimed = best ? { ...best.control, correction: null } : null;
   if (stale.length) {
     try {
       if (claimed && stale.length === names.length) await writeControlIfNone(controlPath(project, n2), claimed);
-      for (const name of stale) await rm8(join13(dir, name), { force: true });
+      for (const name of stale) await rm9(join14(dir, name), { force: true });
     } catch {
     }
   }
@@ -32766,7 +33044,7 @@ async function takeCorrection(project, n2, o2 = {}) {
   const path7 = controlPath(project, n2);
   const peek = await readControlFile(path7);
   if (!peek || peek.correction === null) return null;
-  const claim2 = join13(episodeDir(project, n2), claimName());
+  const claim2 = join14(episodeDir(project, n2), claimName());
   try {
     await rename5(path7, claim2);
   } catch (e) {
@@ -32786,10 +33064,10 @@ async function takeCorrection(project, n2, o2 = {}) {
       if (code === "EPERM" || code === "ENOTSUP" || code === "EXDEV" || code === "ENOSYS") await writeControlIfNone(path7, rest);
       else if (code !== "EEXIST") throw e;
     } finally {
-      await rm8(tmp, { force: true });
+      await rm9(tmp, { force: true });
     }
   }
-  await rm8(claim2, { force: true });
+  await rm9(claim2, { force: true });
   return text;
 }
 async function readSessionState(project, sessionId) {
@@ -32818,7 +33096,7 @@ async function touchSessionState(project, sessionId) {
 }
 function claudeProcessPath(project, pid) {
   if (!Number.isInteger(pid) || pid <= 0) throw new MirageError("BAD_INPUT", `"${pid}" is not a process id`, "A process id is a whole number above 0.");
-  return join13(resolve8(project), ".mirage", "claude", `${pid}.json`);
+  return join14(resolve9(project), ".mirage", "claude", `${pid}.json`);
 }
 async function writeClaudeProcess(project, pid, sessionId, at2 = /* @__PURE__ */ new Date()) {
   const path7 = claudeProcessPath(project, pid);
@@ -32842,16 +33120,16 @@ var init_session_files = __esm({
     init_json_file();
     init_render_episode();
     SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-    sessionDir = (project, n2, sessionId) => join13(episodeDir(project, n2), "sessions", checkSessionId(sessionId));
-    stepsPath = (dir) => join13(dir, "steps.jsonl");
-    logPath = (dir) => join13(dir, "log.jsonl");
-    progressPath = (dir) => join13(dir, "progress.json");
+    sessionDir = (project, n2, sessionId) => join14(episodeDir(project, n2), "sessions", checkSessionId(sessionId));
+    stepsPath = (dir) => join14(dir, "steps.jsonl");
+    logPath = (dir) => join14(dir, "log.jsonl");
+    progressPath = (dir) => join14(dir, "progress.json");
     appendStep = (dir, line) => appendLine(stepsPath(dir), StepLineSchema, line);
     readSteps = (dir) => readLines(stepsPath(dir), StepLineSchema);
     appendLog = (dir, entry) => appendLine(logPath(dir), LogEntrySchema, entry);
     readLog = (dir) => readLines(logPath(dir), LogEntrySchema);
-    clearProgress = (dir) => rm8(progressPath(dir), { force: true });
-    controlPath = (project, n2) => join13(episodeDir(project, n2), "control.json");
+    clearProgress = (dir) => rm9(progressPath(dir), { force: true });
+    controlPath = (project, n2) => join14(episodeDir(project, n2), "control.json");
     CLAIM = "control.json.take-";
     defaultControl = () => ({ version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
     CLAIM_STALE_MS = 6e4;
@@ -32860,20 +33138,20 @@ var init_session_files = __esm({
       const m = /^control\.json\.take-(\d{13})-/.exec(name);
       return m ? Number(m[1]) : mtime;
     };
-    sessionStatePath = (project, sessionId) => join13(resolve8(project), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
+    sessionStatePath = (project, sessionId) => join14(resolve9(project), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
     emptySession = () => ({ video: null, overnight: null, awakePid: null });
   }
 });
 
 // packages/core/src/mirage/video.ts
-import { access as access4, mkdir as mkdir7, readdir as readdir6 } from "node:fs/promises";
-import { join as join14, resolve as resolve9 } from "node:path";
+import { access as access4, mkdir as mkdir7, readdir as readdir7 } from "node:fs/promises";
+import { join as join15, resolve as resolve10 } from "node:path";
 async function newVideo(project, v) {
   const video = VideoSchema.parse({ ...v, version: 1, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
-  const root = join14(resolve9(project), "episodes");
+  const root = join15(resolve10(project), "episodes");
   await mkdir7(root, { recursive: true });
   for (; ; ) {
-    const highest = (await readdir6(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
+    const highest = (await readdir7(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
     const n2 = highest + 1;
     try {
       await mkdir7(episodeDir(project, n2));
@@ -32897,7 +33175,7 @@ async function videoStage(project, n2) {
   const dir = episodeDir(project, n2);
   let stage = "new";
   for (const s of ["final", "guide", "rough"]) {
-    if (await access4(join14(dir, `${s}.mp4`)).then(() => true, () => false)) {
+    if (await access4(join15(dir, `${s}.mp4`)).then(() => true, () => false)) {
       stage = s;
       break;
     }
@@ -32913,13 +33191,13 @@ var init_video2 = __esm({
     init_json_file();
     init_render_episode();
     init_versions2();
-    videoPath = (project, n2) => join14(episodeDir(project, n2), "video.json");
+    videoPath = (project, n2) => join15(episodeDir(project, n2), "video.json");
   }
 });
 
 // packages/core/src/mirage/notes.ts
-import { mkdir as mkdir8, readdir as readdir7, rm as rm9 } from "node:fs/promises";
-import { join as join15 } from "node:path";
+import { mkdir as mkdir8, readdir as readdir8, rm as rm10 } from "node:fs/promises";
+import { join as join16 } from "node:path";
 async function readNotes(project, n2) {
   try {
     return (await readJsonFile(notesPath(project, n2), NotesFileSchema, `episodes/${n2}/notes.json`)).notes;
@@ -32938,12 +33216,12 @@ async function addNote(project, n2, o2) {
   const notes = await readNotes(project, n2);
   const id = `n${notes.reduce((m, x) => Math.max(m, Number(x.id.slice(1))), 0) + 1}`;
   const note = NoteSchema.parse({ id, versionId: o2.versionId, t: o2.t, text: o2.text, box: o2.box, still: `notes/${id}.jpg`, createdAt: (/* @__PURE__ */ new Date()).toISOString(), round: null });
-  const out = join15(episodeDir(project, n2), note.still);
-  await mkdir8(join15(episodeDir(project, n2), "notes"), { recursive: true });
+  const out = join16(episodeDir(project, n2), note.still);
+  await mkdir8(join16(episodeDir(project, n2), "notes"), { recursive: true });
   try {
     await o2.tools.runFfmpeg(["-ss", o2.t.toFixed(3), "-i", o2.videoPath, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", out]);
   } catch (e) {
-    await rm9(out, { force: true });
+    await rm10(out, { force: true });
     throw e;
   }
   await saveNotes(project, n2, [...notes, note]);
@@ -32961,7 +33239,7 @@ async function deleteNote(project, n2, id) {
   const note = find(notes, id);
   if (!NOTE_STILL.test(note.still)) throw new MirageError("BAD_INPUT", `Note ${id} has a still outside notes/.`, "Check notes.json.");
   await saveNotes(project, n2, notes.filter((x) => x.id !== id));
-  await rm9(join15(episodeDir(project, n2), note.still), { force: true });
+  await rm10(join16(episodeDir(project, n2), note.still), { force: true });
 }
 async function sendNotes(project, n2) {
   const notes = await readNotes(project, n2);
@@ -32973,12 +33251,12 @@ async function sendNotes(project, n2) {
   return next.filter((x) => unsent.some((u2) => u2.id === x.id));
 }
 async function noteStatuses(project, n2) {
-  const sessions = join15(episodeDir(project, n2), "sessions");
-  const entries = await readdir7(sessions, { withFileTypes: true }).catch(() => []);
+  const sessions = join16(episodeDir(project, n2), "sessions");
+  const entries = await readdir8(sessions, { withFileTypes: true }).catch(() => []);
   const names = entries.filter((d) => d.isDirectory()).map((d) => d.name).sort();
   const newest = /* @__PURE__ */ new Map();
   for (const name of names) {
-    for (const e of await readLog(join15(sessions, name))) {
+    for (const e of await readLog(join16(sessions, name))) {
       if (e.kind !== "note-status" || !e.noteId || !e.status) continue;
       const at2 = Date.parse(e.at);
       const prev = newest.get(e.noteId);
@@ -32997,7 +33275,7 @@ var init_notes2 = __esm({
     init_json_file();
     init_render_episode();
     init_session_files();
-    notesPath = (project, n2) => join15(episodeDir(project, n2), "notes.json");
+    notesPath = (project, n2) => join16(episodeDir(project, n2), "notes.json");
     saveNotes = (project, n2, notes) => writeJsonFile(notesPath(project, n2), NotesFileSchema, { version: 1, notes }, `episodes/${n2}/notes.json`);
     sentError = () => new MirageError("BAD_INPUT", "This note was already sent.", "Add a new note instead.");
   }
@@ -33061,17 +33339,28 @@ function slotsReport({ slots, moved, dropped }) {
   lines.push(`\u2713 ${slots.length} slot${slots.length === 1 ? "" : "s"}, ${written} with lines${dropped.length ? `, ${dropped.length} dropped` : ""}`);
   return lines;
 }
-function voReport(report, n2) {
+function voReport(report, n2, via = "vo") {
   const lines = [];
+  const again = via === "speak" ? "speak with slots" : "vo --add";
   for (const l of report.lines) {
-    const status = l.status === "kept" ? "kept the earlier take (not found in this recording)" : l.status === "too long" ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold \u2014 shorten it or give it a longer slot, then vo --add` : l.status === "partial" ? `\u26A0 only part of the line was found \u2014 re-read the whole line with vo --add --slots ${l.slot}` : l.status;
+    const status = l.status === "kept" ? "kept the earlier take (not found in this recording)" : l.status === "too long" ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold \u2014 shorten it or give it a longer slot, then ${again}` : l.status === "partial" ? via === "speak" ? `\u26A0 only part of the line was found \u2014 run speak with slots ["${l.slot}"] again` : `\u26A0 only part of the line was found \u2014 re-read the whole line with vo --add --slots ${l.slot}` : l.status;
     lines.push(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ""}${l.overrunSec && (l.status === "placed" || l.status === "partial") ? `  held picture +${l.overrunSec}s` : ""}`);
   }
   const missing = report.lines.filter((l) => l.status === "missing").map((l) => l.slot);
   lines.push(`\u2713 voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ""}`);
-  if (missing.length) lines.push(`\u26A0 not found: ${missing.join(", ")} \u2014 record just those lines, then: pnpm mirage vo <project> ${n2} <new recording> --add`);
+  if (missing.length) {
+    lines.push(via === "speak" ? `\u26A0 not found: ${missing.join(", ")} \u2014 run speak again with slots ${JSON.stringify(missing)}` : `\u26A0 not found: ${missing.join(", ")} \u2014 record just those lines, then: pnpm mirage vo <project> ${n2} <new recording> --add`);
+  }
   for (const w of report.warnings) lines.push(`\u26A0 ${w}`);
   return lines;
+}
+function speakReport(r, n2, voice) {
+  const read = r.report.lines.filter((l) => l.status !== "kept").length;
+  return [
+    `\u2022 Read ${read} line${read === 1 ? "" : "s"} with ${voice}: ${r.audioSec.toFixed(1)} s of narration in ${r.synthSec.toFixed(1)} s, saved as ${r.recording}`,
+    ...r.spedUp.map((x) => `\u2022 ${x.slot} was read at ${x.speed}\xD7 to fit its slot`),
+    ...voReport(r.report, n2, "speak")
+  ];
 }
 var range2, wordCount;
 var init_reports = __esm({
@@ -33120,7 +33409,7 @@ var init_report = __esm({
     "use strict";
     NEXT_AFTER_GUIDE = "Record the voice-over: open the video in Mirage's viewer, go to Review, and follow the steps there.";
     unique = (xs) => [...new Set(xs)];
-    REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
+    REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
     SAVE_TOOLS2 = /* @__PURE__ */ new Set(["Write", "Edit", "MultiEdit"]);
     REPORTED_SAVES = /* @__PURE__ */ new Set(["Timeline written", "Clips described"]);
     reported = (s) => s.status === "done" && (REPORTED_ENGINE_TOOLS.has(s.tool) || SAVE_TOOLS2.has(s.tool) && REPORTED_SAVES.has(s.label));
@@ -33152,6 +33441,7 @@ var init_mirage = __esm({
     init_slots();
     init_voiceover();
     init_voiceover_files();
+    init_narration();
     init_check();
     init_project2();
     init_word_timing();
@@ -33180,7 +33470,9 @@ __export(src_exports2, {
   JsonFileError: () => JsonFileError,
   MAX_BACKUPS: () => MAX_BACKUPS,
   MAX_CHECKPOINTS: () => MAX_CHECKPOINTS,
+  MAX_SPEEDUP: () => MAX_SPEEDUP,
   MirageError: () => MirageError,
+  NARRATION_GAPS: () => NARRATION_GAPS,
   VIDEO_EXTENSIONS: () => VIDEO_EXTENSIONS,
   addNote: () => addNote,
   alignWritten: () => alignWritten,
@@ -33188,6 +33480,7 @@ __export(src_exports2, {
   appendLog: () => appendLog,
   appendStep: () => appendStep,
   asCancelled: () => asCancelled,
+  assembleNarration: () => assembleNarration,
   bitrateFor: () => bitrateFor,
   buildAss: () => buildAss,
   buildReport: () => buildReport,
@@ -33196,6 +33489,7 @@ __export(src_exports2, {
   checkCueFiles: () => checkCueFiles,
   checkEpisode: () => checkEpisode,
   checkReport: () => checkReport,
+  checkSpeakOptions: () => checkSpeakOptions,
   chunkItems: () => chunkItems,
   chunkSize: () => chunkSize,
   chunkTimeoutMs: () => chunkTimeoutMs,
@@ -33241,6 +33535,7 @@ __export(src_exports2, {
   layoutTimeline: () => layoutTimeline,
   lineChangeWarnings: () => lineChangeWarnings,
   lineChanges: () => lineChanges,
+  lineSentences: () => lineSentences,
   listVersions: () => listVersions,
   loadCatalog: () => loadCatalog,
   loadEpisode: () => loadEpisode,
@@ -33252,8 +33547,10 @@ __export(src_exports2, {
   missingSlots: () => missingSlots,
   musicReport: () => musicReport,
   musicTrackArgs: () => musicTrackArgs,
+  narrationTargets: () => narrationTargets,
   newVideo: () => newVideo,
   nextClipId: () => nextClipId,
+  nextNarrationFile: () => nextNarrationFile,
   normalizeWord: () => normalizeWord,
   notEnglish: () => notEnglish,
   noteStatuses: () => noteStatuses,
@@ -33288,6 +33585,7 @@ __export(src_exports2, {
   saveEpisode: () => saveEpisode,
   sendNotes: () => sendNotes,
   sentenceTokens: () => sentenceTokens,
+  sentenceWords: () => sentenceWords,
   sessionDir: () => sessionDir,
   sha256File: () => sha256File,
   shiftAfter: () => shiftAfter,
@@ -33298,9 +33596,12 @@ __export(src_exports2, {
   snapToBeats: () => snapToBeats,
   snapshotVersion: () => snapshotVersion,
   sourcesFor: () => sourcesFor,
+  speakNarration: () => speakNarration,
+  speakReport: () => speakReport,
   speechWords: () => speechWords,
   splitScript: () => splitScript,
   splitSentences: () => splitSentences,
+  spreadWords: () => spreadWords,
   takeCorrection: () => takeCorrection,
   textTokens: () => textTokens,
   timelineDuration: () => timelineDuration,
@@ -33314,6 +33615,8 @@ __export(src_exports2, {
   voReport: () => voReport,
   voTranscriptFile: () => voTranscriptFile,
   voiceRecordings: () => voiceRecordings,
+  voicedSpan: () => voicedSpan,
+  wavBytes: () => wavBytes,
   writeClaudeProcess: () => writeClaudeProcess,
   writeControl: () => writeControl,
   writeJsonFile: () => writeJsonFile,
@@ -33337,15 +33640,15 @@ __export(hook_exports, {
   logHookError: () => logHookError,
   runHook: () => runHook
 });
-import { appendFileSync as appendFileSync2, existsSync as existsSync8, mkdirSync, readdirSync } from "node:fs";
-import { mkdir as mkdir9, writeFile as writeFile7 } from "node:fs/promises";
-import { join as join16 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync9, mkdirSync, readdirSync } from "node:fs";
+import { mkdir as mkdir9, writeFile as writeFile8 } from "node:fs/promises";
+import { join as join17 } from "node:path";
 function logHookError(pluginData2, event2, e) {
   if (!pluginData2) return;
   try {
     mkdirSync(pluginData2, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync2(join16(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
+    appendFileSync2(join17(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
 `);
   } catch {
   }
@@ -33413,7 +33716,7 @@ var init_hook = __esm({
     preDecision = (permissionDecision, reason) => result(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, ...reason === void 0 ? {} : { permissionDecisionReason: reason } } }));
     videoNumbers = (project) => {
       try {
-        return readdirSync(join16(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+        return readdirSync(join17(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
       } catch {
         return [];
       }
@@ -33447,7 +33750,7 @@ var init_hook = __esm({
       async session() {
         return await this.soft(() => this.core.readSessionState(this.project, this.sid)) ?? { video: null, overnight: null, awakePid: null };
       }
-      videoExists = (n2) => existsSync8(this.core.episodeDir(this.project, n2));
+      videoExists = (n2) => existsSync9(this.core.episodeDir(this.project, n2));
       /** Appends a step line for video `n`; nothing for a video that isn't there (a step needs a video's folder). */
       async step(n2, line) {
         if (n2 === null || !this.videoExists(n2)) return;
@@ -33549,7 +33852,7 @@ var init_hook = __esm({
         const numbers = videoNumbers(project);
         const touched = new Set(numbers.filter((n2) => {
           try {
-            return existsSync8(core.sessionDir(project, n2, sid));
+            return existsSync9(core.sessionDir(project, n2, sid));
           } catch {
             return false;
           }
@@ -33597,7 +33900,7 @@ var init_hook = __esm({
           ...last ? { stoppedAt: last.label } : {}
         });
         await mkdir9(dir, { recursive: true });
-        await writeFile7(join16(dir, "report.md"), md);
+        await writeFile8(join17(dir, "report.md"), md);
       }
     };
   }
@@ -33606,7 +33909,7 @@ var init_hook = __esm({
 // packages/hooks/src/main.ts
 init_project_root();
 import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync2 } from "node:fs";
-import { join as join17 } from "node:path";
+import { join as join18 } from "node:path";
 var EVENTS = ["session-start", "pre", "post", "stop"];
 var event = process.argv[2] ?? "";
 var pluginData = process.env.CLAUDE_PLUGIN_DATA ?? "";
@@ -33616,7 +33919,7 @@ function logError2(e) {
   try {
     mkdirSync2(pluginData, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync3(join17(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
+    appendFileSync3(join18(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
 `);
   } catch {
   }

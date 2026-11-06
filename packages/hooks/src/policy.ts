@@ -15,7 +15,7 @@ export const engineTool = (tool: string): string | null => (tool.startsWith(ENGI
 const SAVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 const FILE_TOOLS = new Set([...SAVE_TOOLS, 'NotebookEdit']);
 const READ_ONLY = new Set(['versions', 'status', 'get_notes', 'log']);
-const STAGES = new Set(['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'render']);
+const STAGES = new Set(['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']);
 /** Engine tools that make a project or a video: they belong to no video yet. */
 const NO_VIDEO = new Set(['new_project', 'new_video']);
 
@@ -29,6 +29,7 @@ const ENGINE_LABELS: Record<string, [string, string]> = {
   slots: ['Finding room for narration', 'Narration slots found'],
   guide: ['Rendering the guide video', 'Guide video rendered'],
   vo: ['Fitting your voice-over', 'Voice-over fitted'],
+  speak: ['Reading the narration aloud', 'Narration read and fitted'],
   render: ['Rendering the final video', 'Final video rendered'],
   versions: ['Checking', 'Checked'],
   status: ['Checking', 'Checked'],

@@ -15,6 +15,8 @@ Use the path between “ and ” exactly as it is. With no such line, ask the pe
 
 First load the `mirage:edit` skill with the Skill tool, then follow its rules throughout: how to read `⚠` and `✖` lines, what to do when the person pauses, corrects or stops you, and never inventing anything. Engine messages here often carry a command-line hint, such as `… vo … --add` or `Run: … slots <project> 2`: call the matching engine tool instead (`--add` is `add: true`, `--slots n2,n5` is `slots: ["n2", "n5"]`). Never run `pnpm` or any other command for Mirage's steps.
 
+If the person would rather not record, or wants an AI voice, use `mcp__plugin_mirage_engine__speak` instead of a recording: it reads the written lines with Kokoro and fits them like `vo` does (the edit skill's step 4 says how).
+
 ## 1. Fit it
 Call `mcp__plugin_mirage_engine__vo` with `{ video: n, recording: "<path>" }`.
 - The first recording, or a new recording of every line: no `add`.
@@ -39,7 +41,7 @@ When they come back with a new recording, fit it with `add: true` (and `slots` f
 - `episode.json changed while vo was running`: call `vo` again; the transcript is kept, so it is quick.
 - `The cut changed since slots were written — run slots first`: call `mcp__plugin_mirage_engine__slots`, check the lines it carried over, then `vo` again.
 - `No narration lines are written yet`: the lines come first. Follow steps 4 and 5 of the edit skill.
-- `⚠ nN's line changed since vo`: the recorded line no longer matches what is written. Have them record that line again (`add: true, slots: ["nN"]`), or put the wording back.
+- `⚠ nN's line changed since vo`: the recorded line no longer matches what is written. Have them record that line again (`add: true, slots: ["nN"]`), or put the wording back. When the voice-over came from `speak` (its recording is `episodes/<n>/narration-<k>.wav`), call `speak` with `slots: ["nN"]` instead.
 - `render` refuses a recording changed since `vo` fitted it: ask them to put back the recording that was fitted, or call `vo` again with the new one.
 
 ## 4. Finish

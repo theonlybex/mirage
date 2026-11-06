@@ -20,5 +20,6 @@ Call `mcp__plugin_mirage_engine__status` (no input) and explain what it says in 
   - `ffmpeg: missing` or `ffprobe: missing`: Mirage can't read or render video. Suggest `/mirage:setup`.
   - `transcriber: missing — …`: Mirage can't hear the footage. The rest of the line says which part of speech recognition is missing: `whisper-cli` (the whisper.cpp program), the speech model file, or both. Say which, in plain words, and suggest `/mirage:setup` (its step 4 installs them).
   - `Node: … is too old`: Mirage needs Node 22 or newer. Suggest `/mirage:setup`.
+  - `tts: ok`: AI narration (the Kokoro voice) is ready. `tts: not downloaded yet …`: fine; the first AI narration downloads it (the line says how much). `tts: missing — …`: AI narration can't be set up; say what the line says and suggest `/mirage:setup`.
 
 If everything is fine, say so in one line.

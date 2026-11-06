@@ -28494,7 +28494,7 @@ async function noteStatuses(project2, n2) {
 }
 
 // packages/core/src/mirage/report.ts
-var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
+var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
 // packages/core/src/mirage/one-line.ts
 function oneLine(text, max = 1e3) {

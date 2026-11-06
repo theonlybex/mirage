@@ -6,7 +6,7 @@ const NEXT_AFTER_GUIDE = "Record the voice-over: open the video in Mirage's view
 const unique = (xs: string[]) => [...new Set(xs)];
 
 /** The engine tools whose finished steps are work worth reporting (not reads, checks or notes). */
-const REPORTED_ENGINE_TOOLS = new Set(['ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'render', 'restore', 'overnight'].map((t) => `mcp__plugin_mirage_engine__${t}`));
+const REPORTED_ENGINE_TOOLS = new Set(['ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'restore', 'overnight'].map((t) => `mcp__plugin_mirage_engine__${t}`));
 const SAVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 /** Of Claude's own saves, only the timeline and the clip descriptions are reported. */
 const REPORTED_SAVES = new Set(['Timeline written', 'Clips described']);

@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   analyzeLibrary, checkEpisode, checkReport, describeError, fitRecording, ingestClips, ingestReport, initProject, MirageError, musicReport, realMediaTools,
-  renderEpisode, renderReport, requireProject, resolveUserPath, slotsReport, updateSlots, voReport, type EpisodeMode,
+  renderEpisode, renderReport, requireProject, resolveUserPath, slotsReport, speakNarration, speakReport, updateSlots, voReport, type EpisodeMode,
 } from '@wordedits/core';
+import { DEFAULT_VOICE, kokoroSpeaker } from '@wordedits/sidecars';
 
 const USAGE = `usage: pnpm mirage <command> ...
 
@@ -17,6 +18,8 @@ const USAGE = `usage: pnpm mirage <command> ...
   guide <project> <episode>            render the guide video with lines on screen
   vo <project> <episode> <recording>   fit the voice-over you recorded
        [--add [--slots n2,n5]]          ...or add a recording of just the missing (or listed) lines
+  speak <project> <episode>            read the lines with Kokoro (AI voice) and fit them as a voice-over
+       [--voice af_heart] [--speed 1] [--slots n2,n5]
   render <project> <episode>           render the final episode with captions
 `;
 
@@ -24,6 +27,8 @@ const OPTIONS = {
   title: { type: 'string' },
   add: { type: 'boolean' },
   slots: { type: 'string' },
+  voice: { type: 'string' },
+  speed: { type: 'string' },
   help: { type: 'boolean', short: 'h' },
 } as const;
 let last = -1;
@@ -56,6 +61,7 @@ const ARGS: Record<string, string[]> = {
   guide: ['project path', 'episode number'],
   render: ['project path', 'episode number'],
   vo: ['project path', 'episode number', 'recording'],
+  speak: ['project path', 'episode number'],
 };
 
 async function main() {
@@ -75,7 +81,8 @@ async function main() {
   if (!wanted) throw new UsageError(`unknown command "${cmd}"`);
   if (args.length < wanted.length) throw new UsageError(`missing ${wanted[args.length]}`);
   if (args.length > wanted.length) throw new UsageError(`unexpected argument "${args[wanted.length]}"`);
-  if (values.slots && !values.add) throw new UsageError('--slots only works with --add');
+  if (values.slots && !values.add && cmd !== 'speak') throw new UsageError('--slots only works with --add');
+  if ((values.voice || values.speed) && cmd !== 'speak') throw new UsageError('--voice and --speed only work with speak');
   const [projectArg, third, fourth] = args;
   const project = resolveUserPath(projectArg);
   const episodeNumber = () => {
@@ -122,6 +129,14 @@ async function main() {
       const slots = values.slots?.split(',').map((s) => s.trim()).filter(Boolean);
       const { report } = await fitRecording({ project, episode: n, recording: resolveUserPath(fourth), tools, add: values.add, slots, onStep: (m) => console.log(`• ${m}`) });
       print(voReport(report, n));
+      break;
+    }
+    case 'speak': {
+      const slots = values.slots?.split(',').map((s) => s.trim()).filter(Boolean);
+      const voice = values.voice ?? DEFAULT_VOICE;
+      const speed = values.speed === undefined ? 1 : Number(values.speed);
+      const r = await speakNarration({ project, episode: n, tools, speaker: kokoroSpeaker(), voice, speed, slots, onStep: (m) => console.log(`• ${m}`) });
+      print(speakReport(r, n, voice));
       break;
     }
   }

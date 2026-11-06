@@ -4,7 +4,7 @@ import { readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { readVideo } from '@wordedits/core';
-import { locate, whisperSetup } from '@wordedits/sidecars';
+import { locate, ttsSetup, whisperSetup, type TtsState } from '@wordedits/sidecars';
 
 /** What the overnight check asks of the machine. Tests pass stubs; the server passes realPreflightDeps(). */
 export interface PreflightDeps {
@@ -14,12 +14,14 @@ export interface PreflightDeps {
   which(cmd: string): Promise<boolean>;
   /** What speech recognition is missing (whisper-cli, its model, or both, with how to get them); null when both are found. */
   transcriber(): Promise<string | null>;
+  /** Whether Kokoro, the AI narration voice, is ready, will be fetched by speak, or can't be installed. */
+  tts(): Promise<TtsState>;
 }
 
 const GB = 1024 ** 3;
 
 /** Whether tonight's videos can be edited unattended: plugged in, with room for the renders, and with the tools installed. */
-export async function preflight(o: { project: string; videos: number[]; deps: PreflightDeps }): Promise<{ ok: boolean; problems: string[] }> {
+export async function preflight(o: { project: string; videos: number[]; deps: PreflightDeps }): Promise<{ ok: boolean; problems: string[]; notes: string[] }> {
   const { deps } = o;
   const problems: string[] = [];
   if (await deps.onBattery()) problems.push('Plug in your Mac. Overnight editing needs the power adapter.');
@@ -31,7 +33,13 @@ export async function preflight(o: { project: string; videos: number[]; deps: Pr
   }
   const speech = await deps.transcriber();
   if (speech) problems.push(`Speech recognition isn't set up: ${speech} Run /mirage:setup.`);
-  return { ok: problems.length === 0, problems };
+  // Narration is only needed by videos without a voice of their own, and speak fetches Kokoro itself: only a Kokoro that
+  // can't be installed is a problem.
+  const notes: string[] = [];
+  const tts = await deps.tts();
+  if (tts.state === 'missing') problems.push(`AI narration isn't available: ${tts.text}`);
+  if (tts.state === 'fetch') notes.push(`AI narration (Kokoro) is ${tts.text}.`);
+  return { ok: problems.length === 0, problems, notes };
 }
 
 const execFileAsync = promisify(execFile);
@@ -70,6 +78,7 @@ export function realPreflightDeps(): PreflightDeps {
       const s = await whisperSetup();
       return s.ok ? null : s.problem;
     },
+    tts: async () => ttsSetup(),
   };
 }
 

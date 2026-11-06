@@ -6,6 +6,7 @@ import type { LibraryReport } from './music.js';
 import { loadEpisode, saveEpisode, type RenderResult } from './render-episode.js';
 import { carrySlots, computeSlots, cutOf } from './slots.js';
 import { formatTime, layoutTimeline, timelineDuration } from './timeline.js';
+import type { SpeakResult } from './narration.js';
 import { hasWords, notEnglish, type FitReport } from './voiceover.js';
 
 // The lines the commands print. The CLI and the MCP server both print these, so the two always say the same thing.
@@ -85,19 +86,32 @@ export function slotsReport({ slots, moved, dropped }: SlotsUpdate): string[] {
 }
 
 /** How each line of the voice-over fitted, what is missing, and warnings. `n` is the video's number, for the re-record hint. */
-export function voReport(report: FitReport, n: number): string[] {
+export function voReport(report: FitReport, n: number, via: 'vo' | 'speak' = 'vo'): string[] {
   const lines: string[] = [];
+  const again = via === 'speak' ? 'speak with slots' : 'vo --add';
   for (const l of report.lines) {
     const status =
       l.status === 'kept' ? 'kept the earlier take (not found in this recording)'
-      : l.status === 'too long' ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold — shorten it or give it a longer slot, then vo --add`
-      : l.status === 'partial' ? `⚠ only part of the line was found — re-read the whole line with vo --add --slots ${l.slot}`
+      : l.status === 'too long' ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold — shorten it or give it a longer slot, then ${again}`
+      : l.status === 'partial' ? (via === 'speak' ? `⚠ only part of the line was found — run speak with slots ["${l.slot}"] again` : `⚠ only part of the line was found — re-read the whole line with vo --add --slots ${l.slot}`)
       : l.status;
     lines.push(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ''}${l.overrunSec && (l.status === 'placed' || l.status === 'partial') ? `  held picture +${l.overrunSec}s` : ''}`);
   }
   const missing = report.lines.filter((l) => l.status === 'missing').map((l) => l.slot);
   lines.push(`✓ voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ''}`);
-  if (missing.length) lines.push(`⚠ not found: ${missing.join(', ')} — record just those lines, then: pnpm mirage vo <project> ${n} <new recording> --add`);
+  if (missing.length) {
+    lines.push(via === 'speak' ? `⚠ not found: ${missing.join(', ')} — run speak again with slots ${JSON.stringify(missing)}` : `⚠ not found: ${missing.join(', ')} — record just those lines, then: pnpm mirage vo <project> ${n} <new recording> --add`);
+  }
   for (const w of report.warnings) lines.push(`⚠ ${w}`);
   return lines;
+}
+
+/** What speak read and how it fitted: the recording, how long synthesis took, lines it sped up, then vo's fit report. */
+export function speakReport(r: SpeakResult, n: number, voice: string): string[] {
+  const read = r.report.lines.filter((l) => l.status !== 'kept').length;
+  return [
+    `• Read ${read} line${read === 1 ? '' : 's'} with ${voice}: ${r.audioSec.toFixed(1)} s of narration in ${r.synthSec.toFixed(1)} s, saved as ${r.recording}`,
+    ...r.spedUp.map((x) => `• ${x.slot} was read at ${x.speed}× to fit its slot`),
+    ...voReport(r.report, n, 'speak'),
+  ];
 }

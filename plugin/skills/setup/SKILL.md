@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "Check and install what Mirage needs (Node, FFmpeg, whisper.cpp and its speech model), and connect the tools later versions use when the person asks. Use when the person sets Mirage up, or Mirage says a tool is missing."
+description: "Check and install what Mirage needs (Node, FFmpeg, whisper.cpp and its speech model, the Kokoro AI voice), and connect the tools later versions use when the person asks. Use when the person sets Mirage up, or Mirage says a tool is missing."
 ---
 
 # Setting up Mirage
@@ -33,6 +33,7 @@ The jobs below come from a working "editor while I sleep" setup. Each tool does 
 | 1 | Editor: picks takes, cuts, places graphics, runs the other tools | Claude Code, with Mirage | required now | Claude plan or API key |
 | 2 | Finisher: joins, encodes, checks black frames and A/V sync | FFmpeg | required now | free |
 | 3 | Speech recognition, so Claude can "hear" the footage: words with timestamps, on this computer | whisper.cpp (`whisper-cli`) with the large-v3-turbo model | required now | free |
+| 3b | Narrator: an AI voice that reads the narration lines, for footage without a voice of its own | Kokoro (`kokoro-js`, Apache 2.0), on this computer | optional, fetched by Mirage on first use | free |
 | 4 | Animator: titles, logos, diagrams, motion graphics | HyperFrames (HeyGen, Apache 2.0) | later (Phase 4) | free |
 | 5 | Researcher: screenshots of real pages and posts as proof on screen | Chrome with Claude in Chrome | later (Phase 4) | needs a Claude plan |
 | 6 | Screen editor: face + screen recordings, cuts, zooms, layouts | Tella (MCP) | later (Phase 2), optional | Tella account |
@@ -48,6 +49,7 @@ Call `mcp__plugin_mirage_engine__status` (no input; it works in any folder) and 
 - `ffmpeg: ok` / `ffprobe: ok`, or `missing`: step 3.
 - `transcriber: ok`, or `missing — …` (it names what is missing: whisper-cli, the model, or both): step 4.
 - `Node: v… ok`, or `… is too old`: step 1.
+- `tts: ok`, `tts: not downloaded yet …` or `tts: missing — …`: step 4b.
 
 If the engine tool isn't there at all, Mirage's engine didn't start, which usually means Node is missing or too old: start with step 1, then ask the person to start a new Claude Code session.
 
@@ -163,6 +165,19 @@ Another model from the same page works too: set `WORDEDITS_WHISPER_MODEL` to its
 
 ---
 
+## Step 4b · Kokoro, the AI narration voice (optional; Mirage fetches it)
+
+Mirage reads narration lines aloud with [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) when the person doesn't record a voice-over (the `speak` tool). It runs on this computer with Node, on macOS, Windows and Linux: no account, no key, nothing uploaded. Nothing to install by hand: the first `speak` installs the `kokoro-js` packages with npm (about 170 MB) and downloads the voice model (`onnx-community/Kokoro-82M-v1.0-ONNX`, 8-bit, 92 MB) into Mirage's data folder, once. Synthesis takes about half a minute per minute of narration on a recent Mac.
+
+**Check:** the `tts:` line of `status`.
+- `tts: ok`: ready.
+- `tts: not downloaded yet — speak downloads … into <folder> the first time it runs`: nothing to do now. Tell the person the first AI narration downloads about 260 MB.
+- `tts: missing — npm was not found …`: Mirage needs the npm that comes with Node. Check `npm --version`; if it's missing, reinstall Node (step 1), which brings npm.
+
+**If a download failed half-way** (`Kokoro could not be loaded …`): check the internet connection and run `speak` again. If it keeps failing, delete the folder the `tts:` line named and run `speak` again; it starts over.
+
+---
+
 ## Step 5 · HyperFrames (job 4, the animator; later, Phase 4)
 
 Only if the person asks. HyperFrames needs Node 22+ and FFmpeg. It renders through headless Chrome, which it fetches itself.
@@ -262,7 +277,7 @@ claude --version
 ffmpeg -version | head -1
 ```
 
-The `transcriber:` line of `status` is the speech check.
+The `transcriber:` line of `status` is the speech check, and its `tts:` line the AI voice check.
 
 For a later tool the person set up, also run its check (`npx hyperframes --version`, `claude mcp list`, or ask them to run `/chrome` and read the status).
 
@@ -274,6 +289,7 @@ Then give the person one table, one row per tool, each with ✓ (working), – (
 | Claude Code | | |
 | FFmpeg | | |
 | whisper.cpp + model (speech) | | |
+| Kokoro (AI narration voice) | | |
 | HyperFrames | | |
 | Chrome + Claude in Chrome | | |
 | Tella | | |

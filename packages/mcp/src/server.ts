@@ -9,13 +9,14 @@ import { ViewerInfoSchema } from '@wordedits/shared';
 import {
   analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, ingestClips, ingestReport, initProject, listVersions,
   MirageError, musicReport, newVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
-  sessionDir, slotsReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
+  sessionDir, slotsReport, speakNarration, speakReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
+import { DEFAULT_VOICE, KOKORO_VOICES, kokoroSpeaker, type Speaker } from '@wordedits/sidecars';
 import { preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } from './preflight.js';
 import { runLong } from './run-long.js';
 
 export const TOOL_NAMES: readonly string[] = [
-  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status',
+  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status',
 ];
 
 export interface EngineContext {
@@ -33,6 +34,8 @@ export interface EngineContext {
   preflightDeps?: PreflightDeps;
   /** Keeps the Mac awake; returns the pid of what does. Default: caffeinate. */
   startAwake?: () => number | null;
+  /** The AI narration voice for `speak`. Default: Kokoro in the plugin's data folder. */
+  speaker?: Speaker;
 }
 
 const SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
@@ -117,6 +120,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   const { tools } = ctx;
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
+  const speaker = ctx.speaker ?? kokoroSpeaker();
   const ppid = ctx.ppid ?? process.ppid;
   const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project, ppid) ?? newestSessionId(project));
   const sid = () => knownSession() ?? 'unknown';
@@ -250,6 +254,25 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     },
   );
 
+  tool(
+    'speak',
+    'Read the written narration lines aloud with an AI voice (Kokoro, free and local) and fit them as the voice-over, for footage without a voice of its own. Downloads Kokoro the first time.',
+    {
+      video,
+      voice: z.string().optional().describe(`The Kokoro voice (default ${DEFAULT_VOICE}): ${KOKORO_VOICES.join(', ')}`),
+      speed: z.number().optional().describe('Speaking speed from 0.5 to 2 (default 1)'),
+      slots: z.array(z.string()).optional().describe('Read just these slots again (e.g. ["n2"]), keeping the other lines'),
+    },
+    async (a, { signal }) => {
+      const steps: string[] = [];
+      const voice = a.voice ?? DEFAULT_VOICE;
+      const r = await long('speak', a.video, signal, (h) =>
+        speakNarration({ project, episode: a.video, tools, speaker, voice, speed: a.speed ?? 1, slots: a.slots, onStep: (m) => steps.push(`• ${m}`), onProgress: h.progress, signal: h.signal }),
+      );
+      return report(a.video, [...steps, ...speakReport(r, a.video, voice)]);
+    },
+  );
+
   tool('versions', 'List the saved versions of a video: deliveries as V1, V2 … and the other saves, each with its id.', { video }, async ({ video: n }) => {
     const all = await listVersions(project, n);
     if (!all.length) return ok('no saved versions yet');
@@ -303,13 +326,13 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   );
 
   tool('overnight', 'Get ready to edit unattended overnight: checks the Mac and keeps it awake until this session ends.', { videos: z.array(z.number().int().positive()).min(1) }, async ({ videos }) => {
-    const { ok: ready, problems } = await preflight({ project, videos, deps });
+    const { ok: ready, problems, notes } = await preflight({ project, videos, deps });
     if (!ready) return { content: [{ type: 'text', text: problems.join('\n') }], isError: true };
     // A caffeinate this session already started and that still runs keeps the Mac awake: no second one.
     const earlier = (await readSessionState(project, sid())).awakePid;
     const awakePid = earlier !== null && alive(earlier) ? earlier : startAwake();
     await writeSessionState(project, sid(), { overnight: { videos, startedAt: new Date().toISOString() }, awakePid });
-    return ok(`ready: ${videos.length} videos, Mac kept awake until this session ends`);
+    return ok([`ready: ${videos.length} videos, Mac kept awake until this session ends`, ...notes]);
   });
 
   tool('status', 'Where the project stands: its title, each video\'s stage and deliveries, the viewer, and whether the tools are installed.', {}, async () => {
@@ -332,6 +355,8 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     for (const t of ['ffmpeg', 'ffprobe']) lines.push(`${t}: ${(await deps.which(t)) ? 'ok' : 'missing'}`);
     const speech = await deps.transcriber();
     lines.push(speech ? `transcriber: missing — ${speech}` : 'transcriber: ok');
+    const tts = await deps.tts();
+    lines.push(tts.state === 'ok' ? 'tts: ok' : `tts: ${tts.state === 'missing' ? 'missing — ' : ''}${tts.text}`);
     lines.push(Number(process.versions.node.split('.')[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
   }, false);

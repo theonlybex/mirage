@@ -9,17 +9,18 @@ const fine = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({
   footageBytes: async () => 20 * GB,
   which: async () => true,
   transcriber: async () => null,
+  tts: async () => ({ state: 'ok' }),
   ...over,
 });
 
 describe('preflight', () => {
   it('is ok with no problems when the Mac is plugged in, has room and has its tools', async () => {
-    expect(await preflight({ project: '/p', videos: [1, 2], deps: fine() })).toEqual({ ok: true, problems: [] });
+    expect(await preflight({ project: '/p', videos: [1, 2], deps: fine() })).toEqual({ ok: true, problems: [], notes: [] });
   });
 
   it('asks to plug in when on battery', async () => {
     const r = await preflight({ project: '/p', videos: [1], deps: fine({ onBattery: async () => true }) });
-    expect(r).toEqual({ ok: false, problems: ['Plug in your Mac. Overnight editing needs the power adapter.'] });
+    expect(r).toEqual({ ok: false, problems: ['Plug in your Mac. Overnight editing needs the power adapter.'], notes: [] });
   });
 
   it('asks for space: at least 10 GB, or twice the footage of tonight\'s videos', async () => {
@@ -41,7 +42,14 @@ describe('preflight', () => {
 
   it('says what speech recognition is missing', async () => {
     const r = await preflight({ project: '/p', videos: [1], deps: fine({ transcriber: async () => 'whisper-cli was not found.' }) });
-    expect(r).toEqual({ ok: false, problems: ["Speech recognition isn't set up: whisper-cli was not found. Run /mirage:setup."] });
+    expect(r).toEqual({ ok: false, problems: ["Speech recognition isn't set up: whisper-cli was not found. Run /mirage:setup."], notes: [] });
+  });
+
+  it('notes a Kokoro that speak will fetch, and refuses one that cannot be installed', async () => {
+    const later = await preflight({ project: '/p', videos: [1], deps: fine({ tts: async () => ({ state: 'fetch', text: 'not downloaded yet — speak downloads it' }) }) });
+    expect(later).toEqual({ ok: true, problems: [], notes: ['AI narration (Kokoro) is not downloaded yet — speak downloads it.'] });
+    const never = await preflight({ project: '/p', videos: [1], deps: fine({ tts: async () => ({ state: 'missing', text: 'npm was not found.' }) }) });
+    expect(never).toEqual({ ok: false, problems: ["AI narration isn't available: npm was not found."], notes: [] });
   });
 
   it('reports every problem at once', async () => {

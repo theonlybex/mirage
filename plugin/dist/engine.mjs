@@ -133,12 +133,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve11, reject) {
+        return new Promise(function(resolve12, reject) {
           isexe(path6, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve11(is);
+              resolve12(is);
             }
           });
         });
@@ -204,27 +204,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve11, reject) => {
+      const step = (i2) => new Promise((resolve12, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve11(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve12(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path6.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve11(subStep(p, i2, 0));
+        resolve12(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve11, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve12, reject) => {
         if (ii === pathExt.length)
-          return resolve11(step(i2 + 1));
+          return resolve12(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve11(p + ext);
+              return resolve12(p + ext);
           }
-          return resolve11(subStep(p, i2, ii + 1));
+          return resolve12(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -3487,7 +3487,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve11.call(this, root, ref);
+      let _sch = resolve12.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3514,7 +3514,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s13, s22) {
       return s13.schema === s22.schema && s13.root === s22.root && s13.baseId === s22.baseId;
     }
-    function resolve11(root, ref) {
+    function resolve12(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -4378,7 +4378,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve11(baseURI, relativeURI, options) {
+    function resolve12(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4769,7 +4769,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve11,
+      resolve: resolve12,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -7759,7 +7759,7 @@ var require_dist = __commonJS({
 });
 
 // packages/mcp/src/main.ts
-import { resolve as resolve10 } from "node:path";
+import { resolve as resolve11 } from "node:path";
 
 // node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.2_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -9761,8 +9761,8 @@ function emoji() {
 }
 var ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
 var ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$/;
-var mac = (delimiter3) => {
-  const escapedDelim = escapeRegex(delimiter3 ?? ":");
+var mac = (delimiter4) => {
+  const escapedDelim = escapeRegex(delimiter4 ?? ":");
   return new RegExp(`^(?:[0-9A-F]{2}${escapedDelim}){5}[0-9A-F]{2}$|^(?:[0-9a-f]{2}${escapedDelim}){5}[0-9a-f]{2}$`);
 };
 var cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
@@ -12790,7 +12790,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve11) {
+function isRecursive(inst, stack, resolve12) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -12800,7 +12800,7 @@ function isRecursive(inst, stack, resolve11) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve11);
+      const answer = isRecursive(child, stack, resolve12);
       if (answer > result)
         result = answer;
     }
@@ -12811,7 +12811,7 @@ function isRecursive(inst, stack, resolve11) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve11) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve12) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -12875,7 +12875,7 @@ function isRecursive(inst, stack, resolve11) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve11 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve12 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -29056,12 +29056,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve11) => {
+    return new Promise((resolve12) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve11();
+        resolve12();
       } else {
-        this._stdout.once("drain", resolve11);
+        this._stdout.once("drain", resolve12);
       }
     });
   }
@@ -30711,8 +30711,8 @@ var disconnect = (anyProcess) => {
 // node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve11, reject) => {
-    Object.assign(methods, { resolve: resolve11, reject });
+  const promise2 = new Promise((resolve12, reject) => {
+    Object.assign(methods, { resolve: resolve12, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -35355,11 +35355,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve11 = promise2.resolve.bind(promise2);
-  return { resolve: resolve11, promises };
+  const resolve12 = promise2.resolve.bind(promise2);
+  return { resolve: resolve12, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve11, promises }, subprocess) => {
-  resolve11();
+var waitForConcurrentStreams = async ({ resolve: resolve12, promises }, subprocess) => {
+  resolve12();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -36743,6 +36743,157 @@ async function transcribeAudio(audioPath, opts = {}) {
   }
 }
 
+// packages/sidecars/src/kokoro.ts
+import { existsSync, readdirSync } from "node:fs";
+import { mkdir, rm as rm2, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { homedir as homedir2 } from "node:os";
+import { delimiter as delimiter3, dirname, join as join4 } from "node:path";
+var KOKORO = "kokoro";
+var KOKORO_PACKAGES = { "kokoro-js": "1.2.1", "@huggingface/transformers": "3.8.1" };
+var KOKORO_MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
+var KOKORO_DTYPE = "q8";
+var MODEL_FILE = "onnx/model_quantized.onnx";
+var KOKORO_DOWNLOAD = { packagesMb: 170, modelMb: 92 };
+var DEFAULT_VOICE = "af_heart";
+var KOKORO_VOICES = [
+  "af_heart",
+  "af_alloy",
+  "af_aoede",
+  "af_bella",
+  "af_jessica",
+  "af_kore",
+  "af_nicole",
+  "af_nova",
+  "af_river",
+  "af_sarah",
+  "af_sky",
+  "am_adam",
+  "am_echo",
+  "am_eric",
+  "am_fenrir",
+  "am_liam",
+  "am_michael",
+  "am_onyx",
+  "am_puck",
+  "am_santa",
+  "bf_emma",
+  "bf_isabella",
+  "bf_alice",
+  "bf_lily",
+  "bm_george",
+  "bm_lewis",
+  "bm_daniel",
+  "bm_fable"
+];
+function kokoroDir(env = process.env) {
+  if (env.MIRAGE_KOKORO_DIR) return env.MIRAGE_KOKORO_DIR;
+  if (env.MIRAGE_PLUGIN_DATA) return join4(env.MIRAGE_PLUGIN_DATA, "kokoro");
+  return join4(homedir2(), ".cache", "mirage", "kokoro");
+}
+var modelsDir = (dir) => join4(dir, "models");
+var modelPath = (dir) => join4(modelsDir(dir), ...KOKORO_MODEL.split("/"), ...MODEL_FILE.split("/"));
+var packagesInstalled = (dir) => existsSync(join4(dir, "node_modules", "kokoro-js", "package.json")) && existsSync(join4(dir, "node_modules", "onnxruntime-node", "package.json"));
+function locateNpm(execPath2 = process.execPath, path6 = process.env.PATH ?? "") {
+  const bin = dirname(execPath2);
+  for (const cli of [join4(bin, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"), join4(bin, "node_modules", "npm", "bin", "npm-cli.js")]) {
+    if (existsSync(cli)) return { file: execPath2, args: [cli] };
+  }
+  const names = process.platform === "win32" ? ["npm.cmd"] : ["npm"];
+  for (const d of path6.split(delimiter3).filter(Boolean)) {
+    for (const n2 of names) if (existsSync(join4(d, n2))) return { file: join4(d, n2), args: [] };
+  }
+  return null;
+}
+var sizeText = (dir) => {
+  const parts = [...packagesInstalled(dir) ? [] : [`the Kokoro packages (about ${KOKORO_DOWNLOAD.packagesMb} MB)`], ...existsSync(modelPath(dir)) ? [] : [`${packagesInstalled(dir) ? "the Kokoro" : "its"} voice model (${KOKORO_DOWNLOAD.modelMb} MB)`]];
+  return parts.join(" and ");
+};
+function ttsSetup(dir = kokoroDir()) {
+  if (packagesInstalled(dir) && existsSync(modelPath(dir))) return { state: "ok" };
+  if (!packagesInstalled(dir) && !locateNpm()) {
+    return { state: "missing", text: "npm was not found, so Kokoro (the AI narration voice) can't be installed. Install Node.js 22 or later with npm (nodejs.org), then run speak again." };
+  }
+  return { state: "fetch", text: `not downloaded yet \u2014 speak downloads ${sizeText(dir)} into ${dir} the first time it runs` };
+}
+function pruneOtherPlatforms(dir) {
+  const bin = join4(dir, "node_modules", "onnxruntime-node", "bin", "napi-v3");
+  const removals = [];
+  for (const os of existsSync(bin) ? readdirSync(bin) : []) {
+    if (os !== process.platform) {
+      removals.push(rm2(join4(bin, os), { recursive: true, force: true }));
+      continue;
+    }
+    for (const arch of readdirSync(join4(bin, os))) if (arch !== process.arch) removals.push(rm2(join4(bin, os, arch), { recursive: true, force: true }));
+  }
+  return Promise.all(removals);
+}
+async function installKokoro(dir, o2 = {}) {
+  const npm = locateNpm();
+  if (!npm) throw new SidecarError(KOKORO, "NOT_FOUND", "npm was not found, so Kokoro can't be installed", "Install Node.js 22 or later with npm (nodejs.org), then run speak again.");
+  await mkdir(dir, { recursive: true });
+  const pkg = { name: "mirage-kokoro", private: true, description: "Kokoro text-to-speech for Mirage, installed on first use.", dependencies: KOKORO_PACKAGES, overrides: { "@huggingface/transformers": KOKORO_PACKAGES["@huggingface/transformers"] } };
+  await writeFile(join4(dir, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+  try {
+    await execa(npm.file, [...npm.args, "install", "--no-audit", "--no-fund", "--ignore-scripts", "--omit=dev", "--loglevel=error"], { cwd: dir, cancelSignal: o2.signal, timeout: 20 * 6e4, stdin: "ignore", shell: npm.file.endsWith(".cmd") });
+  } catch (e) {
+    if (o2.signal?.aborted) throw new SidecarError(KOKORO, "CANCELLED", "Installing Kokoro was stopped", "");
+    const err = e;
+    const tail = (err.stderr ?? "").trim().split("\n").slice(-3).join(" ");
+    throw new SidecarError(KOKORO, err.timedOut ? "TIMEOUT" : "EXIT", `Installing Kokoro with npm failed${tail ? `: ${tail}` : ""}`, "Check the internet connection and run speak again.", err.stderr ?? "");
+  }
+  await pruneOtherPlatforms(dir);
+}
+async function quietStdout(work) {
+  const { log, info } = console;
+  console.log = console.info = (...a2) => console.error(...a2);
+  try {
+    return await work();
+  } finally {
+    console.log = log;
+    console.info = info;
+  }
+}
+var loaded = /* @__PURE__ */ new Map();
+async function loadModel(dir, o2) {
+  if (!packagesInstalled(dir)) {
+    o2.onStep?.(`Installing Kokoro text-to-speech, once: about ${KOKORO_DOWNLOAD.packagesMb} MB of packages into ${dir}`);
+    await installKokoro(dir, { signal: o2.signal });
+  }
+  if (!existsSync(modelPath(dir))) o2.onStep?.(`Downloading the Kokoro voice model, once: ${KOKORO_DOWNLOAD.modelMb} MB`);
+  try {
+    const require2 = createRequire(join4(dir, "package.json"));
+    const transformers = require2("@huggingface/transformers");
+    transformers.env.cacheDir = modelsDir(dir);
+    const { KokoroTTS } = require2("kokoro-js");
+    return await KokoroTTS.from_pretrained(KOKORO_MODEL, { dtype: KOKORO_DTYPE, device: "cpu" });
+  } catch (e) {
+    throw new SidecarError(KOKORO, "EXIT", `Kokoro could not be loaded: ${e instanceof Error ? e.message : String(e)}`, `Check the internet connection and run speak again. If it keeps failing, delete ${dir} and run speak again.`);
+  }
+}
+function kokoroSpeaker(dir = kokoroDir()) {
+  const model = (o2 = {}) => {
+    let m = loaded.get(dir);
+    if (!m) {
+      m = quietStdout(() => loadModel(dir, o2));
+      loaded.set(dir, m);
+      m.catch(() => loaded.delete(dir));
+    }
+    return m;
+  };
+  return {
+    prepare: async (o2) => {
+      await model(o2);
+    },
+    speak: async (text, s) => {
+      const tts = await model({ signal: s.signal });
+      s.signal?.throwIfAborted();
+      const audio = await quietStdout(() => tts.generate(text, { voice: s.voice, speed: s.speed }));
+      return { samples: audio.audio, sampleRate: audio.sampling_rate };
+    }
+  };
+}
+
 // packages/core/src/media-tools.ts
 async function realMediaTools() {
   return {
@@ -36883,12 +37034,12 @@ function similarity(a2, b) {
 }
 
 // packages/core/src/mirage/errors.ts
-import { accessSync, constants as constants6, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { accessSync, constants as constants6, existsSync as existsSync2 } from "node:fs";
+import { dirname as dirname2 } from "node:path";
 
 // packages/core/src/mirage/json-file.ts
 import { randomUUID } from "node:crypto";
-import { readFile as readFile2, rename, writeFile } from "node:fs/promises";
+import { readFile as readFile2, rename, writeFile as writeFile2 } from "node:fs/promises";
 var JsonFileError = class extends Error {
   constructor(file2, message, hint = "Fix that field and run the command again.") {
     super(`${file2}: ${message}`);
@@ -36938,7 +37089,7 @@ async function writeJsonFile(path6, schema, value, display = path6, o2 = {}) {
   const text = JSON.stringify(parsed, null, 2) + "\n";
   if (o2.onlyIfChanged && await readFile2(path6, "utf8").catch(() => null) === text) return;
   const tmpPath = `${path6}.tmp-${randomUUID()}`;
-  await writeFile(tmpPath, text, "utf8");
+  await writeFile2(tmpPath, text, "utf8");
   await rename(tmpPath, path6);
 }
 
@@ -36958,7 +37109,7 @@ function unreadableFile(path6) {
     accessSync(path6, constants6.R_OK);
     return false;
   } catch (e) {
-    return e.code !== "ENOENT" && existsSync(path6);
+    return e.code !== "ENOENT" && existsSync2(path6);
   }
 }
 function describeError(e) {
@@ -36970,7 +37121,7 @@ function describeError(e) {
     const why = err.code === "EROFS" ? "the disk is read-only" : "permission denied";
     if (err.syscall === "scandir" || err.syscall === "opendir") return { message: `can't read ${path6}: ${why}`, hint: "Check the folder's permissions (Finder \u2192 Get Info \u2192 Sharing & Permissions)." };
     if ((err.syscall === "open" || err.syscall === "read") && unreadableFile(path6)) return { message: `can't read ${path6}: ${why}`, hint: "Make that file readable (Finder \u2192 Get Info \u2192 Sharing & Permissions)." };
-    return { message: `can't write in ${dirname(path6)}: ${why}`, hint: "Make that folder writable (Finder \u2192 Get Info \u2192 Sharing & Permissions), or move the project to a folder you can write to." };
+    return { message: `can't write in ${dirname2(path6)}: ${why}`, hint: "Make that folder writable (Finder \u2192 Get Info \u2192 Sharing & Permissions), or move the project to a folder you can write to." };
   }
   if (path6 && err.code === "ENOENT") return { message: `${path6} does not exist`, hint: err.hint };
   if (path6 && err.code === "ENOSPC") return { message: `the disk is full (writing ${path6})`, hint: "Free some space and run the command again." };
@@ -37046,9 +37197,9 @@ function dropCollapsed(ep, before) {
 
 // packages/core/src/mirage/ingest.ts
 import { createHash as createHash2 } from "node:crypto";
-import { createReadStream as createReadStream2, existsSync as existsSync2 } from "node:fs";
-import { mkdir, readdir as readdir2, rename as rename2, rm as rm3, stat as stat3 } from "node:fs/promises";
-import { extname, join as join5, resolve } from "node:path";
+import { createReadStream as createReadStream2, existsSync as existsSync3 } from "node:fs";
+import { mkdir as mkdir2, readdir as readdir2, rename as rename2, rm as rm4, stat as stat3 } from "node:fs/promises";
+import { extname, join as join6, resolve } from "node:path";
 
 // packages/core/src/mirage/cancel.ts
 function asCancelled(e, signal) {
@@ -37059,8 +37210,8 @@ function asCancelled(e, signal) {
 
 // packages/core/src/mirage/lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { open as open2, readdir, readFile as readFile3, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join4 } from "node:path";
+import { open as open2, readdir, readFile as readFile3, rm as rm3, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
+import { join as join5 } from "node:path";
 var LOCK_FILE = ".mirage.lock";
 var MAX_LOCK_AGE_MS = 24 * 36e5;
 var STARTING_GRACE_MS = 5e3;
@@ -37109,33 +37260,33 @@ function liveHolder(seen, what, now) {
 async function removeAbandoned(path6, what, now) {
   const guard = `${path6}.takeover`;
   try {
-    await writeFile2(guard, `${process.pid}
+    await writeFile3(guard, `${process.pid}
 `, { flag: "wx" });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
     const st = await stat2(guard).catch(() => null);
-    if (st && Date.now() - st.mtimeMs > STARTING_GRACE_MS) await rm2(guard, { force: true });
+    if (st && Date.now() - st.mtimeMs > STARTING_GRACE_MS) await rm3(guard, { force: true });
     return false;
   }
   try {
     const seen = await lookAt(path6);
-    if (seen && !liveHolder(seen, what, now)) await rm2(path6, { force: true });
+    if (seen && !liveHolder(seen, what, now)) await rm3(path6, { force: true });
   } finally {
-    await rm2(guard, { force: true });
+    await rm3(guard, { force: true });
   }
   return true;
 }
 async function acquireLock(dir, command, what) {
-  const path6 = join4(dir, LOCK_FILE);
+  const path6 = join5(dir, LOCK_FILE);
   const now = Date.now();
   const mine = { pid: process.pid, command, startedAt: new Date(now).toISOString(), token: randomUUID2() };
   for (let attempt = 0; attempt < 50; attempt++) {
     try {
-      await writeFile2(path6, JSON.stringify(mine) + "\n", { flag: "wx" });
+      await writeFile3(path6, JSON.stringify(mine) + "\n", { flag: "wx" });
       return {
         startedAt: now,
         release: async () => {
-          if ((await readLock(path6))?.token === mine.token) await rm2(path6, { force: true });
+          if ((await readLock(path6))?.token === mine.token) await rm3(path6, { force: true });
         }
       };
     } catch (e) {
@@ -37154,13 +37305,13 @@ async function clearLeftovers(dir, lock, ours) {
   const tmp = /\.tmp-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   await Promise.all(
     names.map(async (f) => {
-      const p = join4(dir, f);
+      const p = join5(dir, f);
       if (!ours(f)) {
         if (!tmp.test(f)) return;
         const st = await stat2(p).catch(() => null);
         if (!st || st.mtimeMs > lock.startedAt - TMP_GRACE_MS) return;
       }
-      await rm2(p, { recursive: true, force: true }).catch(() => {
+      await rm3(p, { recursive: true, force: true }).catch(() => {
       });
     })
   );
@@ -37297,14 +37448,14 @@ async function sha256File(path6) {
 }
 async function loadCatalog(project2) {
   try {
-    return await readJsonFile(join5(resolve(project2), "catalog.json"), CatalogSchema, "catalog.json");
+    return await readJsonFile(join6(resolve(project2), "catalog.json"), CatalogSchema, "catalog.json");
   } catch (e) {
     if (e.code === "ENOENT") return { version: 1, clips: [] };
     throw e;
   }
 }
 async function saveCatalog(project2, catalog) {
-  await writeJsonFile(join5(resolve(project2), "catalog.json"), CatalogSchema, catalog, "catalog.json");
+  await writeJsonFile(join6(resolve(project2), "catalog.json"), CatalogSchema, catalog, "catalog.json");
 }
 function nextClipId(catalog) {
   const max = catalog.clips.reduce((m, c3) => Math.max(m, Number(c3.id.slice(1))), 0);
@@ -37322,7 +37473,7 @@ async function transcribeClip(o2) {
     o2.result.warnings.push(`${o2.name}: transcription failed (${errorReason(e)}); its speech is invisible to slots and captions \u2014 run ingest again to retry`);
     return null;
   } finally {
-    await rm3(o2.wav, { force: true }).catch(() => {
+    await rm4(o2.wav, { force: true }).catch(() => {
     });
   }
 }
@@ -37367,7 +37518,7 @@ async function clipFiles(dir, result) {
 }
 async function ingestClips(o2) {
   const project2 = resolve(o2.project);
-  await mkdir(project2, { recursive: true });
+  await mkdir2(project2, { recursive: true });
   const lock = await acquireLock(project2, "ingest", "the project");
   try {
     await clearLeftovers(project2, lock, (f) => /^\.tmp-c\d+\.wav$/.test(f));
@@ -37386,22 +37537,22 @@ async function ingestLocked(o2, project2) {
   let catalog;
   for (const name of files) {
     o2.signal?.throwIfAborted();
-    const path6 = join5(dir, name);
+    const path6 = join6(dir, name);
     catalog = await loadCatalogOrStop(project2);
     let id = nextClipId(catalog);
-    let framesDir = join5(project2, "frames", id);
+    let framesDir = join6(project2, "frames", id);
     try {
       const sha256 = await sha256File(path6);
       const prev = catalog.clips.find((c3) => c3.sha256 === sha256);
       if (prev) {
         let moved = false;
         let transcript2 = null;
-        if (prev.path !== path6 && !existsSync2(prev.path)) {
+        if (prev.path !== path6 && !existsSync3(prev.path)) {
           moved = true;
           o2.onStep?.(`${name}: moved, path updated`);
         }
         if ((moved || prev.path === path6) && prev.probe.hasAudio && prev.transcript === null) {
-          transcript2 = await transcribeClip({ tools: o2.tools, path: path6, name, wav: join5(project2, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, audioStream: prev.probe.audioStream, locale: o2.locale, result, signal: o2.signal, onStep: o2.onStep });
+          transcript2 = await transcribeClip({ tools: o2.tools, path: path6, name, wav: join6(project2, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, audioStream: prev.probe.audioStream, locale: o2.locale, result, signal: o2.signal, onStep: o2.onStep });
           if (transcript2) o2.onStep?.(`${name}: transcribed`);
         }
         if (moved || transcript2) {
@@ -37445,8 +37596,8 @@ async function ingestLocked(o2, project2) {
       if (probe2.durationSec - videoSec > Math.max(1, 0.1 * probe2.durationSec)) {
         result.warnings.push(`${name}: its picture stops at ${s1(videoSec)} s but its sound runs to ${s1(probe2.durationSec)} s \u2014 items can use only the first ${s1(videoSec)} s`);
       }
-      await rm3(framesDir, { recursive: true, force: true });
-      await mkdir(framesDir, { recursive: true });
+      await rm4(framesDir, { recursive: true, force: true });
+      await mkdir2(framesDir, { recursive: true });
       const interval = frameInterval(videoSec);
       const first = videoSec < interval ? r33(videoSec / 2) : 0;
       await o2.tools.runFfmpeg(["-noaccurate_seek", "-ss", String(first), "-i", path6, "-vf", `setpts=PTS-1/120/TB,fps=1/${interval}:start_time=0:round=up,scale=640:-2`, ...first ? ["-frames:v", "1"] : [], "-q:v", "5", "f%04d.jpg"], {
@@ -37456,7 +37607,7 @@ async function ingestLocked(o2, project2) {
         timeoutMs: Math.max(12e4, probe2.durationSec * 5e3)
       });
       const frameFiles = (await readdir2(framesDir)).filter((f) => f.endsWith(".jpg")).sort();
-      const transcript = probe2.hasAudio ? await transcribeClip({ tools: o2.tools, path: path6, name, wav: join5(project2, `.tmp-${id}.wav`), durationSec: probe2.durationSec, audioStream: probe2.audioStream, locale: o2.locale, result, signal: o2.signal, onStep: o2.onStep }) : null;
+      const transcript = probe2.hasAudio ? await transcribeClip({ tools: o2.tools, path: path6, name, wav: join6(project2, `.tmp-${id}.wav`), durationSec: probe2.durationSec, audioStream: probe2.audioStream, locale: o2.locale, result, signal: o2.signal, onStep: o2.onStep }) : null;
       o2.signal?.throwIfAborted();
       let clip;
       catalog = await updateCatalog(project2, (cat) => {
@@ -37467,14 +37618,14 @@ async function ingestLocked(o2, project2) {
         clip = { id, path: path6, sha256, probe: probe2, kind: guessKind(probe2, transcript), transcript, frames, notes: "", moments: [] };
         cat.clips.push(clip);
       });
-      const finalDir = join5(project2, "frames", id);
+      const finalDir = join6(project2, "frames", id);
       if (finalDir !== framesDir) {
         await rename2(framesDir, finalDir);
         framesDir = finalDir;
       }
       result.added.push(clip);
     } catch (e) {
-      if (!catalog.clips.some((c3) => c3.id === id)) await rm3(framesDir, { recursive: true, force: true }).catch(() => {
+      if (!catalog.clips.some((c3) => c3.id === id)) await rm4(framesDir, { recursive: true, force: true }).catch(() => {
       });
       if (e instanceof JsonFileError) throw stopIngest(e);
       const stopped = asCancelled(e, o2.signal);
@@ -37486,7 +37637,7 @@ async function ingestLocked(o2, project2) {
 }
 
 // packages/core/src/mirage/tempo.ts
-import { readFile as readFile5, rm as rm4 } from "node:fs/promises";
+import { readFile as readFile5, rm as rm5 } from "node:fs/promises";
 var HOP = 128;
 var WIN = 1024;
 var DELTA = HOP / 2 + 12;
@@ -37594,21 +37745,21 @@ async function decodeMono(file2, tmpOut, tools, o2) {
     const buf = await readFile5(tmpOut);
     return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
   } finally {
-    await rm4(tmpOut, { force: true });
+    await rm5(tmpOut, { force: true });
   }
 }
 
 // packages/core/src/mirage/music.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { existsSync as existsSync3 } from "node:fs";
+import { existsSync as existsSync4 } from "node:fs";
 import { readdir as readdir3 } from "node:fs/promises";
-import { extname as extname2, join as join6, resolve as resolve2 } from "node:path";
+import { extname as extname2, join as join7, resolve as resolve2 } from "node:path";
 var AUDIO_EXTENSIONS = /* @__PURE__ */ new Set([".mp3", ".m4a", ".wav", ".aif", ".aiff", ".flac", ".ogg"]);
 var MIN_CONFIDENCE = 0.1;
 var r6 = (n2) => Math.round(n2 * 1e6) / 1e6;
 async function loadLibrary(dir) {
   try {
-    return await readJsonFile(join6(resolve2(dir), "library.json"), MusicLibrarySchema, "music/library.json");
+    return await readJsonFile(join7(resolve2(dir), "library.json"), MusicLibrarySchema, "music/library.json");
   } catch (e) {
     if (e.code === "ENOENT") return { version: 1, tracks: [] };
     throw e;
@@ -37625,7 +37776,7 @@ function cueTrack(c3, i2, lib) {
 }
 function checkCueFiles(cues, lib, musicDir) {
   cues.forEach((c3, i2) => {
-    if (!existsSync3(join6(musicDir, cueTrack(c3, i2, lib).file))) {
+    if (!existsSync4(join7(musicDir, cueTrack(c3, i2, lib).file))) {
       throw new MirageError("NO_MUSIC_TRACK", `music cue ${i2 + 1}: ${c3.track} is missing from music/`, `Put ${c3.track} back in ${musicDir}, or remove the cue.`);
     }
   });
@@ -37657,7 +37808,7 @@ async function analyzeLocked(root, tools) {
     unreadable.add(track);
   };
   for (const track of lib.tracks) {
-    const onDisk = files.find((f) => sameFileName(f, track.file)) ?? (existsSync3(join6(root, track.file)) ? track.file : void 0);
+    const onDisk = files.find((f) => sameFileName(f, track.file)) ?? (existsSync4(join7(root, track.file)) ? track.file : void 0);
     if (!onDisk) {
       report.warnings.push(`${track.file} is in library.json but not in the music folder \u2014 put it back, or remove its entry`);
       continue;
@@ -37666,7 +37817,7 @@ async function analyzeLocked(root, tools) {
       report.tracks.push(track);
       continue;
     }
-    const path6 = join6(root, onDisk);
+    const path6 = join7(root, onDisk);
     let p;
     try {
       p = await tools.probe(path6);
@@ -37685,7 +37836,7 @@ async function analyzeLocked(root, tools) {
     if (track.bpm === null || track.beatOffset === null) {
       let samples;
       try {
-        samples = await decodeMono(path6, join6(root, `.tmp-${randomUUID3()}.f32`), tools, { sampleRate: 11025, maxSec: 90 });
+        samples = await decodeMono(path6, join7(root, `.tmp-${randomUUID3()}.f32`), tools, { sampleRate: 11025, maxSec: 90 });
       } catch (e) {
         skip(track, errorReason(e));
         continue;
@@ -37700,7 +37851,7 @@ async function analyzeLocked(root, tools) {
     report.tracks.push(track);
   }
   lib.tracks = lib.tracks.filter((t) => !(added.has(t) && unreadable.has(t)));
-  await writeJsonFile(join6(root, "library.json"), MusicLibrarySchema, lib, "music/library.json");
+  await writeJsonFile(join7(root, "library.json"), MusicLibrarySchema, lib, "music/library.json");
   return report;
 }
 function snapItem(item, t, oldDur, cue, beat, fps, catalog) {
@@ -38005,9 +38156,9 @@ function buildAss(o2) {
 
 // packages/core/src/mirage/render-episode.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { existsSync as existsSync4 } from "node:fs";
-import { mkdir as mkdir2, rename as rename3, rm as rm5, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join7, resolve as resolve3 } from "node:path";
+import { existsSync as existsSync5 } from "node:fs";
+import { mkdir as mkdir3, rename as rename3, rm as rm6, writeFile as writeFile4 } from "node:fs/promises";
+import { join as join8, resolve as resolve3 } from "node:path";
 
 // packages/core/src/mirage/encode.ts
 function bitrateFor(width, height, fps) {
@@ -38547,7 +38698,7 @@ function sourcesFor(ep, catalog) {
     if (item.src.out > videoEnd + 0.1) {
       throw new MirageError("BAD_ITEM", `item ${item.id}: ${item.clip} has video only until ${videoEnd.toFixed(1)} s (src.out is ${item.src.out} s)`, `End the item by ${videoEnd.toFixed(1)} s; the rest of ${item.clip} is sound only.`);
     }
-    if (!existsSync4(clip.path)) {
+    if (!existsSync5(clip.path)) {
       throw new MirageError("BAD_ITEM", `item ${item.id}: clip file ${clip.path} is missing`, "Reconnect the drive or re-ingest the folder it moved to");
     }
     map2.set(clip.id, { path: clip.path, hasAudio: clip.probe.hasAudio, durationSec: clip.probe.durationSec, audioStream: clip.probe.audioStream, videoStartSec: clip.probe.videoStartSec, width: clip.probe.width, height: clip.probe.height });
@@ -38644,7 +38795,7 @@ function musicTrackArgs(cues, lib, musicDir, durationSec, loudnessLufs, output2)
   const inputs = [];
   const chains = [];
   cues.forEach((c3, i2) => {
-    inputs.push("-stream_loop", "-1", "-ss", ffNum(c3.offset), "-i", join7(musicDir, cueTrack(c3, i2, lib).file));
+    inputs.push("-stream_loop", "-1", "-ss", ffNum(c3.offset), "-i", join8(musicDir, cueTrack(c3, i2, lib).file));
     const dur = c3.end - c3.start;
     const measured = Math.max(dur, LOUDNORM_MIN_SEC);
     const fades = [
@@ -38720,13 +38871,13 @@ function episodeFinalArgs(o2) {
   }
   return [...inputs, "-filter_complex", chains.join(";"), "-map", "[vout]", "-map", "[aout]", ...encodeArgs(o2), "-t", D, o2.output];
 }
-var episodeDir = (project2, n2) => join7(resolve3(project2), "episodes", String(n2));
+var episodeDir = (project2, n2) => join8(resolve3(project2), "episodes", String(n2));
 var noEpisode = (n2) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json does not exist`, "Ask Claude to write the episode timeline first.");
 var wrongNumber = (n2, found) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json says it is episode ${found}`, `Set "number" to ${n2} in episodes/${n2}/episode.json.`);
 async function loadEpisode(project2, n2) {
   let ep;
   try {
-    ep = await readJsonFile(join7(episodeDir(project2, n2), "episode.json"), EpisodeSchema, `episodes/${n2}/episode.json`);
+    ep = await readJsonFile(join8(episodeDir(project2, n2), "episode.json"), EpisodeSchema, `episodes/${n2}/episode.json`);
   } catch (e) {
     if (e.code === "ENOENT") {
       throw noEpisode(n2);
@@ -38739,8 +38890,8 @@ async function loadEpisode(project2, n2) {
 async function saveEpisode(project2, ep, n2 = ep.number) {
   if (ep.number !== n2) throw wrongNumber(n2, ep.number);
   const dir = episodeDir(project2, n2);
-  await mkdir2(dir, { recursive: true });
-  await writeJsonFile(join7(dir, "episode.json"), EpisodeSchema, ep, `episodes/${n2}/episode.json`, { onlyIfChanged: true });
+  await mkdir3(dir, { recursive: true });
+  await writeJsonFile(join8(dir, "episode.json"), EpisodeSchema, ep, `episodes/${n2}/episode.json`, { onlyIfChanged: true });
 }
 function voiceRecordings(ep) {
   const vo = ep.voiceover;
@@ -38754,7 +38905,7 @@ async function loadVoiceoverTranscripts(project2, ep) {
   for (const rec of voiceRecordings(ep)) {
     const file2 = ep.voiceover.transcripts[rec] ?? "voiceover.transcript.json";
     try {
-      out.set(rec, await readJsonFile(join7(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`));
+      out.set(rec, await readJsonFile(join8(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`));
     } catch (e) {
       if (e.code === "ENOENT") {
         throw new MirageError("NO_EPISODE", `episodes/${n2}/${file2} is missing`, `Run: pnpm mirage vo <project> ${n2} ${rec}`);
@@ -38766,7 +38917,7 @@ async function loadVoiceoverTranscripts(project2, ep) {
 }
 async function lockEpisode(project2, n2, command) {
   const dir = episodeDir(project2, n2);
-  if (!existsSync4(dir)) throw noEpisode(n2);
+  if (!existsSync5(dir)) throw noEpisode(n2);
   const lock = await acquireLock(dir, command, `episode ${n2}`);
   await clearLeftovers(dir, lock, (f) => f.startsWith(".work-") || f.includes(".partial-") || /^\.vo-.*\.wav$/.test(f));
   return lock;
@@ -38797,24 +38948,24 @@ async function renderLocked(o2) {
   const final = o2.mode === "final";
   const [W, H] = final ? [ep.output.width, ep.output.height] : previewSize(ep.output.width, ep.output.height);
   const dir = episodeDir(project2, o2.episode);
-  const musicDir = resolve3(o2.musicDir ?? join7(project2, "music"));
+  const musicDir = resolve3(o2.musicDir ?? join8(project2, "music"));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
   const voTranscripts = final && ep.voiceover ? await loadVoiceoverTranscripts(project2, ep) : null;
   const recordings = final ? voiceRecordings(ep) : [];
   for (const rec of recordings) {
     const abs = resolve3(project2, rec);
-    if (!existsSync4(abs)) throw new MirageError("BAD_ITEM", `voice-over recording ${abs} is missing`, "Reconnect the drive or put the recording back, then render again.");
+    if (!existsSync5(abs)) throw new MirageError("BAD_ITEM", `voice-over recording ${abs} is missing`, "Reconnect the drive or put the recording back, then render again.");
     const was = fittedRecordingSha(ep.voiceover, rec);
     if (was && !(await sha256File(abs)).startsWith(was)) {
       throw new MirageError("BAD_ITEM", `voice-over recording ${abs} changed since vo fitted it`, `Put back the recording you fitted, or run vo again with the new one: pnpm mirage vo <project> ${o2.episode} <recording> (then --add for lines from other recordings).`);
     }
   }
-  const outputPath = join7(dir, `${o2.mode}.mp4`);
+  const outputPath = join8(dir, `${o2.mode}.mp4`);
   const id = randomUUID4();
-  const work = join7(dir, `.work-${id}`);
+  const work = join8(dir, `.work-${id}`);
   const partial2 = `${outputPath}.partial-${id}.mp4`;
-  await mkdir2(work, { recursive: true });
+  await mkdir3(work, { recursive: true });
   const report = (f) => o2.onProgress?.(Math.min(1, Math.max(0, f)));
   try {
     const chunks = chunkItems(laid, chunkSize(sources));
@@ -38822,7 +38973,7 @@ async function renderLocked(o2) {
     for (const [i2, chunk] of chunks.entries()) {
       o2.signal?.throwIfAborted();
       const dur = chunk.reduce((s, l) => s + l.frames / fps, 0);
-      await o2.tools.runFfmpeg(itemChunkArgs(chunk, { width: W, height: H, fps }, sources, join7(work, `chunk-${pad3(i2)}.mov`)), {
+      await o2.tools.runFfmpeg(itemChunkArgs(chunk, { width: W, height: H, fps }, sources, join8(work, `chunk-${pad3(i2)}.mov`)), {
         expectedDurationSec: dur,
         timeoutMs: chunkTimeoutMs(chunk, fps),
         signal: o2.signal,
@@ -38831,11 +38982,11 @@ async function renderLocked(o2) {
       done += dur;
     }
     o2.signal?.throwIfAborted();
-    await writeFile3(join7(work, "chunks.txt"), chunks.map((_, i2) => `file 'chunk-${pad3(i2)}.mov'`).join("\n") + "\n");
+    await writeFile4(join8(work, "chunks.txt"), chunks.map((_, i2) => `file 'chunk-${pad3(i2)}.mov'`).join("\n") + "\n");
     let musicWav;
     if (ep.music.length) {
       o2.signal?.throwIfAborted();
-      await o2.tools.runFfmpeg(musicTrackArgs(ep.music, lib, musicDir, D, ep.loudnessLufs, join7(work, "music.wav")), {
+      await o2.tools.runFfmpeg(musicTrackArgs(ep.music, lib, musicDir, D, ep.loudnessLufs, join8(work, "music.wav")), {
         expectedDurationSec: D,
         timeoutMs: Math.max(12e4, D * 10 * 1e3),
         signal: o2.signal
@@ -38847,13 +38998,13 @@ async function renderLocked(o2) {
     let voiceRaw;
     if (final && ep.voiceover) {
       const pcm = /* @__PURE__ */ new Map();
-      for (const [i2, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve3(project2, rec), join7(work, `rec-${i2}.f32`), o2.tools, { sampleRate: 48e3, clipTime: true, signal: o2.signal }));
+      for (const [i2, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve3(project2, rec), join8(work, `rec-${i2}.f32`), o2.tools, { sampleRate: 48e3, clipTime: true, signal: o2.signal }));
       const track = buildVoiceTrack({ recording: pcm, defaultRecording: ep.voiceover.recording, sampleRate: 48e3, lines: ep.voiceover.lines, durationSec: D });
-      await writeFile3(join7(work, "vo.f32"), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
+      await writeFile4(join8(work, "vo.f32"), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
       voiceRaw = "vo.f32";
     }
     const cues = o2.mode === "guide" ? [] : groupCaptions(speechWords(ep, catalog, voTranscripts), { durationSec: D });
-    await writeFile3(join7(work, "overlays.ass"), buildAss({ width: W, height: H, captions: cues, overlays: ep.overlays, prompts: o2.mode === "guide" ? ep.slots : [] }));
+    await writeFile4(join8(work, "overlays.ass"), buildAss({ width: W, height: H, captions: cues, overlays: ep.overlays, prompts: o2.mode === "guide" ? ep.slots : [] }));
     o2.signal?.throwIfAborted();
     const encoder = final ? await o2.tools.pickEncoder() : { name: "libx264", extraArgs: [] };
     await o2.tools.runFfmpeg(
@@ -38889,32 +39040,32 @@ async function renderLocked(o2) {
     await rename3(partial2, outputPath);
     let srtPath = null;
     if (final) {
-      srtPath = join7(dir, "final.srt");
-      await writeFile3(srtPath, toSrt(cues));
+      srtPath = join8(dir, "final.srt");
+      await writeFile4(srtPath, toSrt(cues));
     }
     report(1);
     return { outputPath, srtPath, durationSec: D, warnings: final ? lineChangeWarnings(ep, "render") : [] };
   } catch (e) {
-    await rm5(partial2, { force: true }).catch(() => {
+    await rm6(partial2, { force: true }).catch(() => {
     });
     throw e;
   } finally {
-    await rm5(work, { recursive: true, force: true }).catch(() => {
+    await rm6(work, { recursive: true, force: true }).catch(() => {
     });
   }
 }
 
 // packages/core/src/mirage/voiceover-files.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
-import { existsSync as existsSync5, statSync as statSync2 } from "node:fs";
-import { mkdir as mkdir3, rm as rm6 } from "node:fs/promises";
-import { isAbsolute, join as join8, relative, resolve as resolve4 } from "node:path";
+import { existsSync as existsSync6, statSync as statSync2 } from "node:fs";
+import { mkdir as mkdir4, rm as rm7 } from "node:fs/promises";
+import { isAbsolute, join as join9, relative, resolve as resolve4 } from "node:path";
 var voTranscriptFile = (sha256) => `voiceover.${sha256.slice(0, 16)}.transcript.json`;
 async function fitRecording(o2) {
   const project2 = resolve4(o2.project);
   const n2 = o2.episode;
   const rec = resolve4(o2.recording);
-  if (!existsSync5(rec)) throw new MirageError("BAD_ITEM", `${rec} does not exist`, "Pass the path of your voice-over recording.");
+  if (!existsSync6(rec)) throw new MirageError("BAD_ITEM", `${rec} does not exist`, "Pass the path of your voice-over recording.");
   if (statSync2(rec).isDirectory()) throw new MirageError("BAD_INPUT", `${rec} is a folder, not a recording`, "Pass the path of your voice-over recording file.");
   const lock = await lockEpisode(project2, n2, "vo");
   try {
@@ -38952,14 +39103,17 @@ async function fitLocked(o2, project2, rec) {
   if (only) await checkKeptRecordings(project2, ep, (l) => !only.includes(l.slot), recording, sha);
   const file2 = voTranscriptFile(sha);
   let transcript;
-  const reused = existsSync5(join8(dir, file2));
-  if (reused) {
+  const reused = !o2.transcript && existsSync6(join9(dir, file2));
+  if (o2.transcript) {
+    transcript = o2.transcript;
+    await writeJsonFile(join9(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
+  } else if (reused) {
     o2.onStep?.("Reusing the transcript of this recording");
-    transcript = await readJsonFile(join8(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`);
+    transcript = await readJsonFile(join9(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`);
   } else {
     o2.onStep?.("Transcribing your voice-over\u2026");
-    await mkdir3(dir, { recursive: true });
-    const wav = join8(dir, `.vo-${randomUUID5()}.wav`);
+    await mkdir4(dir, { recursive: true });
+    const wav = join9(dir, `.vo-${randomUUID5()}.wav`);
     try {
       await o2.tools.extractWav(rec, wav, { signal: o2.signal }).catch(async (e) => {
         o2.signal?.throwIfAborted();
@@ -38969,10 +39123,10 @@ async function fitLocked(o2, project2, rec) {
       });
       transcript = await refineTranscript(await o2.tools.transcribe(wav, { signal: o2.signal }), wav);
     } finally {
-      await rm6(wav, { force: true });
+      await rm7(wav, { force: true });
     }
     o2.signal?.throwIfAborted();
-    await writeJsonFile(join8(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
+    await writeJsonFile(join9(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
   }
   o2.signal?.throwIfAborted();
   const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project2), recording, transcript, only });
@@ -38999,7 +39153,7 @@ async function checkKeptRecordings(project2, ep, kept, recording, sha) {
   for (const [r, slots] of byRecording) {
     const was = fittedRecordingSha(vo, r);
     const abs = resolve4(project2, r);
-    if (!was || r !== recording && !existsSync5(abs)) continue;
+    if (!was || r !== recording && !existsSync6(abs)) continue;
     const now = r === recording ? sha : await sha256File(abs);
     if (now.startsWith(was)) continue;
     const them = slots.join(", ");
@@ -39014,8 +39168,229 @@ async function checkKeptRecordings(project2, ep, kept, recording, sha) {
   }
 }
 
+// packages/core/src/mirage/narration.ts
+import { existsSync as existsSync7 } from "node:fs";
+import { readdir as readdir4, rm as rm8, writeFile as writeFile5 } from "node:fs/promises";
+import { join as join10, resolve as resolve5 } from "node:path";
+var r37 = (n2) => Math.round(n2 * 1e3) / 1e3;
+var NARRATION_GAPS = { lead: 0.3, sentence: 0.3, line: 0.8 };
+var MARGIN_SEC = 0.03;
+var MAX_SPEEDUP = 1.15;
+var MAX_SENTENCE_WORDS = 40;
+function lineSentences(line) {
+  const sentences = line.trim().replace(/\s+/g, " ").split(/(?<=[.!?…]["'”’)\]]*)\s+/).filter((s) => hasWords(s));
+  return sentences.flatMap((s) => {
+    if (s.split(" ").length <= MAX_SENTENCE_WORDS) return [s];
+    const out = [];
+    let cur = "";
+    for (const clause of s.split(/(?<=[,;:—–])\s+/)) {
+      if (cur && (cur + " " + clause).split(" ").length > MAX_SENTENCE_WORDS) {
+        out.push(cur);
+        cur = clause;
+      } else cur = cur ? `${cur} ${clause}` : clause;
+    }
+    if (cur) out.push(cur);
+    return out;
+  });
+}
+function frameDb2(samples, sampleRate) {
+  const size = Math.max(1, Math.round(sampleRate * 0.01));
+  const db = [];
+  for (let i2 = 0; i2 + size <= samples.length; i2 += size) {
+    let sum = 0;
+    for (let j = i2; j < i2 + size; j++) sum += samples[j] * samples[j];
+    db.push(10 * Math.log10(sum / size + 1e-12));
+  }
+  return { db, size };
+}
+function voicedSpan(samples, sampleRate) {
+  const { db, size } = frameDb2(samples, sampleRate);
+  const peak = Math.max(-120, ...db);
+  if (peak < -60) return null;
+  const voiced = (f) => db[f] >= peak - 45;
+  let a2 = 0;
+  while (a2 < db.length && !voiced(a2)) a2++;
+  let b = db.length - 1;
+  while (b > a2 && !voiced(b)) b--;
+  const quiet = [];
+  for (let f = a2, run2 = -1; f <= b; f++) {
+    const low = db[f] < peak - 35;
+    if (low && run2 < 0) run2 = f;
+    if (!low && run2 >= 0) {
+      if (f - run2 >= 8) quiet.push([run2 * size, f * size]);
+      run2 = -1;
+    }
+  }
+  return { start: a2 * size, end: Math.min(samples.length, (b + 1) * size), quiet };
+}
+var weight = (w) => [...w].reduce((n2, c3) => n2 + (/\d/.test(c3) ? 3 : new RegExp("\\p{L}", "u").test(c3) ? 1 : 0), 0) + 1.5;
+function spreadWords(text, start, end) {
+  const words = text.split(/\s+/).filter(Boolean);
+  const total = words.reduce((n2, w) => n2 + weight(w), 0);
+  let t = start;
+  return words.map((w) => {
+    const d = (end - start) * weight(w) / total;
+    const word = { w, start: r37(t), end: r37(t + d), conf: 1 };
+    t += d;
+    return word;
+  });
+}
+function sentenceWords(text, start, end, pauses) {
+  const clauses = text.split(/(?<=[,;:—–])\s+/).filter(Boolean);
+  if (clauses.length < 2 || pauses.length < clauses.length - 1) return spreadWords(text, start, end);
+  const breaks = [...pauses].sort((a2, b) => b[1] - b[0] - (a2[1] - a2[0])).slice(0, clauses.length - 1).sort((a2, b) => a2[0] - b[0]);
+  return clauses.flatMap((c3, i2) => spreadWords(c3, i2 === 0 ? start : breaks[i2 - 1][1], i2 === clauses.length - 1 ? end : breaks[i2][0]));
+}
+function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
+  const pieces = [];
+  const words = [];
+  const segments = [];
+  const spans = [];
+  let at2 = 0;
+  const silence = (sec) => {
+    const n2 = Math.round(sec * sampleRate);
+    pieces.push(new Float32Array(n2));
+    at2 += n2;
+  };
+  const margin = Math.round(MARGIN_SEC * sampleRate);
+  silence(gaps.lead);
+  lines.forEach((line, k) => {
+    if (k > 0) silence(gaps.line);
+    const lineStart = at2;
+    let spoken = 0;
+    for (const s of line.sentences) {
+      const v = voicedSpan(s.samples, sampleRate);
+      if (!v) continue;
+      if (spoken++ > 0) silence(gaps.sentence);
+      const from = Math.max(0, v.start - margin);
+      const to = Math.min(s.samples.length, v.end + margin);
+      pieces.push(s.samples.subarray(from, to));
+      const sec = (x) => (at2 + x - from) / sampleRate;
+      const sw = sentenceWords(s.text, sec(v.start), sec(v.end), v.quiet.map(([a2, b]) => [sec(a2), sec(b)]));
+      words.push(...sw);
+      segments.push({ start: r37(sec(v.start)), end: r37(sec(v.end)), text: s.text });
+      at2 += to - from;
+    }
+    if (!spoken) return;
+    const last = words[words.length - 1];
+    if (!/[.?!]["'”’)\]]*$/.test(last.w)) words[words.length - 1] = { ...last, w: `${last.w}.` };
+    spans.push({ slot: line.slot, start: r37(lineStart / sampleRate), end: r37(at2 / sampleRate) });
+  });
+  silence(gaps.lead);
+  const samples = new Float32Array(at2);
+  let o2 = 0;
+  for (const p of pieces) {
+    samples.set(p, o2);
+    o2 += p.length;
+  }
+  return { samples, transcript: { words, segments, speech: segments.map((s) => [s.start, s.end]) }, lines: spans };
+}
+function wavBytes(samples, sampleRate) {
+  const b = Buffer.alloc(44 + samples.length * 2);
+  b.write("RIFF", 0, "ascii");
+  b.writeUInt32LE(36 + samples.length * 2, 4);
+  b.write("WAVEfmt ", 8, "ascii");
+  b.writeUInt32LE(16, 16);
+  b.writeUInt16LE(1, 20);
+  b.writeUInt16LE(1, 22);
+  b.writeUInt32LE(sampleRate, 24);
+  b.writeUInt32LE(sampleRate * 2, 28);
+  b.writeUInt16LE(2, 32);
+  b.writeUInt16LE(16, 34);
+  b.write("data", 36, "ascii");
+  b.writeUInt32LE(samples.length * 2, 40);
+  for (let i2 = 0; i2 < samples.length; i2++) b.writeInt16LE(Math.round(Math.max(-1, Math.min(1, samples[i2])) * 32767), 44 + i2 * 2);
+  return b;
+}
+function checkSpeakOptions(voice, speed) {
+  if (!KOKORO_VOICES.includes(voice)) {
+    throw new MirageError("BAD_INPUT", `There is no voice ${voice}`, `Pick one of: ${KOKORO_VOICES.join(", ")} (af/am: American, bf/bm: British; f female, m male).`);
+  }
+  if (!Number.isFinite(speed) || speed < 0.5 || speed > 2) throw new MirageError("BAD_INPUT", `Speed ${speed} is out of range`, "Use a speed from 0.5 (slower) to 2 (faster); 1 is normal.");
+}
+async function nextNarrationFile(dir) {
+  const used = (await readdir4(dir).catch(() => [])).map((f) => /^narration-(\d+)\.wav$/.exec(f)?.[1]).filter(Boolean).map(Number);
+  return `narration-${used.length ? Math.max(...used) + 1 : 1}.wav`;
+}
+function narrationTargets(ep, only) {
+  if (!ep.slots.some((s) => hasWords(s.line))) {
+    const foreign = ep.slots.filter((s) => notEnglish(s.line)).map((s) => s.id);
+    if (foreign.length) throw englishOnlyError(foreign);
+    throw new MirageError("NOTHING_MATCHED", "No narration lines are written yet", "Run slots and write a line for each slot first.");
+  }
+  if (slotsStale(ep)) throw slotsStaleError(ep.number);
+  if (only?.length) {
+    if (cutChanged(ep)) throw cutChangedError();
+    for (const id of only) {
+      const slot = ep.slots.find((s) => s.id === id);
+      if (!slot) throw new MirageError("BAD_ITEM", `there is no slot ${id}`, "List slots from the slots tool.");
+      if (!hasWords(slot.line)) throw new MirageError("BAD_ITEM", `slot ${id} has no written line`, "Write its line first, or list slots that have one.");
+    }
+  }
+  const wanted = only?.length ? new Set(only) : null;
+  return ep.slots.filter((s) => hasWords(s.line) && (!wanted || wanted.has(s.id))).sort((a2, b) => a2.start - b.start);
+}
+async function speakNarration(o2) {
+  checkSpeakOptions(o2.voice, o2.speed);
+  const project2 = resolve5(o2.project);
+  const n2 = o2.episode;
+  const targets = narrationTargets(await loadEpisode(project2, n2), o2.slots);
+  const english = targets.filter((s) => !notEnglish(s.line));
+  if (!english.length) throw englishOnlyError(targets.map((s) => s.id));
+  const dir = episodeDir(project2, n2);
+  let wav = null;
+  try {
+    await o2.speaker.prepare({ onStep: o2.onStep, signal: o2.signal });
+    const started = Date.now();
+    const spoken = [];
+    const spedUp = [];
+    let rate = 0;
+    const read = async (line, speed) => {
+      const out = [];
+      for (const text of lineSentences(line)) {
+        o2.signal?.throwIfAborted();
+        const a2 = await o2.speaker.speak(text, { voice: o2.voice, speed, signal: o2.signal });
+        if (rate && a2.sampleRate !== rate) throw new MirageError("BAD_INPUT", "The voice changed sample rate mid-way", "Run speak again.");
+        rate = a2.sampleRate;
+        out.push({ text, samples: a2.samples });
+      }
+      return out;
+    };
+    const spokenSec = (s) => {
+      const voiced = s.map((x) => voicedSpan(x.samples, rate)).filter((v) => v !== null);
+      return voiced.reduce((t, v) => t + (v.end - v.start) / rate, 0) + Math.max(0, voiced.length - 1) * NARRATION_GAPS.sentence;
+    };
+    o2.onStep?.(`Reading ${english.length} line${english.length === 1 ? "" : "s"} with ${o2.voice}\u2026`);
+    for (const [i2, slot] of english.entries()) {
+      let sentences = await read(slot.line, o2.speed);
+      const room = slot.end - slot.start - 0.1;
+      const sec = spokenSec(sentences);
+      if (sec > room && room > 0) {
+        const faster = Math.round(Math.min(o2.speed * MAX_SPEEDUP, o2.speed * sec / room + 0.01) * 100) / 100;
+        sentences = await read(slot.line, faster);
+        spedUp.push({ slot: slot.id, speed: faster });
+      }
+      spoken.push({ slot: slot.id, sentences });
+      o2.onProgress?.((i2 + 1) / english.length * 0.9);
+    }
+    const synthSec = (Date.now() - started) / 1e3;
+    const joined = assembleNarration(spoken, rate);
+    o2.signal?.throwIfAborted();
+    const name = await nextNarrationFile(dir);
+    await writeFile5(join10(dir, name), wavBytes(joined.samples, rate), { flag: "wx" });
+    wav = join10(dir, name);
+    const fit = await fitRecording({ project: project2, episode: n2, recording: wav, tools: o2.tools, add: !!o2.slots?.length, slots: o2.slots, transcript: joined.transcript, onStep: o2.onStep, signal: o2.signal });
+    o2.onProgress?.(1);
+    const audioSec = r37(joined.lines.reduce((t, l) => t + l.end - l.start, 0));
+    return { recording: `episodes/${n2}/${name}`, report: fit.report, episode: fit.episode, audioSec, synthSec: r37(synthSec), spedUp };
+  } catch (e) {
+    if (wav && existsSync7(wav)) await rm8(wav, { force: true });
+    throw asCancelled(e, o2.signal);
+  }
+}
+
 // packages/core/src/mirage/check.ts
-import { join as join9, resolve as resolve5 } from "node:path";
+import { join as join11, resolve as resolve6 } from "node:path";
 var OLD_DEFAULT_GAIN_DB = -18;
 var s12 = (n2) => n2.toFixed(1);
 var s2 = (n2) => n2.toFixed(2);
@@ -39058,13 +39433,13 @@ function timelineWarnings(ep, lib, snapped) {
   return out;
 }
 async function checkEpisode(project2, n2) {
-  const root = resolve5(project2);
+  const root = resolve6(project2);
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n2);
   sourcesFor(ep, catalog);
   const warnings = [];
   const notes = [];
-  const musicDir = join9(root, "music");
+  const musicDir = join11(root, "music");
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
   if (ep.voiceover) {
@@ -39094,30 +39469,30 @@ async function checkEpisode(project2, n2) {
 }
 
 // packages/core/src/mirage/project.ts
-import { existsSync as existsSync6 } from "node:fs";
-import { mkdir as mkdir4, writeFile as writeFile4 } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { join as join10, resolve as resolve6 } from "node:path";
-function resolveUserPath(p, base = process.env.INIT_CWD ?? process.cwd(), home = homedir2()) {
+import { existsSync as existsSync8 } from "node:fs";
+import { mkdir as mkdir5, writeFile as writeFile6 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { join as join12, resolve as resolve7 } from "node:path";
+function resolveUserPath(p, base = process.env.INIT_CWD ?? process.cwd(), home = homedir3()) {
   if (p === "~") return home;
-  if (p.startsWith("~/")) return join10(home, p.slice(2));
-  return resolve6(base, p);
+  if (p.startsWith("~/")) return join12(home, p.slice(2));
+  return resolve7(base, p);
 }
 async function initProject(project2, title) {
-  const file2 = join10(project2, "mirage.json");
-  if (existsSync6(file2)) throw new MirageError("BAD_INPUT", `${project2} is already a Mirage project`, "Nothing was changed; edit mirage.json to change its title.");
-  await mkdir4(join10(project2, "episodes"), { recursive: true });
-  await mkdir4(join10(project2, "music"), { recursive: true });
-  await writeFile4(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
+  const file2 = join12(project2, "mirage.json");
+  if (existsSync8(file2)) throw new MirageError("BAD_INPUT", `${project2} is already a Mirage project`, "Nothing was changed; edit mirage.json to change its title.");
+  await mkdir5(join12(project2, "episodes"), { recursive: true });
+  await mkdir5(join12(project2, "music"), { recursive: true });
+  await writeFile6(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
 }
 function requireProject(project2) {
-  if (!existsSync6(join10(project2, "mirage.json"))) {
+  if (!existsSync8(join12(project2, "mirage.json"))) {
     throw new MirageError("NO_PROJECT", `no Mirage project at ${project2}`, `Check the path, or create one with: pnpm mirage init ${project2} --title "<title>"`);
   }
 }
 async function readProject(project2) {
   try {
-    return await readJsonFile(join10(project2, "mirage.json"), MirageProjectSchema, "mirage.json");
+    return await readJsonFile(join12(project2, "mirage.json"), MirageProjectSchema, "mirage.json");
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -39126,15 +39501,15 @@ async function readProject(project2) {
 
 // packages/core/src/mirage/versions.ts
 import { randomBytes, randomUUID as randomUUID6 } from "node:crypto";
-import { access as access3, copyFile, link, mkdir as mkdir5, readdir as readdir4, readFile as readFile6, rename as rename4, rm as rm7, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join11 } from "node:path";
+import { access as access3, copyFile, link, mkdir as mkdir6, readdir as readdir5, readFile as readFile6, rename as rename4, rm as rm9, writeFile as writeFile7 } from "node:fs/promises";
+import { join as join13 } from "node:path";
 var MAX_CHECKPOINTS = 50;
 var MAX_BACKUPS = 20;
 var DEFAULT_WAIT_MS = 3e4;
 var RETRY_MS = 250;
 var STATE_FILES = ["episode.json", "summary.md"];
 var ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
-var versionsDir = (project2, n2) => join11(episodeDir(project2, n2), "versions");
+var versionsDir = (project2, n2) => join13(episodeDir(project2, n2), "versions");
 async function readBytes(path6) {
   try {
     return await readFile6(path6);
@@ -39145,7 +39520,7 @@ async function readBytes(path6) {
 }
 async function writeBytesAtomic(path6, bytes) {
   const tmpPath = `${path6}.tmp-${randomUUID6()}`;
-  await writeFile5(tmpPath, bytes);
+  await writeFile7(tmpPath, bytes);
   await rename4(tmpPath, path6);
 }
 async function linkOrCopy(from, to) {
@@ -39181,14 +39556,14 @@ async function withEpisodeLock(project2, n2, waitMs, fn) {
 }
 async function listLocked(project2, n2) {
   const root = versionsDir(project2, n2);
-  const names = await readdir4(root).catch((e) => {
+  const names = await readdir5(root).catch((e) => {
     if (e.code === "ENOENT") return [];
     throw e;
   });
   const metas = [];
   for (const name of names.filter((f) => ID_PATTERN.test(f)).sort()) {
     try {
-      const meta3 = await readJsonFile(join11(root, name, "meta.json"), VersionMetaSchema);
+      const meta3 = await readJsonFile(join13(root, name, "meta.json"), VersionMetaSchema);
       if (meta3.id === name) metas.push(meta3);
     } catch {
     }
@@ -39198,27 +39573,27 @@ async function listLocked(project2, n2) {
 async function snapshotLocked(project2, n2, o2) {
   const dir = episodeDir(project2, n2);
   const root = versionsDir(project2, n2);
-  if (o2.render && !await access3(join11(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
+  if (o2.render && !await access3(join13(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
     throw new MirageError("BAD_INPUT", `episodes/${n2}/${o2.render}.mp4 does not exist`, "Render it first.");
   }
-  await mkdir5(root, { recursive: true });
-  for (const f of await readdir4(root)) if (f.startsWith(".tmp-")) await rm7(join11(root, f), { recursive: true, force: true }).catch(() => {
+  await mkdir6(root, { recursive: true });
+  for (const f of await readdir5(root)) if (f.startsWith(".tmp-")) await rm9(join13(root, f), { recursive: true, force: true }).catch(() => {
   });
   const existing = await listLocked(project2, n2);
   const now = /* @__PURE__ */ new Date();
   const id = newId(o2.kind, now);
-  const tmp = join11(root, `.tmp-${randomUUID6()}`);
-  await mkdir5(tmp);
+  const tmp = join13(root, `.tmp-${randomUUID6()}`);
+  await mkdir6(tmp);
   try {
-    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join11(dir, f))));
-    if (episode) await writeFile5(join11(tmp, "episode.json"), episode);
-    if (summary) await writeFile5(join11(tmp, "summary.md"), summary);
+    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join13(dir, f))));
+    if (episode) await writeFile7(join13(tmp, "episode.json"), episode);
+    if (summary) await writeFile7(join13(tmp, "summary.md"), summary);
     let render = null;
     if (o2.render) {
-      await linkOrCopy(join11(dir, `${o2.render}.mp4`), join11(tmp, "video.mp4"));
+      await linkOrCopy(join13(dir, `${o2.render}.mp4`), join13(tmp, "video.mp4"));
       let captions = null;
-      if (o2.render === "final" && await readBytes(join11(dir, "final.srt")) !== null) {
-        await copyFile(join11(dir, "final.srt"), join11(tmp, "captions.srt"));
+      if (o2.render === "final" && await readBytes(join13(dir, "final.srt")) !== null) {
+        await copyFile(join13(dir, "final.srt"), join13(tmp, "captions.srt"));
         captions = "captions.srt";
       }
       render = { mode: o2.render, file: "video.mp4", captions };
@@ -39236,13 +39611,13 @@ async function snapshotLocked(project2, n2, o2) {
       hasEpisode: episode !== null,
       hasSummary: summary !== null
     };
-    await writeJsonFile(join11(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
-    await rename4(tmp, join11(root, id));
+    await writeJsonFile(join13(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
+    await rename4(tmp, join13(root, id));
     if (o2.kind === "checkpoint") await prune(project2, n2, "checkpoint", MAX_CHECKPOINTS);
     if (o2.kind === "backup") await prune(project2, n2, "backup", MAX_BACKUPS);
     return meta3;
   } catch (e) {
-    await rm7(tmp, { recursive: true, force: true }).catch(() => {
+    await rm9(tmp, { recursive: true, force: true }).catch(() => {
     });
     throw e;
   }
@@ -39250,7 +39625,7 @@ async function snapshotLocked(project2, n2, o2) {
 async function prune(project2, n2, kind, keep) {
   const ofKind = (await listLocked(project2, n2)).filter((v) => v.kind === kind);
   for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
-    await rm7(join11(versionsDir(project2, n2), old.id), { recursive: true, force: true });
+    await rm9(join13(versionsDir(project2, n2), old.id), { recursive: true, force: true });
   }
 }
 async function listVersions(project2, n2) {
@@ -39260,14 +39635,14 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
   return withEpisodeLock(project2, n2, o2.waitMs, async () => {
     const restored = (await listLocked(project2, n2)).find((v) => v.id === id);
     if (!restored) throw new MirageError("BAD_INPUT", `episodes/${n2} has no saved version "${id}"`, "List the versions and pick one of those.");
-    const from = join11(versionsDir(project2, n2), id);
-    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join11(from, f))));
+    const from = join13(versionsDir(project2, n2), id);
+    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join13(from, f))));
     const backup = await snapshotLocked(project2, n2, { kind: "backup", label: `Before going back to \u201C${restored.label}\u201D` });
     const dir = episodeDir(project2, n2);
     for (const [i2, f] of STATE_FILES.entries()) {
       const b = bytes[i2];
-      if (b) await writeBytesAtomic(join11(dir, f), b);
-      else await rm7(join11(dir, f), { force: true });
+      if (b) await writeBytesAtomic(join13(dir, f), b);
+      else await rm9(join13(dir, f), { force: true });
     }
     return { restored, backup };
   });
@@ -39275,28 +39650,28 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
 
 // packages/core/src/mirage/session-files.ts
 import { readFileSync as readFileSync3 } from "node:fs";
-import { appendFile, link as link2, mkdir as mkdir6, readdir as readdir5, readFile as readFile7, rename as rename5, rm as rm8, stat as stat4, utimes, writeFile as writeFile6 } from "node:fs/promises";
-import { dirname as dirname2, join as join12, resolve as resolve7 } from "node:path";
+import { appendFile, link as link2, mkdir as mkdir7, readdir as readdir6, readFile as readFile7, rename as rename5, rm as rm10, stat as stat4, utimes, writeFile as writeFile8 } from "node:fs/promises";
+import { dirname as dirname3, join as join14, resolve as resolve8 } from "node:path";
 var SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 function checkSessionId(id) {
   if (!SESSION_ID.test(id) || id.includes("..")) throw new MirageError("BAD_INPUT", `"${id}" is not a session id`, "A session id is letters, digits, dots, dashes and underscores.");
   return id;
 }
-var sessionDir = (project2, n2, sessionId) => join12(episodeDir(project2, n2), "sessions", checkSessionId(sessionId));
+var sessionDir = (project2, n2, sessionId) => join14(episodeDir(project2, n2), "sessions", checkSessionId(sessionId));
 async function appendLine(path6, schema, value) {
   const parsed = schema.parse(value);
-  await mkdir6(dirname2(path6), { recursive: true });
+  await mkdir7(dirname3(path6), { recursive: true });
   await appendFile(path6, JSON.stringify(parsed) + "\n", "utf8");
 }
-var logPath = (dir) => join12(dir, "log.jsonl");
-var progressPath = (dir) => join12(dir, "progress.json");
+var logPath = (dir) => join14(dir, "log.jsonl");
+var progressPath = (dir) => join14(dir, "progress.json");
 var appendLog = (dir, entry) => appendLine(logPath(dir), LogEntrySchema, entry);
 async function writeProgress(dir, p) {
-  await mkdir6(dir, { recursive: true });
+  await mkdir7(dir, { recursive: true });
   await writeJsonFile(progressPath(dir), ProgressSchema2, p, "progress.json");
 }
-var clearProgress = (dir) => rm8(progressPath(dir), { force: true });
-var controlPath = (project2, n2) => join12(episodeDir(project2, n2), "control.json");
+var clearProgress = (dir) => rm10(progressPath(dir), { force: true });
+var controlPath = (project2, n2) => join14(episodeDir(project2, n2), "control.json");
 var CLAIM = "control.json.take-";
 var defaultControl = () => ({ version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
 async function readControlFile(path6) {
@@ -39313,29 +39688,29 @@ var claimedAt = (name, mtime) => {
 };
 async function writeControlIfNone(path6, control) {
   try {
-    await writeFile6(path6, JSON.stringify(ControlSchema.parse(control), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+    await writeFile8(path6, JSON.stringify(ControlSchema.parse(control), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
 }
 async function claimedControl(project2, n2, written) {
   const dir = episodeDir(project2, n2);
-  const names = (await readdir5(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
+  const names = (await readdir6(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
   let best = null;
   const stale = [];
   for (const name of names) {
-    const info = await stat4(join12(dir, name)).catch(() => null);
+    const info = await stat4(join14(dir, name)).catch(() => null);
     if (!info) continue;
     if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
     if (written) continue;
-    const control = await readControlFile(join12(dir, name));
+    const control = await readControlFile(join14(dir, name));
     if (control && (!best || info.mtimeMs > best.mtime)) best = { control, mtime: info.mtimeMs };
   }
   const claimed = best ? { ...best.control, correction: null } : null;
   if (stale.length) {
     try {
       if (claimed && stale.length === names.length) await writeControlIfNone(controlPath(project2, n2), claimed);
-      for (const name of stale) await rm8(join12(dir, name), { force: true });
+      for (const name of stale) await rm10(join14(dir, name), { force: true });
     } catch {
     }
   }
@@ -39349,7 +39724,7 @@ async function readWrittenControl(project2, n2) {
 async function readControl(project2, n2) {
   return await readWrittenControl(project2, n2) ?? defaultControl();
 }
-var sessionStatePath = (project2, sessionId) => join12(resolve7(project2), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
+var sessionStatePath = (project2, sessionId) => join14(resolve8(project2), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
 var emptySession = () => ({ video: null, overnight: null, awakePid: null });
 async function readSessionState(project2, sessionId) {
   try {
@@ -39362,13 +39737,13 @@ async function readSessionState(project2, sessionId) {
 async function writeSessionState(project2, sessionId, patch) {
   const path6 = sessionStatePath(project2, sessionId);
   const next = SessionStateSchema.parse({ ...await readSessionState(project2, sessionId), ...patch });
-  await mkdir6(dirname2(path6), { recursive: true });
+  await mkdir7(dirname3(path6), { recursive: true });
   await writeJsonFile(path6, SessionStateSchema, next, `.mirage/sessions/${sessionId}.json`);
   return next;
 }
 function claudeProcessPath(project2, pid) {
   if (!Number.isInteger(pid) || pid <= 0) throw new MirageError("BAD_INPUT", `"${pid}" is not a process id`, "A process id is a whole number above 0.");
-  return join12(resolve7(project2), ".mirage", "claude", `${pid}.json`);
+  return join14(resolve8(project2), ".mirage", "claude", `${pid}.json`);
 }
 function readClaudeProcess(project2, pid) {
   try {
@@ -39380,18 +39755,18 @@ function readClaudeProcess(project2, pid) {
 }
 
 // packages/core/src/mirage/video.ts
-import { access as access4, mkdir as mkdir7, readdir as readdir6 } from "node:fs/promises";
-import { join as join13, resolve as resolve8 } from "node:path";
-var videoPath = (project2, n2) => join13(episodeDir(project2, n2), "video.json");
+import { access as access4, mkdir as mkdir8, readdir as readdir7 } from "node:fs/promises";
+import { join as join15, resolve as resolve9 } from "node:path";
+var videoPath = (project2, n2) => join15(episodeDir(project2, n2), "video.json");
 async function newVideo(project2, v) {
   const video2 = VideoSchema.parse({ ...v, version: 1, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
-  const root = join13(resolve8(project2), "episodes");
-  await mkdir7(root, { recursive: true });
+  const root = join15(resolve9(project2), "episodes");
+  await mkdir8(root, { recursive: true });
   for (; ; ) {
-    const highest = (await readdir6(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
+    const highest = (await readdir7(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
     const n2 = highest + 1;
     try {
-      await mkdir7(episodeDir(project2, n2));
+      await mkdir8(episodeDir(project2, n2));
     } catch (e) {
       if (e.code === "EEXIST") continue;
       throw e;
@@ -39412,7 +39787,7 @@ async function videoStage(project2, n2) {
   const dir = episodeDir(project2, n2);
   let stage = "new";
   for (const s of ["final", "guide", "rough"]) {
-    if (await access4(join13(dir, `${s}.mp4`)).then(() => true, () => false)) {
+    if (await access4(join15(dir, `${s}.mp4`)).then(() => true, () => false)) {
       stage = s;
       break;
     }
@@ -39422,8 +39797,8 @@ async function videoStage(project2, n2) {
 }
 
 // packages/core/src/mirage/notes.ts
-import { join as join14 } from "node:path";
-var notesPath = (project2, n2) => join14(episodeDir(project2, n2), "notes.json");
+import { join as join16 } from "node:path";
+var notesPath = (project2, n2) => join16(episodeDir(project2, n2), "notes.json");
 async function readNotes(project2, n2) {
   try {
     return (await readJsonFile(notesPath(project2, n2), NotesFileSchema, `episodes/${n2}/notes.json`)).notes;
@@ -39493,38 +39868,49 @@ function slotsReport({ slots, moved, dropped }) {
   lines.push(`\u2713 ${slots.length} slot${slots.length === 1 ? "" : "s"}, ${written} with lines${dropped.length ? `, ${dropped.length} dropped` : ""}`);
   return lines;
 }
-function voReport(report, n2) {
+function voReport(report, n2, via = "vo") {
   const lines = [];
+  const again = via === "speak" ? "speak with slots" : "vo --add";
   for (const l of report.lines) {
-    const status = l.status === "kept" ? "kept the earlier take (not found in this recording)" : l.status === "too long" ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold \u2014 shorten it or give it a longer slot, then vo --add` : l.status === "partial" ? `\u26A0 only part of the line was found \u2014 re-read the whole line with vo --add --slots ${l.slot}` : l.status;
+    const status = l.status === "kept" ? "kept the earlier take (not found in this recording)" : l.status === "too long" ? `too long: runs ${l.overrunSec}s past its slot, more than the picture can hold \u2014 shorten it or give it a longer slot, then ${again}` : l.status === "partial" ? via === "speak" ? `\u26A0 only part of the line was found \u2014 run speak with slots ["${l.slot}"] again` : `\u26A0 only part of the line was found \u2014 re-read the whole line with vo --add --slots ${l.slot}` : l.status;
     lines.push(`  ${l.slot}  ${status}${l.takes > 1 ? `  (${l.takes} takes, used the last)` : ""}${l.overrunSec && (l.status === "placed" || l.status === "partial") ? `  held picture +${l.overrunSec}s` : ""}`);
   }
   const missing = report.lines.filter((l) => l.status === "missing").map((l) => l.slot);
   lines.push(`\u2713 voice-over fitted${report.extendedSec ? `, episode ${report.extendedSec.toFixed(2)} s longer` : ""}`);
-  if (missing.length) lines.push(`\u26A0 not found: ${missing.join(", ")} \u2014 record just those lines, then: pnpm mirage vo <project> ${n2} <new recording> --add`);
+  if (missing.length) {
+    lines.push(via === "speak" ? `\u26A0 not found: ${missing.join(", ")} \u2014 run speak again with slots ${JSON.stringify(missing)}` : `\u26A0 not found: ${missing.join(", ")} \u2014 record just those lines, then: pnpm mirage vo <project> ${n2} <new recording> --add`);
+  }
   for (const w of report.warnings) lines.push(`\u26A0 ${w}`);
   return lines;
 }
+function speakReport(r, n2, voice) {
+  const read = r.report.lines.filter((l) => l.status !== "kept").length;
+  return [
+    `\u2022 Read ${read} line${read === 1 ? "" : "s"} with ${voice}: ${r.audioSec.toFixed(1)} s of narration in ${r.synthSec.toFixed(1)} s, saved as ${r.recording}`,
+    ...r.spedUp.map((x) => `\u2022 ${x.slot} was read at ${x.speed}\xD7 to fit its slot`),
+    ...voReport(r.report, n2, "speak")
+  ];
+}
 
 // packages/core/src/mirage/report.ts
-var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
+var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
 // packages/mcp/src/fallback-viewer.ts
 import { spawn as spawn2 } from "node:child_process";
-import { existsSync as existsSync7 } from "node:fs";
-import { dirname as dirname3, join as join15 } from "node:path";
+import { existsSync as existsSync9 } from "node:fs";
+import { dirname as dirname4, join as join17 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function fallbackViewerArgs(o2) {
   if (o2.env.MIRAGE_FALLBACK_VIEWER === "0") return null;
-  const exists3 = o2.exists ?? existsSync7;
-  const script = join15(o2.here, "viewer.mjs");
-  const ui = join15(o2.here, "viewer-ui");
+  const exists3 = o2.exists ?? existsSync9;
+  const script = join17(o2.here, "viewer.mjs");
+  const ui = join17(o2.here, "viewer-ui");
   if (!exists3(script) || !exists3(ui)) return null;
   const data = o2.env.MIRAGE_PLUGIN_DATA;
   return [script, "--project", o2.project, "--ui", ui, ...data ? ["--data", data] : [], "--fallback"];
 }
 function startFallbackViewer(project2) {
-  const args = fallbackViewerArgs({ here: dirname3(fileURLToPath3(import.meta.url)), project: project2, env: process.env });
+  const args = fallbackViewerArgs({ here: dirname4(fileURLToPath3(import.meta.url)), project: project2, env: process.env });
   if (!args) return;
   const child = spawn2(process.execPath, args, { stdio: ["pipe", "ignore", "inherit"], windowsHide: true });
   child.on("error", (e) => console.error(`mirage engine: the viewer didn't start: ${e.message}`));
@@ -39533,9 +39919,9 @@ function startFallbackViewer(project2) {
 }
 
 // packages/mcp/src/server.ts
-import { existsSync as existsSync8, readdirSync, realpathSync, statSync as statSync3 } from "node:fs";
-import { readdir as readdir8 } from "node:fs/promises";
-import { isAbsolute as isAbsolute2, join as join17, relative as relative2, resolve as resolve9, sep } from "node:path";
+import { existsSync as existsSync10, readdirSync as readdirSync2, realpathSync, statSync as statSync3 } from "node:fs";
+import { readdir as readdir9 } from "node:fs/promises";
+import { isAbsolute as isAbsolute2, join as join19, relative as relative2, resolve as resolve10, sep } from "node:path";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v3/helpers/util.js
 var util;
@@ -45511,7 +45897,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve11) => setTimeout(resolve11, pollInterval));
+        await new Promise((resolve12) => setTimeout(resolve12, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error62) {
@@ -45528,7 +45914,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve11, reject) => {
+    return new Promise((resolve12, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -45606,7 +45992,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve11(parseResult.data);
+            resolve12(parseResult.data);
           }
         } catch (error62) {
           reject(error62);
@@ -45868,12 +46254,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve11, reject) => {
+    return new Promise((resolve12, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve11, interval);
+      const timeoutId = setTimeout(resolve12, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -47013,7 +47399,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve11) => setTimeout(resolve11, pollInterval));
+      await new Promise((resolve12) => setTimeout(resolve12, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -47583,8 +47969,8 @@ var EMPTY_COMPLETION_RESULT = {
 
 // packages/mcp/src/preflight.ts
 import { execFile, spawn as spawn3 } from "node:child_process";
-import { readdir as readdir7, stat as stat5, statfs } from "node:fs/promises";
-import { join as join16 } from "node:path";
+import { readdir as readdir8, stat as stat5, statfs } from "node:fs/promises";
+import { join as join18 } from "node:path";
 import { promisify as promisify3 } from "node:util";
 var GB = 1024 ** 3;
 async function preflight(o2) {
@@ -47599,13 +47985,17 @@ async function preflight(o2) {
   }
   const speech = await deps.transcriber();
   if (speech) problems.push(`Speech recognition isn't set up: ${speech} Run /mirage:setup.`);
-  return { ok: problems.length === 0, problems };
+  const notes = [];
+  const tts = await deps.tts();
+  if (tts.state === "missing") problems.push(`AI narration isn't available: ${tts.text}`);
+  if (tts.state === "fetch") notes.push(`AI narration (Kokoro) is ${tts.text}.`);
+  return { ok: problems.length === 0, problems, notes };
 }
 var execFileAsync = promisify3(execFile);
 async function folderBytes(dir) {
   let total = 0;
-  for (const e of await readdir7(dir, { withFileTypes: true }).catch(() => [])) {
-    const path6 = join16(dir, e.name);
+  for (const e of await readdir8(dir, { withFileTypes: true }).catch(() => [])) {
+    const path6 = join18(dir, e.name);
     if (e.isDirectory()) total += await folderBytes(path6);
     else if (e.isFile()) total += (await stat5(path6).catch(() => null))?.size ?? 0;
   }
@@ -47632,7 +48022,8 @@ function realPreflightDeps() {
     transcriber: async () => {
       const s = await whisperSetup();
       return s.ok ? null : s.problem;
-    }
+    },
+    tts: async () => ttsSetup()
   };
 }
 function startCaffeinate() {
@@ -47695,11 +48086,11 @@ async function runLong(o2) {
 // packages/mcp/src/server.ts
 var SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 function newestSessionId(project2) {
-  const dir = join17(resolve9(project2), ".mirage", "sessions");
+  const dir = join19(resolve10(project2), ".mirage", "sessions");
   let best = null;
   let names;
   try {
-    names = readdirSync(dir);
+    names = readdirSync2(dir);
   } catch {
     return null;
   }
@@ -47708,7 +48099,7 @@ function newestSessionId(project2) {
     if (!id || id === "unknown" || id.includes("..")) continue;
     let mtime;
     try {
-      mtime = statSync3(join17(dir, name)).mtimeMs;
+      mtime = statSync3(join19(dir, name)).mtimeMs;
     } catch {
       continue;
     }
@@ -47717,7 +48108,7 @@ function newestSessionId(project2) {
   return best?.id ?? null;
 }
 function footageProblem(folder, project2) {
-  if (!existsSync8(folder)) return `\u2716 ${folder} does not exist`;
+  if (!existsSync10(folder)) return `\u2716 ${folder} does not exist`;
   if (!statSync3(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
   const rel = relative2(realpathSync(folder), realpathSync(project2));
   if (rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute2(rel)) {
@@ -47751,10 +48142,11 @@ var alive2 = (pid) => {
 var video = external_exports.number().int().positive().describe("The video number, e.g. 1");
 var MODES = { cut: "rough", guide: "guide", render: "final" };
 function createEngineServer(ctx) {
-  const project2 = resolve9(ctx.project);
+  const project2 = resolve10(ctx.project);
   const { tools } = ctx;
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
+  const speaker = ctx.speaker ?? kokoroSpeaker();
   const ppid = ctx.ppid ?? process.ppid;
   const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project2, ppid) ?? newestSessionId(project2));
   const sid = () => knownSession() ?? "unknown";
@@ -47770,7 +48162,7 @@ function createEngineServer(ctx) {
     }));
   }
   async function newestVideo() {
-    const numbers = (await readdir8(join17(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+    const numbers = (await readdir9(join19(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }
   async function report(n2, lines) {
@@ -47822,8 +48214,8 @@ function createEngineServer(ctx) {
     }
   });
   tool("music", "Find the tempo and mood of the tracks in the project's music folder.", {}, async () => {
-    const dir = join17(project2, "music");
-    if (!existsSync8(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
+    const dir = join19(project2, "music");
+    if (!existsSync10(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
     return report(await sessionVideo(), musicReport(dir, await analyzeLibrary(dir, tools)));
   });
   tool("check", "Check the timeline of a video against the catalog and music, snap montages to the beat, and list it.", { video }, async ({ video: n2 }) => report(n2, checkReport(await checkEpisode(project2, n2))));
@@ -47872,6 +48264,27 @@ function createEngineServer(ctx) {
       return report(a2.video, [...steps, ...voReport(fit, a2.video)]);
     }
   );
+  tool(
+    "speak",
+    "Read the written narration lines aloud with an AI voice (Kokoro, free and local) and fit them as the voice-over, for footage without a voice of its own. Downloads Kokoro the first time.",
+    {
+      video,
+      voice: external_exports.string().optional().describe(`The Kokoro voice (default ${DEFAULT_VOICE}): ${KOKORO_VOICES.join(", ")}`),
+      speed: external_exports.number().optional().describe("Speaking speed from 0.5 to 2 (default 1)"),
+      slots: external_exports.array(external_exports.string()).optional().describe('Read just these slots again (e.g. ["n2"]), keeping the other lines')
+    },
+    async (a2, { signal }) => {
+      const steps = [];
+      const voice = a2.voice ?? DEFAULT_VOICE;
+      const r = await long(
+        "speak",
+        a2.video,
+        signal,
+        (h2) => speakNarration({ project: project2, episode: a2.video, tools, speaker, voice, speed: a2.speed ?? 1, slots: a2.slots, onStep: (m) => steps.push(`\u2022 ${m}`), onProgress: h2.progress, signal: h2.signal })
+      );
+      return report(a2.video, [...steps, ...speakReport(r, a2.video, voice)]);
+    }
+  );
   tool("versions", "List the saved versions of a video: deliveries as V1, V2 \u2026 and the other saves, each with its id.", { video }, async ({ video: n2 }) => {
     const all = await listVersions(project2, n2);
     if (!all.length) return ok("no saved versions yet");
@@ -47893,7 +48306,7 @@ function createEngineServer(ctx) {
       inRound.map((x) => [
         `Note ${x.id} at ${x.t.toFixed(1)} s: ${x.text}`,
         ...x.box ? [`(about the area ${pct(x.box.x)}%\u2013${pct(x.box.x + x.box.w)}% across, ${pct(x.box.y)}%\u2013${pct(x.box.y + x.box.h)}% down)`] : [],
-        `Still: ${join17(episodeDir(project2, n2), x.still)}`
+        `Still: ${join19(episodeDir(project2, n2), x.still)}`
       ].join("\n")).join("\n\n")
     );
   });
@@ -47918,12 +48331,12 @@ function createEngineServer(ctx) {
     }
   );
   tool("overnight", "Get ready to edit unattended overnight: checks the Mac and keeps it awake until this session ends.", { videos: external_exports.array(external_exports.number().int().positive()).min(1) }, async ({ videos }) => {
-    const { ok: ready, problems } = await preflight({ project: project2, videos, deps });
+    const { ok: ready, problems, notes } = await preflight({ project: project2, videos, deps });
     if (!ready) return { content: [{ type: "text", text: problems.join("\n") }], isError: true };
     const earlier = (await readSessionState(project2, sid())).awakePid;
     const awakePid = earlier !== null && alive2(earlier) ? earlier : startAwake();
     await writeSessionState(project2, sid(), { overnight: { videos, startedAt: (/* @__PURE__ */ new Date()).toISOString() }, awakePid });
-    return ok(`ready: ${videos.length} videos, Mac kept awake until this session ends`);
+    return ok([`ready: ${videos.length} videos, Mac kept awake until this session ends`, ...notes]);
   });
   tool("status", "Where the project stands: its title, each video's stage and deliveries, the viewer, and whether the tools are installed.", {}, async () => {
     const lines = [];
@@ -47933,17 +48346,19 @@ function createEngineServer(ctx) {
     });
     if (meta3 === null) lines.push(`No Mirage project here yet (${project2}). Use new_project to start one.`);
     else if (meta3) lines.push(`Project: ${meta3.title}`);
-    const numbers = (await readdir8(join17(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+    const numbers = (await readdir9(join19(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
     for (const n2 of numbers) {
       const { stage, deliveries } = await videoStage(project2, n2);
       const title = (await readVideo(project2, n2).catch(() => null))?.title;
       lines.push(`Video ${n2}${title ? ` \u201C${title}\u201D` : ""}: ${stage} \xB7 ${deliveries} ${deliveries === 1 ? "delivery" : "deliveries"}`);
     }
-    const viewer = await readJsonFile(join17(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
+    const viewer = await readJsonFile(join19(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
     lines.push(viewer && alive2(viewer.pid) ? `Viewer: running at ${viewer.url}` : "Viewer: not running");
     for (const t of ["ffmpeg", "ffprobe"]) lines.push(`${t}: ${await deps.which(t) ? "ok" : "missing"}`);
     const speech = await deps.transcriber();
     lines.push(speech ? `transcriber: missing \u2014 ${speech}` : "transcriber: ok");
+    const tts = await deps.tts();
+    lines.push(tts.state === "ok" ? "tts: ok" : `tts: ${tts.state === "missing" ? "missing \u2014 " : ""}${tts.text}`);
     lines.push(Number(process.versions.node.split(".")[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
   }, false);
@@ -47951,7 +48366,7 @@ function createEngineServer(ctx) {
 }
 
 // packages/mcp/src/main.ts
-var project = resolve10(process.env.MIRAGE_PROJECT || process.cwd());
+var project = resolve11(process.env.MIRAGE_PROJECT || process.cwd());
 createEngineServer({ project, tools: await realMediaTools() }).connect(new StdioServerTransport()).catch((e) => {
   console.error(`mirage engine: ${e instanceof Error ? e.message : String(e)}`);
   process.exit(1);

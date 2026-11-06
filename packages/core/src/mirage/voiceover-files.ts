@@ -30,6 +30,8 @@ export async function fitRecording(o: {
   onStep?: (m: string) => void;
   /** Aborting stops the fit before anything is saved: it throws CANCELLED and episode.json is untouched. */
   signal?: AbortSignal;
+  /** The recording's transcript when it is already known (narration speak synthesized): saved as its transcript, nothing is transcribed. */
+  transcript?: Transcript;
 }): Promise<{ episode: Episode; report: FitReport; reused: boolean }> {
   const project = resolve(o.project);
   const n = o.episode;
@@ -76,8 +78,11 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
   if (only) await checkKeptRecordings(project, ep, (l) => !only!.includes(l.slot), recording, sha);
   const file = voTranscriptFile(sha);
   let transcript: Transcript;
-  const reused = existsSync(join(dir, file));
-  if (reused) {
+  const reused = !o.transcript && existsSync(join(dir, file));
+  if (o.transcript) {
+    transcript = o.transcript;
+    await writeJsonFile(join(dir, file), TranscriptSchema, transcript, `episodes/${n}/${file}`);
+  } else if (reused) {
     o.onStep?.('Reusing the transcript of this recording');
     transcript = await readJsonFile(join(dir, file), TranscriptSchema, `episodes/${n}/${file}`);
   } else {

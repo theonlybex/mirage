@@ -30,7 +30,7 @@ If you haven't yet told them for this project, add: "Your footage stays on this 
 Start once they say it's done.
 
 ## 3. Edit each video, never asking
-For each video in turn, follow the mirage:edit skill from its step 1 (catalog the footage folders in `episodes/<n>/video.json`) through step 4 (the narration lines and `mcp__plugin_mirage_engine__guide`). Don't stop at the rough cut, and don't wait for the person to read the lines.
+For each video in turn, follow the mirage:edit skill from its step 1 (catalog the footage folders in `episodes/<n>/video.json`) through step 4 (the narration lines and `mcp__plugin_mirage_engine__guide`). Don't stop at the rough cut, and don't wait for the person to read the lines. When `episodes/<n>/video.json` asks for AI narration, or the person asked for it, call `mcp__plugin_mirage_engine__speak` after the lines and then `mcp__plugin_mirage_engine__render`, instead of stopping at the guide (the edit skill's step 4 says how).
 
 Never ask the person anything; nobody is there to answer. Instead, write it down for the morning with `mcp__plugin_mirage_engine__log` (`{ video: n, kind, text }`):
 - Where you would have asked, make your best guess and carry on, then log it with kind `guess`: "Used the second take of the intro, because the first one cuts off mid-sentence."
@@ -45,4 +45,4 @@ A step that fails with a `✖` is tried once more, after fixing what its message
 The person can still pause, correct or stop you from the viewer. Follow the edit skill: act on a correction, and after a stop make no more tool calls, not even for the next video. Say in one line what was finished.
 
 ## 5. Finish
-When the last video has its guide cut, say: "Done for tonight. Mirage's viewer has the morning report."
+When the last video has its guide cut (or its final video, for AI narration), say: "Done for tonight. Mirage's viewer has the morning report."
