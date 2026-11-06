@@ -7,7 +7,7 @@ import { EpisodeSchema, TranscriptSchema } from '@wordedits/shared';
 import type { Speaker } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
 import type { MediaTools } from '../media-tools.js';
-import { assembleNarration, lineSentences, narrationTargets, nextNarrationFile, sentenceWords, speakNarration, spreadWords, voicedSpan, wavBytes } from './narration.js';
+import { assembleNarration, lineSentences, narrationTargets, nextNarrationFile, sentenceWords, shotStarts, speakNarration, spreadWords, voicedSpan, wavBytes } from './narration.js';
 import { loadEpisode, saveEpisode } from './render-episode.js';
 import { speakReport } from './reports.js';
 import { readWavMono } from './word-timing.js';
@@ -53,11 +53,11 @@ const tools = {
   },
 } as unknown as MediaTools;
 
-async function project(lines: [string, number, number, string][]) {
+async function project(lines: [string, number, number, string][], shots = [20]) {
   const dir = await mkdtemp(join(tmpdir(), 'mirage-speak-'));
   await saveEpisode(dir, EpisodeSchema.parse({
     version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
-    items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 20 } }],
+    items: shots.map((sec, i) => ({ id: `s${i + 1}`, beat: 'problem', clip: 'c001', src: { in: 0, out: sec } })),
     slots: lines.map(([id, start, end, line]) => ({ id, start, end, maxWords: 8, line })),
   }));
   return dir;
@@ -221,6 +221,46 @@ describe('speakNarration', () => {
     expect(calls.map((c) => c.speed)).toEqual([1, 1, 1.15]);
     expect(r.report.lines.find((l) => l.slot === 'n2')!.overrunSec).toBeGreaterThan(0);
     expect(speakReport(r, 1, 'af_heart')).toContain('• n2 was read at 1.15× to fit its slot');
+  });
+
+  it('starts each sentence with its shot when a line has one sentence per shot, keeping the pauses', async () => {
+    // Three 2 s shots under one slot; each sentence is 0.6 s of voice, so straight through they would drift ahead.
+    const dir = await project([['n1', 0, 6, 'One two. Three four. Five six.']], [2, 2, 2]);
+    expect(shotStarts(await loadEpisode(dir, 1), { start: 0, end: 6 })).toEqual([0, 2, 4]);
+    const r = await speakNarration({ project: dir, episode: 1, tools, speaker: fakeSpeaker().speaker, voice: 'af_heart', speed: 1 });
+    expect(r.shots).toEqual([{ slot: 'n1', sentences: 3, shots: 3, paced: true, late: [] }]);
+    expect(speakReport(r, 1, 'af_heart')).toContain('• n1: each of its 3 sentences starts with its shot');
+    const ep = await loadEpisode(dir, 1);
+    const line = ep.voiceover!.lines[0];
+    expect(line.cuts).toEqual([]);
+    const tx = TranscriptSchema.parse(JSON.parse(await readFile(join(dir, 'episodes', '1', ep.voiceover!.transcripts[ep.voiceover!.recording]), 'utf8')));
+    const starts = tx.segments.map((s) => s.start + line.at - line.src.in);
+    expect(starts[0]).toBeCloseTo(0.2, 1);
+    expect(starts[1]).toBeCloseTo(2.2, 1);
+    expect(starts[2]).toBeCloseTo(4.2, 1);
+  });
+
+  it('reads a line straight through when its sentences and shots differ in number', async () => {
+    const dir = await project([['n1', 0, 6, 'One two. Three four.']], [2, 2, 2]);
+    const r = await speakNarration({ project: dir, episode: 1, tools, speaker: fakeSpeaker().speaker, voice: 'af_heart', speed: 1 });
+    expect(r.shots).toEqual([{ slot: 'n1', sentences: 2, shots: 3, paced: false, late: [] }]);
+    const ep = await loadEpisode(dir, 1);
+    const tx = TranscriptSchema.parse(JSON.parse(await readFile(join(dir, 'episodes', '1', ep.voiceover!.transcripts[ep.voiceover!.recording]), 'utf8')));
+    expect(tx.segments[1].start - tx.segments[0].end).toBeCloseTo(0.36, 2);
+  });
+
+  it('reads a sentence too long for its shot faster, and warns when even that runs into the next shot', async () => {
+    // Eight words = 2.4 s in a 2 s shot (1.64 s with the pause): read at 1.15×, still 2.09 s, so it runs 0.45 s late.
+    const dir = await project([['n1', 0, 6, 'a b c d e f g h. Three four. Five six.']], [2, 2, 2]);
+    const { speaker, calls } = fakeSpeaker();
+    const r = await speakNarration({ project: dir, episode: 1, tools, speaker, voice: 'af_heart', speed: 1 });
+    expect(calls.map((c) => c.speed)).toEqual([1, 1.15, 1, 1]);
+    expect(r.spedUp).toEqual([{ slot: 'n1', speed: 1.15, sentence: 1 }]);
+    expect(r.shots[0].late).toHaveLength(1);
+    expect(r.shots[0].late[0].sentence).toBe(1);
+    const report = speakReport(r, 1, 'af_heart');
+    expect(report).toContain('• n1 sentence 1 was read at 1.15× to fit its shot');
+    expect(report.find((l) => l.startsWith('⚠ n1 sentence 1 runs '))).toMatch(/into the next shot even read faster — shorten it$/);
   });
 
   it('refuses before reading anything: no lines, an unknown voice, a bad speed, lines not in English', async () => {

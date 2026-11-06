@@ -272,7 +272,7 @@ function takesOf(pool: Cand[], lineLength: number): Cand[] {
  * Fits the lines read in `recording` into their slots. With `only`, fits just those slots (lines re-recorded in a new
  * take) and keeps every other placed line; without it, replaces the whole voice-over.
  */
-export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording: string; transcript: Transcript; only?: string[] }): { episode: Episode; report: FitReport } {
+export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording: string; transcript: Transcript; only?: string[]; keepPauses?: boolean }): { episode: Episode; report: FitReport } {
   const words = o.transcript.words;
   const sentences = splitSentences(words);
   const sTokens = sentences.map((s) => sentenceTokens(s, words));
@@ -464,7 +464,7 @@ export function fitVoiceover(o: { episode: Episode; catalog: Catalog; recording:
       cuts.push([r3(a), r3(b)]);
       x = y;
     }
-    for (let i = 1; i < spoken.length; i++) {
+    for (let i = 1; i < spoken.length && !o.keepPauses; i++) {
       const a = spoken[i - 1].end;
       const b = spoken[i].start;
       if (b - a > 0.6) cuts.push([r3(a + 0.15), r3(b - 0.15)]);

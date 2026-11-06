@@ -31810,7 +31810,7 @@ function fitVoiceover(o2) {
       cuts.push([r36(a2), r36(b)]);
       x = y;
     }
-    for (let i2 = 1; i2 < spoken.length; i2++) {
+    for (let i2 = 1; i2 < spoken.length && !o2.keepPauses; i2++) {
       const a2 = spoken[i2 - 1].end;
       const b = spoken[i2].start;
       if (b - a2 > 0.6) cuts.push([r36(a2 + 0.15), r36(b - 0.15)]);
@@ -32347,7 +32347,7 @@ async function fitLocked(o2, project, rec) {
     await writeJsonFile(join9(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
   }
   o2.signal?.throwIfAborted();
-  const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only });
+  const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only, keepPauses: o2.keepPauses });
   const vo = fit.episode.voiceover;
   const placed = new Set(fit.report.lines.filter((l) => placedStatus(l.status)).map((l) => l.slot));
   if (only) await checkKeptRecordings(project, fit.episode, (l) => !placed.has(l.slot), recording, sha);
@@ -32469,6 +32469,11 @@ function sentenceWords(text, start, end, pauses) {
   const breaks = [...pauses].sort((a2, b) => b[1] - b[0] - (a2[1] - a2[0])).slice(0, clauses.length - 1).sort((a2, b) => a2[0] - b[0]);
   return clauses.flatMap((c3, i2) => spreadWords(c3, i2 === 0 ? start : breaks[i2 - 1][1], i2 === clauses.length - 1 ? end : breaks[i2][0]));
 }
+function shotStarts(ep, slot) {
+  const out = [0];
+  for (const l of layoutTimeline(ep)) if (l.start > slot.start + 0.05 && l.start < slot.end - 0.5) out.push(r37(l.start - slot.start));
+  return out;
+}
 function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
   const pieces = [];
   const words = [];
@@ -32487,11 +32492,15 @@ function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
     const lineStart = at2;
     let spoken = 0;
     const lineFrom = words.length;
-    for (const s of line.sentences) {
+    let voice0 = 0;
+    for (const [k2, s] of line.sentences.entries()) {
       const v = voicedSpan(s.samples, sampleRate);
       if (!v) continue;
-      if (spoken++ > 0) silence(gaps.sentence);
       const from = Math.max(0, v.start - margin);
+      if (spoken++ > 0) {
+        const want = line.starts?.[k2] === void 0 ? 0 : (voice0 + Math.round(line.starts[k2] * sampleRate) - at2 - (v.start - from)) / sampleRate;
+        silence(Math.max(gaps.sentence, want));
+      } else voice0 = at2 + v.start - from;
       const to = Math.min(s.samples.length, v.end + margin);
       pieces.push(s.samples.subarray(from, to));
       const sec = (x) => (at2 + x - from) / sampleRate;
@@ -32564,7 +32573,9 @@ async function speakNarration(o2) {
   checkSpeakOptions(o2.voice, o2.speed);
   const project = resolve6(o2.project);
   const n2 = o2.episode;
-  const targets = narrationTargets(await loadEpisode(project, n2), o2.slots);
+  const ep = await loadEpisode(project, n2);
+  const targets = narrationTargets(ep, o2.slots);
+  const base = o2.slots?.length ? ep : (cutChanged(ep) ? undoFitEdits(ep) : revertHolds(ep)).episode;
   const english = targets.filter((s) => !notEnglish(s.line));
   if (!english.length) throw englishOnlyError(targets.map((s) => s.id));
   const dir = episodeDir(project, n2);
@@ -32574,33 +32585,64 @@ async function speakNarration(o2) {
     const started = Date.now();
     const spoken = [];
     const spedUp = [];
+    const shots = [];
     let rate = 0;
+    const say = async (text, speed) => {
+      o2.signal?.throwIfAborted();
+      const a2 = await o2.speaker.speak(text, { voice: o2.voice, speed, signal: o2.signal });
+      if (rate && a2.sampleRate !== rate) throw new MirageError("BAD_INPUT", "The voice changed sample rate mid-way", "Run speak again.");
+      rate = a2.sampleRate;
+      return { text, samples: a2.samples };
+    };
     const read = async (line, speed) => {
       const out = [];
-      for (const text of lineSentences(line)) {
-        o2.signal?.throwIfAborted();
-        const a2 = await o2.speaker.speak(text, { voice: o2.voice, speed, signal: o2.signal });
-        if (rate && a2.sampleRate !== rate) throw new MirageError("BAD_INPUT", "The voice changed sample rate mid-way", "Run speak again.");
-        rate = a2.sampleRate;
-        out.push({ text, samples: a2.samples });
-      }
+      for (const text of lineSentences(line)) out.push(await say(text, speed));
       return out;
     };
+    const voicedSec = (samples) => {
+      const v = voicedSpan(samples, rate);
+      return v ? (v.end - v.start) / rate : 0;
+    };
+    const faster = (sec, room) => Math.round(Math.min(o2.speed * MAX_SPEEDUP, o2.speed * sec / room + 0.01) * 100) / 100;
     const spokenSec = (s) => {
       const voiced = s.map((x) => voicedSpan(x.samples, rate)).filter((v) => v !== null);
       return voiced.reduce((t, v) => t + (v.end - v.start) / rate, 0) + Math.max(0, voiced.length - 1) * NARRATION_GAPS.sentence;
     };
     o2.onStep?.(`Reading ${english.length} line${english.length === 1 ? "" : "s"} with ${o2.voice}\u2026`);
-    for (const [i2, slot] of english.entries()) {
-      let sentences = await read(slot.line, o2.speed);
+    for (const [i2, written] of english.entries()) {
+      const slot = base.slots.find((s) => s.id === written.id) ?? written;
       const room = slot.end - slot.start - 0.1;
-      const sec = spokenSec(sentences);
-      if (sec > room && room > 0) {
-        const faster = Math.round(Math.min(o2.speed * MAX_SPEEDUP, o2.speed * sec / room + 0.01) * 100) / 100;
-        sentences = await read(slot.line, faster);
-        spedUp.push({ slot: slot.id, speed: faster });
+      const starts = shotStarts(base, slot);
+      const texts = lineSentences(slot.line);
+      if (starts.length > 1 && starts.length === texts.length) {
+        const sentences = [];
+        const late = [];
+        for (const [k, text] of texts.entries()) {
+          const space = (k + 1 < starts.length ? starts[k + 1] - MIN_PAUSE : room) - starts[k];
+          let s = await say(text, o2.speed);
+          let sec = voicedSec(s.samples);
+          if (sec > space && space > 0) {
+            const speed = faster(sec, space);
+            s = await say(text, speed);
+            sec = voicedSec(s.samples);
+            spedUp.push({ slot: slot.id, speed, sentence: k + 1 });
+          }
+          if (k + 1 < starts.length && sec > space + 0.05) late.push({ sentence: k + 1, sec: r37(sec - space) });
+          sentences.push(s);
+        }
+        spoken.push({ slot: slot.id, sentences, starts });
+        shots.push({ slot: slot.id, sentences: texts.length, shots: starts.length, paced: true, late });
+      } else {
+        let sentences = await read(slot.line, o2.speed);
+        const sec = spokenSec(sentences);
+        if (sec > room && room > 0) {
+          const speed = faster(sec, room);
+          sentences = await read(slot.line, speed);
+          spedUp.push({ slot: slot.id, speed });
+        }
+        spoken.push({ slot: slot.id, sentences });
+        if (starts.length > 1) shots.push({ slot: slot.id, sentences: texts.length, shots: starts.length, paced: false, late: [] });
       }
-      spoken.push({ slot: slot.id, sentences });
       o2.onProgress?.((i2 + 1) / english.length * 0.9);
     }
     const synthSec = (Date.now() - started) / 1e3;
@@ -32609,16 +32651,16 @@ async function speakNarration(o2) {
     const name = await nextNarrationFile(dir);
     await writeFile4(join10(dir, name), wavBytes(joined.samples, rate), { flag: "wx" });
     wav = join10(dir, name);
-    const fit = await fitRecording({ project, episode: n2, recording: wav, tools: o2.tools, add: !!o2.slots?.length, slots: o2.slots, transcript: joined.transcript, onStep: o2.onStep, signal: o2.signal });
+    const fit = await fitRecording({ project, episode: n2, recording: wav, tools: o2.tools, add: !!o2.slots?.length, slots: o2.slots, transcript: joined.transcript, keepPauses: true, onStep: o2.onStep, signal: o2.signal });
     o2.onProgress?.(1);
     const audioSec = r37(joined.lines.reduce((t, l) => t + l.end - l.start, 0));
-    return { recording: `episodes/${n2}/${name}`, report: fit.report, episode: fit.episode, audioSec, synthSec: r37(synthSec), spedUp };
+    return { recording: `episodes/${n2}/${name}`, report: fit.report, episode: fit.episode, audioSec, synthSec: r37(synthSec), spedUp, shots };
   } catch (e) {
     if (wav && existsSync7(wav)) await rm7(wav, { force: true });
     throw asCancelled(e, o2.signal);
   }
 }
-var r37, NARRATION_GAPS, MARGIN_SEC, MAX_SPEEDUP, MAX_SENTENCE_WORDS, weight;
+var r37, NARRATION_GAPS, MARGIN_SEC, MAX_SPEEDUP, MAX_SENTENCE_WORDS, weight, MIN_PAUSE;
 var init_narration = __esm({
   "packages/core/src/mirage/narration.ts"() {
     "use strict";
@@ -32627,6 +32669,7 @@ var init_narration = __esm({
     init_errors4();
     init_render_episode();
     init_slots();
+    init_timeline();
     init_voiceover();
     init_voiceover_files();
     r37 = (n2) => Math.round(n2 * 1e3) / 1e3;
@@ -32635,6 +32678,7 @@ var init_narration = __esm({
     MAX_SPEEDUP = 1.15;
     MAX_SENTENCE_WORDS = 40;
     weight = (w) => [...w].reduce((n2, c3) => n2 + (/\d/.test(c3) ? 3 : new RegExp("\\p{L}", "u").test(c3) ? 1 : 0), 0) + 1.5;
+    MIN_PAUSE = NARRATION_GAPS.sentence + 2 * MARGIN_SEC;
   }
 });
 
@@ -33360,7 +33404,9 @@ function speakReport(r, n2, voice) {
   const read = r.report.lines.filter((l) => l.status !== "kept").length;
   return [
     `\u2022 Read ${read} line${read === 1 ? "" : "s"} with ${voice}: ${r.audioSec.toFixed(1)} s of narration in ${r.synthSec.toFixed(1)} s, saved as ${r.recording}`,
-    ...r.spedUp.map((x) => `\u2022 ${x.slot} was read at ${x.speed}\xD7 to fit its slot`),
+    ...r.shots.filter((x) => x.paced).map((x) => `\u2022 ${x.slot}: each of its ${x.sentences} sentences starts with its shot`),
+    ...r.spedUp.map((x) => x.sentence ? `\u2022 ${x.slot} sentence ${x.sentence} was read at ${x.speed}\xD7 to fit its shot` : `\u2022 ${x.slot} was read at ${x.speed}\xD7 to fit its slot`),
+    ...r.shots.flatMap((x) => x.late.map((l) => `\u26A0 ${x.slot} sentence ${l.sentence} runs ${l.sec.toFixed(1)} s into the next shot even read faster \u2014 shorten it`)),
     ...voReport(r.report, n2, "speak")
   ];
 }
@@ -33591,6 +33637,7 @@ __export(src_exports2, {
   sessionDir: () => sessionDir,
   sha256File: () => sha256File,
   shiftAfter: () => shiftAfter,
+  shotStarts: () => shotStarts,
   similarity: () => similarity,
   slotsReport: () => slotsReport,
   slotsStale: () => slotsStale,

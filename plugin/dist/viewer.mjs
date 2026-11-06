@@ -28147,6 +28147,11 @@ async function lockEpisode(project2, n2, command) {
   return lock;
 }
 
+// packages/core/src/mirage/narration.ts
+var NARRATION_GAPS = { lead: 0.3, sentence: 0.3, line: 0.8 };
+var MARGIN_SEC = 0.03;
+var MIN_PAUSE = NARRATION_GAPS.sentence + 2 * MARGIN_SEC;
+
 // packages/core/src/mirage/versions.ts
 import { randomBytes, randomUUID as randomUUID3 } from "node:crypto";
 import { access as access3, copyFile, link, mkdir, readdir as readdir2, readFile as readFile4, rename as rename2, rm as rm3, writeFile as writeFile3 } from "node:fs/promises";

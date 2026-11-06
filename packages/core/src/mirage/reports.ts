@@ -111,7 +111,9 @@ export function speakReport(r: SpeakResult, n: number, voice: string): string[] 
   const read = r.report.lines.filter((l) => l.status !== 'kept').length;
   return [
     `• Read ${read} line${read === 1 ? '' : 's'} with ${voice}: ${r.audioSec.toFixed(1)} s of narration in ${r.synthSec.toFixed(1)} s, saved as ${r.recording}`,
-    ...r.spedUp.map((x) => `• ${x.slot} was read at ${x.speed}× to fit its slot`),
+    ...r.shots.filter((x) => x.paced).map((x) => `• ${x.slot}: each of its ${x.sentences} sentences starts with its shot`),
+    ...r.spedUp.map((x) => (x.sentence ? `• ${x.slot} sentence ${x.sentence} was read at ${x.speed}× to fit its shot` : `• ${x.slot} was read at ${x.speed}× to fit its slot`)),
+    ...r.shots.flatMap((x) => x.late.map((l) => `⚠ ${x.slot} sentence ${l.sentence} runs ${l.sec.toFixed(1)} s into the next shot even read faster — shorten it`)),
     ...voReport(r.report, n, 'speak'),
   ];
 }

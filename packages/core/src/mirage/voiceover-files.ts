@@ -32,6 +32,8 @@ export async function fitRecording(o: {
   signal?: AbortSignal;
   /** The recording's transcript when it is already known (narration speak synthesized): saved as its transcript, nothing is transcribed. */
   transcript?: Transcript;
+  /** Keep the recording's pauses (they were placed on purpose) instead of shortening those over 0.6 s. */
+  keepPauses?: boolean;
 }): Promise<{ episode: Episode; report: FitReport; reused: boolean }> {
   const project = resolve(o.project);
   const n = o.episode;
@@ -108,7 +110,7 @@ async function fitLocked(o: Parameters<typeof fitRecording>[0], project: string,
   }
 
   o.signal?.throwIfAborted();
-  const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only });
+  const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only, keepPauses: o.keepPauses });
   const vo = fit.episode.voiceover!;
   const placed = new Set(fit.report.lines.filter((l) => placedStatus(l.status)).map((l) => l.slot));
   if (only) await checkKeptRecordings(project, fit.episode, (l) => !placed.has(l.slot), recording, sha);

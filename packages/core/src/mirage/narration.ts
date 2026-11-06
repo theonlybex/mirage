@@ -9,7 +9,8 @@ import { asCancelled } from './cancel.js';
 import { MirageError } from './errors.js';
 import { episodeDir, loadEpisode } from './render-episode.js';
 import { slotsStale, slotsStaleError } from './slots.js';
-import { cutChanged, cutChangedError, englishOnlyError, hasWords, notEnglish, type FitReport } from './voiceover.js';
+import { layoutTimeline } from './timeline.js';
+import { cutChanged, cutChangedError, englishOnlyError, hasWords, notEnglish, revertHolds, undoFitEdits, type FitReport } from './voiceover.js';
 import { fitRecording } from './voiceover-files.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -111,13 +112,32 @@ export interface SpokenLine {
   slot: string;
   /** Each sentence of the line with Kokoro's audio for it. */
   sentences: { text: string; samples: Float32Array }[];
+  /**
+   * Where each sentence's voice should begin, in seconds after the first one's (so starts[0] is 0): the pause before a
+   * sentence grows to reach it, and never shrinks below NARRATION_GAPS.sentence.
+   */
+  starts?: number[];
+}
+
+/** The shortest pause between two sentences' voices: the gap plus the sound kept on either side. */
+const MIN_PAUSE = NARRATION_GAPS.sentence + 2 * MARGIN_SEC;
+
+/**
+ * Where each shot under a slot begins, in seconds from the slot's start: 0 for the shot the slot opens on, then every item
+ * that starts inside the slot (not in its last half second, too late for a sentence of its own).
+ */
+export function shotStarts(ep: Episode, slot: { start: number; end: number }): number[] {
+  const out = [0];
+  for (const l of layoutTimeline(ep)) if (l.start > slot.start + 0.05 && l.start < slot.end - 0.5) out.push(r3(l.start - slot.start));
+  return out;
 }
 
 /**
  * Joins the spoken lines into one recording, in the order given, with NARRATION_GAPS of silence (each sentence trimmed to
  * its voice), and the transcript of that recording: the written words, timed by where each sentence's voice is. In the
  * transcript each line is one sentence (only its last word ends one): the fit never reads two lines as one, and a line of
- * many sentences is still one span to match (the fit lets a span cover at most six sentences).
+ * many sentences is still one span to match (the fit lets a span cover at most six sentences). A line with `starts`
+ * has each sentence's voice begin that long after its first sentence's.
  */
 export function assembleNarration(lines: SpokenLine[], sampleRate: number, gaps = NARRATION_GAPS): { samples: Float32Array; transcript: Transcript; lines: { slot: string; start: number; end: number }[] } {
   const pieces: Float32Array[] = [];
@@ -137,11 +157,16 @@ export function assembleNarration(lines: SpokenLine[], sampleRate: number, gaps 
     const lineStart = at;
     let spoken = 0;
     const lineFrom = words.length;
-    for (const s of line.sentences) {
+    let voice0 = 0;
+    for (const [k, s] of line.sentences.entries()) {
       const v = voicedSpan(s.samples, sampleRate);
       if (!v) continue;
-      if (spoken++ > 0) silence(gaps.sentence);
       const from = Math.max(0, v.start - margin);
+      if (spoken++ > 0) {
+        // Paced: the pause lasts until this sentence's voice reaches its start.
+        const want = line.starts?.[k] === undefined ? 0 : (voice0 + Math.round(line.starts[k] * sampleRate) - at - (v.start - from)) / sampleRate;
+        silence(Math.max(gaps.sentence, want));
+      } else voice0 = at + v.start - from;
       const to = Math.min(s.samples.length, v.end + margin);
       pieces.push(s.samples.subarray(from, to));
       const sec = (x: number) => (at + x - from) / sampleRate;
@@ -227,14 +252,21 @@ export interface SpeakResult {
   /** Seconds of speech in the recording and seconds it took to synthesize. */
   audioSec: number;
   synthSec: number;
-  /** Lines spoken faster than asked so they fit their slot. */
-  spedUp: { slot: string; speed: number }[];
+  /** Lines (or with `sentence`, one sentence of a paced line, from 1) spoken faster than asked so they fit. */
+  spedUp: { slot: string; speed: number; sentence?: number }[];
+  /**
+   * Lines over more than one shot: `paced` when each sentence starts with its shot (one sentence per shot), with the
+   * sentences that still run past their shot's end and by how much; otherwise read straight through.
+   */
+  shots: { slot: string; sentences: number; shots: number; paced: boolean; late: { sentence: number; sec: number }[] }[];
 }
 
 /**
  * The `speak` command: reads each written line (or just `slots`) with `speaker`, joins them into a new recording
  * episodes/<n>/narration-<k>.wav, and fits it like vo does (with `slots`, as vo --add --slots), using the transcript the
- * synthesis already knows instead of transcribing it. A line too long for its slot is first spoken up to MAX_SPEEDUP faster.
+ * synthesis already knows instead of transcribing it, and keeping its pauses. A line too long for its slot is first spoken
+ * up to MAX_SPEEDUP faster. A line with one sentence per shot under its slot is paced: each sentence starts as its shot
+ * does (0.2 s in), and a sentence too long for its shot is spoken up to MAX_SPEEDUP faster.
  */
 export async function speakNarration(o: {
   project: string;
@@ -251,7 +283,10 @@ export async function speakNarration(o: {
   checkSpeakOptions(o.voice, o.speed);
   const project = resolve(o.project);
   const n = o.episode;
-  const targets = narrationTargets(await loadEpisode(project, n), o.slots);
+  const ep = await loadEpisode(project, n);
+  const targets = narrationTargets(ep, o.slots);
+  // The cut the fit will place the lines on: a full fit first undoes what earlier fits held or split.
+  const base = o.slots?.length ? ep : (cutChanged(ep) ? undoFitEdits(ep) : revertHolds(ep)).episode;
   const english = targets.filter((s) => !notEnglish(s.line));
   // Lines in another language aren't read (the voices are English); the fit reports them.
   if (!english.length) throw englishOnlyError(targets.map((s) => s.id));
@@ -262,34 +297,67 @@ export async function speakNarration(o: {
     const started = Date.now();
     const spoken: SpokenLine[] = [];
     const spedUp: SpeakResult['spedUp'] = [];
+    const shots: SpeakResult['shots'] = [];
     let rate = 0;
+    const say = async (text: string, speed: number) => {
+      o.signal?.throwIfAborted();
+      const a = await o.speaker.speak(text, { voice: o.voice, speed, signal: o.signal });
+      if (rate && a.sampleRate !== rate) throw new MirageError('BAD_INPUT', 'The voice changed sample rate mid-way', 'Run speak again.');
+      rate = a.sampleRate;
+      return { text, samples: a.samples };
+    };
     const read = async (line: string, speed: number) => {
       const out: SpokenLine['sentences'] = [];
-      for (const text of lineSentences(line)) {
-        o.signal?.throwIfAborted();
-        const a = await o.speaker.speak(text, { voice: o.voice, speed, signal: o.signal });
-        if (rate && a.sampleRate !== rate) throw new MirageError('BAD_INPUT', 'The voice changed sample rate mid-way', 'Run speak again.');
-        rate = a.sampleRate;
-        out.push({ text, samples: a.samples });
-      }
+      for (const text of lineSentences(line)) out.push(await say(text, speed));
       return out;
     };
+    const voicedSec = (samples: Float32Array) => {
+      const v = voicedSpan(samples, rate);
+      return v ? (v.end - v.start) / rate : 0;
+    };
+    const faster = (sec: number, room: number) => Math.round(Math.min(o.speed * MAX_SPEEDUP, (o.speed * sec) / room + 0.01) * 100) / 100;
     const spokenSec = (s: SpokenLine['sentences']) => {
       const voiced = s.map((x) => voicedSpan(x.samples, rate)).filter((v) => v !== null);
       return voiced.reduce((t, v) => t + (v.end - v.start) / rate, 0) + Math.max(0, voiced.length - 1) * NARRATION_GAPS.sentence;
     };
     o.onStep?.(`Reading ${english.length} line${english.length === 1 ? '' : 's'} with ${o.voice}…`);
-    for (const [i, slot] of english.entries()) {
-      let sentences = await read(slot.line, o.speed);
-      // The fit starts a line 0.15 s into its slot and lets it run 0.2 s past the end; vo pads its cut by 0.15 s.
+    for (const [i, written] of english.entries()) {
+      const slot = base.slots.find((s) => s.id === written.id) ?? written;
+      // The fit starts a line's voice 0.2 s into its slot and lets it run 0.1 s past the end (vo pads its cut by 0.15 s).
       const room = slot.end - slot.start - 0.1;
-      const sec = spokenSec(sentences);
-      if (sec > room && room > 0) {
-        const faster = Math.round(Math.min(o.speed * MAX_SPEEDUP, (o.speed * sec) / room + 0.01) * 100) / 100;
-        sentences = await read(slot.line, faster);
-        spedUp.push({ slot: slot.id, speed: faster });
+      const starts = shotStarts(base, slot);
+      const texts = lineSentences(slot.line);
+      if (starts.length > 1 && starts.length === texts.length) {
+        // One sentence per shot: each has from its shot's start to the next one's (less a pause), the last to the slot's end.
+        const sentences: SpokenLine['sentences'] = [];
+        const late: { sentence: number; sec: number }[] = [];
+        for (const [k, text] of texts.entries()) {
+          const space = (k + 1 < starts.length ? starts[k + 1] - MIN_PAUSE : room) - starts[k];
+          let s = await say(text, o.speed);
+          let sec = voicedSec(s.samples);
+          if (sec > space && space > 0) {
+            const speed = faster(sec, space);
+            s = await say(text, speed);
+            sec = voicedSec(s.samples);
+            spedUp.push({ slot: slot.id, speed, sentence: k + 1 });
+          }
+          // The last sentence running past the slot is the fit's to report (it holds the picture).
+          if (k + 1 < starts.length && sec > space + 0.05) late.push({ sentence: k + 1, sec: r3(sec - space) });
+          sentences.push(s);
+        }
+        spoken.push({ slot: slot.id, sentences, starts });
+        shots.push({ slot: slot.id, sentences: texts.length, shots: starts.length, paced: true, late });
+      } else {
+        let sentences = await read(slot.line, o.speed);
+        const sec = spokenSec(sentences);
+        if (sec > room && room > 0) {
+          const speed = faster(sec, room);
+          sentences = await read(slot.line, speed);
+          spedUp.push({ slot: slot.id, speed });
+        }
+        spoken.push({ slot: slot.id, sentences });
+        if (starts.length > 1) shots.push({ slot: slot.id, sentences: texts.length, shots: starts.length, paced: false, late: [] });
       }
-      spoken.push({ slot: slot.id, sentences });
       o.onProgress?.(((i + 1) / english.length) * 0.9);
     }
     const synthSec = (Date.now() - started) / 1000;
@@ -299,10 +367,10 @@ export async function speakNarration(o: {
     // wx: never over another run's recording, even one started at the same moment.
     await writeFile(join(dir, name), wavBytes(joined.samples, rate), { flag: 'wx' });
     wav = join(dir, name);
-    const fit = await fitRecording({ project, episode: n, recording: wav, tools: o.tools, add: !!o.slots?.length, slots: o.slots, transcript: joined.transcript, onStep: o.onStep, signal: o.signal });
+    const fit = await fitRecording({ project, episode: n, recording: wav, tools: o.tools, add: !!o.slots?.length, slots: o.slots, transcript: joined.transcript, keepPauses: true, onStep: o.onStep, signal: o.signal });
     o.onProgress?.(1);
     const audioSec = r3(joined.lines.reduce((t, l) => t + l.end - l.start, 0));
-    return { recording: `episodes/${n}/${name}`, report: fit.report, episode: fit.episode, audioSec, synthSec: r3(synthSec), spedUp };
+    return { recording: `episodes/${n}/${name}`, report: fit.report, episode: fit.episode, audioSec, synthSec: r3(synthSec), spedUp, shots };
   } catch (e) {
     // A recording nothing was fitted to is only clutter.
     if (wav && existsSync(wav)) await rm(wav, { force: true });
