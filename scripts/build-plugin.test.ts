@@ -33,11 +33,11 @@ afterAll(async () => {
 });
 
 describe('buildPlugin', () => {
-  it('writes the three bundles, the viewer page and the speech helper source', () => {
-    for (const f of ['dist/engine.mjs', 'dist/hook.mjs', 'dist/viewer.mjs', 'dist/viewer-ui/index.html', 'native/transcribe.swift']) {
+  it('writes the three bundles and the viewer page', () => {
+    for (const f of ['dist/engine.mjs', 'dist/hook.mjs', 'dist/viewer.mjs', 'dist/viewer-ui/index.html']) {
       expect(existsSync(join(built, f)), f).toBe(true);
     }
-    expect(readFileSync(join(built, 'native/transcribe.swift'), 'utf8')).toBe(readFileSync(join(ROOT, 'native/macos/transcribe.swift'), 'utf8'));
+    expect(existsSync(join(built, 'native')), 'no speech helper source: whisper.cpp does the transcription').toBe(false);
   });
 
   it('keeps the viewer page under assets/ in one script, with no dynamic import', () => {
@@ -75,7 +75,7 @@ describe('buildPlugin', () => {
       const committed = readFileSync(join(PLUGIN, 'dist', f));
       expect(fresh.equals(committed), `plugin/dist/${f} is stale: run pnpm build:plugin`).toBe(true);
     }
-    for (const f of ['native/transcribe.swift', 'LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
+    for (const f of ['LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
       expect(existsSync(join(PLUGIN, f)), `plugin/${f} is missing: run pnpm build:plugin`).toBe(true);
       expect(readFileSync(join(PLUGIN, f), 'utf8'), `plugin/${f} is stale: run pnpm build:plugin`).toBe(readFileSync(join(built, f), 'utf8'));
     }
@@ -135,9 +135,9 @@ describe('manifests', () => {
     expect(m.command).toContain('--data "${CLAUDE_PLUGIN_DATA}"');
   });
 
-  it('points the engine at the project and the compiled speech helper', () => {
+  it('points the engine at the project', () => {
     const s = json(join(PLUGIN, '.mcp.json')).mcpServers.engine;
-    expect(s.env).toEqual({ MIRAGE_PROJECT: '${CLAUDE_PROJECT_DIR}', WORDEDITS_TRANSCRIBER: '${CLAUDE_PLUGIN_DATA}/bin/wordedits-transcribe' });
+    expect(s.env).toEqual({ MIRAGE_PROJECT: '${CLAUDE_PROJECT_DIR}' });
   });
 
   it('ships the node launcher executable', () => {

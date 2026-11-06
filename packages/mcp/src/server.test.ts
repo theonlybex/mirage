@@ -17,7 +17,7 @@ import { createEngineServer, newestSessionId, TOOL_NAMES, type EngineContext } f
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
 const GB = 1024 ** 3;
-const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, transcriber: async () => true, ...over });
+const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, transcriber: async () => null, ...over });
 
 const clients: Client[] = [];
 afterEach(async () => {
@@ -390,10 +390,8 @@ describe('engine tools', () => {
     const dir = await projectWithVideo();
     await writeFile(join(dir, 'episodes', '1', 'rough.mp4'), 'x');
     await snapshotVersion(dir, 1, { kind: 'delivery', label: 'Rough cut', render: 'rough' });
-    const was = process.env.WORDEDITS_TRANSCRIBER;
-    process.env.WORDEDITS_TRANSCRIBER = join(dir, 'no-transcriber');
-    try {
-      const { call } = await connect(dir, { preflightDeps: deps({ which: async (c) => c === 'ffmpeg' }) });
+    {
+      const { call } = await connect(dir, { preflightDeps: deps({ which: async (c) => c === 'ffmpeg', transcriber: async () => 'The speech model is missing (/m/ggml.bin).' }) });
       const r = await call('status');
       expect(r.isError).toBe(false);
       const lines = r.text.split('\n');
@@ -402,15 +400,14 @@ describe('engine tools', () => {
       expect(lines).toContain('Viewer: not running');
       expect(lines).toContain('ffmpeg: ok');
       expect(lines).toContain('ffprobe: missing');
-      expect(lines).toContain('transcriber: missing');
+      expect(lines).toContain('transcriber: missing — The speech model is missing (/m/ggml.bin).');
       expect(lines.find((l) => l.startsWith('Node: '))).toMatch(/^Node: v\d+\.\d+\.\d+ ok$/);
       await mkdir(join(dir, '.mirage'), { recursive: true });
       await writeFile(join(dir, '.mirage', 'viewer.json'), JSON.stringify({ url: 'http://127.0.0.1:5123', pid: process.pid }));
       expect((await call('status')).text).toContain('Viewer: running at http://127.0.0.1:5123');
-    } finally {
-      if (was === undefined) delete process.env.WORDEDITS_TRANSCRIBER;
-      else process.env.WORDEDITS_TRANSCRIBER = was;
     }
+    const { call } = await connect(dir, { preflightDeps: deps() });
+    expect((await call('status')).text.split('\n')).toContain('transcriber: ok');
   });
 
   it('status on a folder that is not a project yet says so', async () => {

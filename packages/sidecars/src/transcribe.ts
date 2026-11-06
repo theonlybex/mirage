@@ -1,17 +1,12 @@
-import { access, constants } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { availableParallelism, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { TranscriptSchema, type Transcript, type Word } from '@wordedits/shared';
 import { SidecarError } from './errors.js';
 import { runPath } from './run.js';
+import { dtwPreset, WHISPER, whisperInstallHint, whisperLanguage, whisperSetup, wordsFromWhisperJson } from './whisper.js';
 
-const NAME = 'wordedits-transcribe';
 const SENTENCE_END = /[.?!]["'”’)\]]*$/;
-
-/** Where the transcriber is: WORDEDITS_TRANSCRIBER when set (the plugin points it at its own copy), else the built one in bin/. */
-export function transcriberPath(): string {
-  if (process.env.WORDEDITS_TRANSCRIBER) return process.env.WORDEDITS_TRANSCRIBER;
-  return fileURLToPath(new URL(`../bin/darwin/${NAME}`, import.meta.url));
-}
 
 export function sentenceSegments(words: Word[]): Transcript['segments'] {
   const out: Transcript['segments'] = [];
@@ -36,44 +31,47 @@ export function speechRanges(words: Word[], maxGapSec = 0.3): [number, number][]
   return out;
 }
 
-interface RawWord {
-  w?: unknown;
-  start?: unknown;
-  end?: unknown;
-  conf?: unknown;
-}
-
-export async function transcribeAudio(audioPath: string, opts: { locale?: string; timeoutMs?: number; signal?: AbortSignal; /** The helper to run, instead of transcriberPath(). */ transcriber?: string } = {}): Promise<Transcript> {
-  if (process.platform !== 'darwin') {
-    throw new SidecarError(NAME, 'NOT_FOUND', 'On-device transcription is only available on macOS for now', 'Use a Mac with macOS 26 or later.');
-  }
-  const bin = opts.transcriber ?? transcriberPath();
+/**
+ * Transcribes 16 kHz mono WAV with whisper.cpp: greedy decoding (it keeps punctuation, which sentence segments need, and is
+ * the fastest on a CPU), DTW word timing when the model's alignment heads are known (DTW needs flash attention off), and
+ * non-speech tokens (♪, [Music]) suppressed. `locale` 'en-US' → `-l en`; none → `-l auto`.
+ */
+export async function transcribeAudio(audioPath: string, opts: { locale?: string; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Transcript> {
+  const setup = await whisperSetup();
+  if (!setup.ok) throw new SidecarError(WHISPER, 'NOT_FOUND', 'Speech recognition is not set up', setup.problem);
+  const preset = dtwPreset(setup.model);
+  const dir = await mkdtemp(join(tmpdir(), 'mirage-whisper-'));
+  const out = join(dir, 'words');
   try {
-    await access(bin, constants.X_OK);
-  } catch {
-    throw new SidecarError(NAME, 'NOT_FOUND', 'The transcriber has not been built', 'Run: pnpm build:native');
+    await runPath(WHISPER, setup.cli, [
+      '-m', setup.model, '-f', audioPath, '-l', whisperLanguage(opts.locale),
+      '-t', String(Math.max(1, Math.min(8, availableParallelism()))), '-bs', '1', '-sns',
+      ...(preset ? ['-nfa', '--dtw', preset] : []),
+      '-ojf', '-of', out, '-np',
+    ], {
+      timeoutMs: opts.timeoutMs ?? 30 * 60_000,
+      keepStdout: false,
+      notFoundHint: whisperInstallHint(),
+      signal: opts.signal,
+    }).catch((e: unknown) => {
+      // whisper-cli follows an error with its whole usage text: the line that says what went wrong is the "error:" one.
+      if (e instanceof SidecarError && e.code === 'EXIT') e.hint = e.stderr.split('\n').find((l) => /^error:/i.test(l.trim()))?.trim() ?? e.hint;
+      throw e;
+    });
+    let json: string;
+    try {
+      json = await readFile(`${out}.json`, 'latin1');
+    } catch {
+      throw new SidecarError(WHISPER, 'PARSE', `${WHISPER} wrote no transcript`, 'Try again; if it persists, reinstall whisper.cpp.');
+    }
+    let words: Word[];
+    try {
+      words = wordsFromWhisperJson(json);
+    } catch {
+      throw new SidecarError(WHISPER, 'PARSE', `${WHISPER} returned invalid JSON`, 'Try again; if it persists, reinstall whisper.cpp.', json.slice(0, 2000));
+    }
+    return TranscriptSchema.parse({ words, segments: sentenceSegments(words), speech: speechRanges(words) });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
-  const { stdout } = await runPath(NAME, bin, [audioPath, '--locale', opts.locale ?? 'en-US'], {
-    timeoutMs: opts.timeoutMs ?? 30 * 60_000,
-    notFoundHint: 'Run: pnpm build:native',
-    signal: opts.signal,
-  });
-
-  let raw: { words?: RawWord[] };
-  try {
-    raw = JSON.parse(stdout) as { words?: RawWord[] };
-  } catch {
-    throw new SidecarError(NAME, 'PARSE', 'The transcriber returned invalid JSON', 'Try again; if it persists, rebuild with pnpm build:native.', stdout);
-  }
-  const words: Word[] = (raw.words ?? [])
-    .map((r) => {
-      const start = Math.max(0, Number(r.start) || 0);
-      const end = Math.max(start, Number(r.end) || start);
-      const conf = Math.min(1, Math.max(0, Number(r.conf ?? 1)));
-      return { w: String(r.w ?? '').trim(), start, end, conf };
-    })
-    .filter((x) => x.w.length > 0)
-    .sort((a, b) => a.start - b.start);
-
-  return TranscriptSchema.parse({ words, segments: sentenceSegments(words), speech: speechRanges(words) });
 }

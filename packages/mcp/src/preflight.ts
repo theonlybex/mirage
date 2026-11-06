@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 import { execFile, spawn } from 'node:child_process';
-import { access, constants, readdir, stat, statfs } from 'node:fs/promises';
+import { readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { readVideo } from '@wordedits/core';
-import { locate, transcriberPath } from '@wordedits/sidecars';
+import { locate, whisperSetup } from '@wordedits/sidecars';
 
 /** What the overnight check asks of the machine. Tests pass stubs; the server passes realPreflightDeps(). */
 export interface PreflightDeps {
@@ -12,8 +12,8 @@ export interface PreflightDeps {
   freeBytes(path: string): Promise<number>;
   footageBytes(project: string, n: number): Promise<number>;
   which(cmd: string): Promise<boolean>;
-  /** Whether the speech helper is built (the SessionStart hook compiles it). */
-  transcriber(): Promise<boolean>;
+  /** What speech recognition is missing (whisper-cli, its model, or both, with how to get them); null when both are found. */
+  transcriber(): Promise<string | null>;
 }
 
 const GB = 1024 ** 3;
@@ -29,7 +29,8 @@ export async function preflight(o: { project: string; videos: number[]; deps: Pr
   for (const tool of ['ffmpeg', 'ffprobe']) {
     if (!(await deps.which(tool))) problems.push(`${tool} isn't installed. Run /mirage:setup.`);
   }
-  if (!(await deps.transcriber())) problems.push("The speech helper isn't built yet. Run /mirage:status.");
+  const speech = await deps.transcriber();
+  if (speech) problems.push(`Speech recognition isn't set up: ${speech} Run /mirage:setup.`);
   return { ok: problems.length === 0, problems };
 }
 
@@ -65,7 +66,10 @@ export function realPreflightDeps(): PreflightDeps {
       return (await Promise.all((video?.footage ?? []).map(folderBytes))).reduce((a, b) => a + b, 0);
     },
     which: (cmd) => locate(cmd as 'ffmpeg' | 'ffprobe').then(() => true, () => false),
-    transcriber: () => access(transcriberPath(), constants.X_OK).then(() => true, () => false),
+    transcriber: async () => {
+      const s = await whisperSetup();
+      return s.ok ? null : s.problem;
+    },
   };
 }
 

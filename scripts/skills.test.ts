@@ -109,7 +109,9 @@ describe('the plugin skills', () => {
     expect(edit).toContain("Here's the rough cut in Mirage's viewer. Click on the video to leave notes, then press Send notes.");
     expect(edit).toContain('Never write inside footage folders. Never invent footage, numbers or events.');
     expect(read('overnight')).toContain("Done for tonight. Mirage's viewer has the morning report.");
-    expect(read('setup')).toContain('xcode-select --install');
+    expect(read('setup')).toContain('brew install whisper-cpp');
+    expect(read('setup')).toContain('https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin');
+    expect(read('setup')).not.toMatch(/xcode-select|Parakeet/);
   });
 
   it('the skills that run on engine output say to use the tool when a message suggests a command', () => {

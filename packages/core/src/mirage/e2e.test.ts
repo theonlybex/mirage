@@ -1,10 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema } from '@wordedits/shared';
-import { run } from '@wordedits/sidecars';
+import { run, whisperSetup } from '@wordedits/sidecars';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog } from './ingest.js';
@@ -16,7 +15,8 @@ import { fitRecording } from './voiceover-files.js';
 
 const LINE = 'Every request took ten seconds, so I rewrote the backend.';
 
-describe.skipIf(process.platform !== 'darwin')('a Mirage episode end to end (macOS)', () => {
+// macOS for the `say` voice the clips are made with; whisper.cpp and its model must be installed (/mirage:setup).
+describe.skipIf(process.platform !== 'darwin' || !(await whisperSetup()).ok)('a Mirage episode end to end (macOS)', () => {
   let tools: MediaTools;
   let project: string;
   let passed = false;
@@ -26,8 +26,6 @@ describe.skipIf(process.platform !== 'darwin')('a Mirage episode end to end (mac
   });
   beforeAll(async () => {
     tools = await realMediaTools();
-    const s = await import('@wordedits/sidecars');
-    if (!existsSync(s.transcriberPath())) execFileSync('pnpm', ['build:native'], { stdio: 'inherit' });
     project = await mkdtemp(join(tmpdir(), 'mirage e2e '));
     const clips = join(project, 'batch 1');
     await mkdir(clips, { recursive: true });

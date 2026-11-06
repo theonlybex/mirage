@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { access, constants, readdir } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZodRawShape } from 'zod';
@@ -11,7 +11,6 @@ import {
   MirageError, musicReport, newVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
   sessionDir, slotsReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
-import { transcriberPath } from '@wordedits/sidecars';
 import { preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } from './preflight.js';
 import { runLong } from './run-long.js';
 
@@ -331,7 +330,8 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     const viewer = await readJsonFile(join(project, '.mirage', 'viewer.json'), ViewerInfoSchema, '.mirage/viewer.json').catch(() => null);
     lines.push(viewer && alive(viewer.pid) ? `Viewer: running at ${viewer.url}` : 'Viewer: not running');
     for (const t of ['ffmpeg', 'ffprobe']) lines.push(`${t}: ${(await deps.which(t)) ? 'ok' : 'missing'}`);
-    lines.push(`transcriber: ${(await access(transcriberPath(), constants.X_OK).then(() => true, () => false)) ? 'ok' : 'missing'}`);
+    const speech = await deps.transcriber();
+    lines.push(speech ? `transcriber: missing — ${speech}` : 'transcriber: ok');
     lines.push(Number(process.versions.node.split('.')[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
   }, false);

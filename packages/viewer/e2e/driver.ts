@@ -20,8 +20,6 @@ export const PLUGIN_ROOT = join(ROOT, 'plugin');
 const NODE = join(PLUGIN_ROOT, 'scripts', 'node');
 const HOOK = join(PLUGIN_ROOT, 'dist', 'hook.mjs');
 const ENGINE = join(PLUGIN_ROOT, 'dist', 'engine.mjs');
-/** The speech helper `pnpm build:native` makes. */
-const BUILT_TRANSCRIBER = join(ROOT, 'packages', 'sidecars', 'bin', 'darwin', 'wordedits-transcribe');
 /** What Claude Code calls the plugin's engine tools. */
 export const ENGINE_PREFIX = 'mcp__plugin_mirage_engine__';
 export const CLIPS_FOLDER = 'my clips ✨';
@@ -55,15 +53,6 @@ async function ffmpegDir(root: string): Promise<string> {
   await symlink(ffmpeg, join(dir, 'ffmpeg'));
   await symlink(ffprobe, join(dir, 'ffprobe'));
   return dir;
-}
-
-/** Runs a command to the end, failing on a non-zero exit. */
-function run(cmd: string, args: string[], o: { cwd?: string } = {}): Promise<void> {
-  return new Promise((ok, fail) => {
-    const p = spawn(cmd, args, { cwd: o.cwd, stdio: 'inherit' });
-    p.on('error', fail);
-    p.on('exit', (code) => (code === 0 ? ok() : fail(new Error(`${cmd} ${args.join(' ')} exited with ${code}`))));
-  });
 }
 
 /** Ends a child process: SIGTERM, then SIGKILL if it is still there after 5 s. */
@@ -107,7 +96,6 @@ export class Driver {
     for (const f of [NODE, HOOK, ENGINE, join(PLUGIN_ROOT, 'dist', 'viewer.mjs')]) {
       if (!existsSync(f)) throw new Error(`${f} is missing: run pnpm build:plugin first.`);
     }
-    if (process.platform === 'darwin' && !existsSync(BUILT_TRANSCRIBER)) await run('pnpm', ['build:native'], { cwd: ROOT });
     const root = await mkdtemp(join(tmpdir(), 'mirage-e2e-'));
     // Anything failing from here on leaves no temp folder behind.
     try {
@@ -117,12 +105,6 @@ export class Driver {
       await mkdir(project, { recursive: true });
       await mkdir(clips, { recursive: true });
       for (const f of ['tone-6s.mp4', 'silent-6s.mp4']) await copyFile(join(ROOT, 'fixtures', f), join(clips, f));
-      // The speech helper where the SessionStart hook would compile it (a fresh copy is newer than its source, so the hook
-      // doesn't start swiftc), and where .mcp.json points WORDEDITS_TRANSCRIBER.
-      if (existsSync(BUILT_TRANSCRIBER)) {
-        await mkdir(join(pluginData, 'bin'), { recursive: true });
-        await copyFile(BUILT_TRANSCRIBER, join(pluginData, 'bin', 'wordedits-transcribe'));
-      }
       const env: Record<string, string> = {
         ...(process.env as Record<string, string>),
         CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
@@ -131,7 +113,7 @@ export class Driver {
         WORDEDITS_FFMPEG_DIR: await ffmpegDir(root),
       };
       // Nothing of the test runner's own settings may reach the plugin's processes.
-      for (const k of ['MIRAGE_PROJECT', 'WORDEDITS_TRANSCRIBER', 'NODE_OPTIONS']) delete env[k];
+      for (const k of ['MIRAGE_PROJECT', 'NODE_OPTIONS']) delete env[k];
       await o.extraClips?.(clips, env);
       return new Driver(root, project, clips, pluginData, env);
     } catch (e) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { request as httpRequest } from 'node:http';
 import { createServer, type Server } from 'node:net';
-import { chmod, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -39,7 +39,6 @@ const start = async (over: Partial<Parameters<typeof startViewer>[0]> = {}) => {
   return viewer;
 };
 beforeEach(async () => {
-  vi.stubEnv('WORDEDITS_TRANSCRIBER', '');
   transcribeCalls.length = 0;
   t = await makeProject();
   lines = [];
@@ -763,18 +762,19 @@ describe('API', () => {
   describe('voice notes', () => {
     const post = (body = 'webm-bytes', video = 1) =>
       fetch(`${base()}/api/voice-note?video=${video}`, { method: 'POST', headers: { 'x-mirage-key': viewer.key, 'content-type': 'audio/webm' }, body });
-    const installTranscriber = async () => {
-      await mkdir(join(t.pluginData, 'bin'), { recursive: true });
-      await writeFile(join(t.pluginData, 'bin', 'wordedits-transcribe'), '#!/bin/sh\n');
-      await chmod(join(t.pluginData, 'bin', 'wordedits-transcribe'), 0o755);
-    };
+    let ready = true;
+    const speechReady = async () => ready;
+    beforeEach(() => {
+      ready = true;
+    });
 
     it('transcribes the recording and keeps the audio', async () => {
-      await start();
-      await installTranscriber();
+      await start({ speechReady });
       const r = await post();
       expect(r.status).toBe(200);
       expect(await r.json()).toEqual({ text: 'Make the intro shorter' });
+      expect(transcribeCalls).toHaveLength(1);
+      expect(transcribeCalls[0]!.audio).toMatch(/voice-[0-9a-f-]{36}\.wav$/);
       const files = await readdir(join(t.project, 'episodes', '1', 'notes'));
       const webm = files.filter((f) => /^voice-[0-9a-f-]{36}\.webm$/.test(f));
       expect(webm).toHaveLength(1);
@@ -782,40 +782,24 @@ describe('API', () => {
       expect(lines).toHaveLength(1);
     });
 
-    it('says the speech recognition is still being set up when the transcriber is not built', async () => {
-      await start();
+    it('says speech recognition is not set up when whisper.cpp or its model is missing', async () => {
+      ready = false;
+      await start({ speechReady });
       const r = await post();
       expect(r.status).toBe(503);
-      expect(await r.json()).toEqual({ error: 'Speech recognition is still being set up. Try again in a minute, or type the note.' });
+      expect(await r.json()).toEqual({ error: "Speech recognition isn't set up yet. Run /mirage:setup in Claude, or type the note." });
       expect(existsSync(join(t.project, 'episodes', '1', 'notes'))).toBe(false);
+      expect(transcribeCalls).toHaveLength(0);
     });
 
-    it('uses WORDEDITS_TRANSCRIBER when set, for the check and for the transcription', async () => {
-      const mine = join(t.root, 'my-helper');
-      vi.stubEnv('WORDEDITS_TRANSCRIBER', mine);
+    it('checks speech recognition by default with whisper.cpp itself', async () => {
+      vi.stubEnv('WORDEDITS_WHISPER_DIR', join(t.root, 'no-whisper'));
       await start();
-      expect((await post()).status).toBe(503); // not at <pluginData>/bin, and not yet at the env's path
-      await installTranscriber(); // a helper in pluginData/bin is not the one asked for
-      expect((await post()).status).toBe(503);
-      await writeFile(mine, '#!/bin/sh\n');
-      await chmod(mine, 0o755);
-      expect((await post()).status).toBe(200);
-      expect(transcribeCalls.map((c) => c.opts)).toEqual([{ transcriber: mine }]);
-    });
-
-    it('an explicit transcriber path wins, and the default is the one in pluginData/bin', async () => {
-      await start();
-      await installTranscriber();
-      expect((await post()).status).toBe(200);
-      expect(transcribeCalls[0]!.opts).toEqual({ transcriber: join(t.pluginData, 'bin', 'wordedits-transcribe') });
-      const other = join(t.root, 'other-helper');
-      await start({ transcriber: other });
       expect((await post()).status).toBe(503);
     });
 
     it('refuses an empty recording and a video that does not exist', async () => {
-      await start();
-      await installTranscriber();
+      await start({ speechReady });
       expect((await post('')).status).toBe(400);
       expect((await post('x', 9)).status).toBe(404);
     });

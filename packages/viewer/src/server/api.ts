@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { randomUUID } from 'node:crypto';
-import { access, constants, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { extname, isAbsolute, join } from 'node:path';
 import {
@@ -18,8 +18,8 @@ export { HttpError };
 
 export type ApiContext = {
   project: string;
-  /** The speech helper: checked before a voice note is taken and the one that transcribes it. */
-  transcriber: string;
+  /** Whether speech recognition is installed: checked before a voice note is taken. */
+  speechReady: () => Promise<boolean>;
   tools: MediaTools;
   /** Prints one line to stdout: Claude's notification. */
   say: (line: string) => void;
@@ -30,7 +30,7 @@ const JSON_LIMIT = 1 << 20;
 const AUDIO_LIMIT = 25 << 20;
 const TEXT_LIMIT = 2000;
 const SAY_LIMIT = 1000;
-const SPEECH_NOT_READY = 'Speech recognition is still being set up. Try again in a minute, or type the note.';
+const SPEECH_NOT_READY = "Speech recognition isn't set up yet. Run /mirage:setup in Claude, or type the note.";
 
 /** A person's text as it goes into a line to Claude: one line, short, and unable to close its own quotes (core's, shared with the hooks). */
 export const oneLine = (text: string, max = SAY_LIMIT): string => coreOneLine(text, max);
@@ -172,9 +172,7 @@ async function voiceNote(ctx: ApiContext, req: IncomingMessage, url: URL): Promi
   const audio = await readBody(req, AUDIO_LIMIT);
   if (!audio.length) throw new HttpError(400, 'The recording is empty.');
   const notReady = new HttpError(503, SPEECH_NOT_READY);
-  await access(ctx.transcriber, constants.X_OK).catch(() => {
-    throw notReady;
-  });
+  if (!(await ctx.speechReady())) throw notReady;
   const dir = join(episodeDir(ctx.project, n), 'notes');
   await mkdir(dir, { recursive: true });
   const id = randomUUID();
@@ -183,7 +181,7 @@ async function voiceNote(ctx: ApiContext, req: IncomingMessage, url: URL): Promi
   await writeFile(webm, audio);
   try {
     await ctx.tools.extractWav(webm, wav);
-    const transcript = await ctx.tools.transcribe(wav, { transcriber: ctx.transcriber });
+    const transcript = await ctx.tools.transcribe(wav);
     return { status: 200, body: { text: transcript.segments.map((s) => s.text.trim()).filter(Boolean).join(' ') } };
   } catch (e) {
     if (e instanceof SidecarError && e.code === 'NOT_FOUND') throw notReady;

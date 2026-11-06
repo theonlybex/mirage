@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { join, resolve } from 'node:path';
 import { readVideo, writeJsonFile, type MediaTools } from '@wordedits/core';
 import { ViewerInfoSchema } from '@wordedits/shared';
+import { whisperSetup } from '@wordedits/sidecars';
 import { errorResult, handleApi, videoNumbers, type ApiResult } from './api.js';
 import { EventHub } from './events.js';
 import { handleMedia } from './media.js';
@@ -17,10 +18,10 @@ export type ViewerOptions = {
   project: string;
   /** The built page (index.html and assets/). */
   uiDir: string;
-  /** The plugin's data folder (the speech-recognition helper is in bin/). */
+  /** The plugin's data folder. */
   pluginData: string;
-  /** The speech-recognition helper. Default: WORDEDITS_TRANSCRIBER if set, else `<pluginData>/bin/wordedits-transcribe`. */
-  transcriber?: string;
+  /** Whether speech recognition (whisper.cpp and its model) is installed, checked before a voice note is taken. Default: whisperSetup(). */
+  speechReady?: () => Promise<boolean>;
   /** First and last port to try on 127.0.0.1. */
   ports?: [number, number];
   key?: string;
@@ -63,7 +64,7 @@ export async function startViewer(o: ViewerOptions): Promise<Viewer> {
   const key = o.key ?? randomBytes(32).toString('base64url');
   // One line each, whatever is passed in: a newline would be a second notification.
   const say = (line: string) => o.say(line.replace(/[\r\n]+/g, ' '));
-  const transcriber = o.transcriber ?? (process.env.WORDEDITS_TRANSCRIBER || join(o.pluginData, 'bin', 'wordedits-transcribe'));
+  const speechReady = o.speechReady ?? (async () => (await whisperSetup()).ok);
   const hub = new EventHub(project);
   const ends = new Set<() => void>();
   let port = 0;
@@ -116,7 +117,7 @@ export async function startViewer(o: ViewerOptions): Promise<Viewer> {
       return pipeline(Readable.fromWeb(r.body as import('node:stream/web').ReadableStream), res).catch(() => {});
     }
     if (pathname.startsWith('/api/')) {
-      return sendJson(res, await handleApi({ project, transcriber, tools: o.tools, say }, req, url));
+      return sendJson(res, await handleApi({ project, speechReady, tools: o.tools, say }, req, url));
     }
     if (method !== 'GET' && method !== 'HEAD') return send(res, 405, 'text/plain; charset=utf-8', 'Method not allowed', { allow: 'GET, HEAD' });
     if (pathname === '/') return sendStatic(res, await servePage(o.uiDir, key));

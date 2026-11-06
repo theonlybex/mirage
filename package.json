@@ -12,7 +12,6 @@
     "typecheck": "tsc -b packages/shared packages/sidecars packages/core packages/mcp packages/hooks packages/viewer packages/viewer/tsconfig.ui.json packages/viewer/tsconfig.e2e.json scripts",
     "fixtures": "tsx scripts/make-fixtures.ts",
     "mirage": "tsx scripts/mirage.ts",
-    "build:native": "tsx scripts/build-native.ts",
     "fixtures:speech": "tsx scripts/make-speech-fixture.ts",
     "build:plugin": "tsx scripts/build-plugin.ts"
   },

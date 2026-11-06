@@ -1,13 +1,12 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Word } from '@wordedits/shared';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { extractWav } from './ffmpeg.js';
 import { probe } from './ffprobe.js';
-import { sentenceSegments, speechRanges, transcribeAudio, transcriberPath } from './transcribe.js';
+import { sentenceSegments, speechRanges, transcribeAudio } from './transcribe.js';
+import { whisperSetup } from './whisper.js';
 
 const w = (text: string, start: number, end: number): Word => ({ w: text, start, end, conf: 1 });
 
@@ -31,26 +30,7 @@ describe('speechRanges', () => {
   });
 });
 
-describe('transcriberPath', () => {
-  it('is WORDEDITS_TRANSCRIBER when set, else the built binary', () => {
-    const was = process.env.WORDEDITS_TRANSCRIBER;
-    try {
-      process.env.WORDEDITS_TRANSCRIBER = '/plugin/bin/wordedits-transcribe';
-      expect(transcriberPath()).toBe('/plugin/bin/wordedits-transcribe');
-      delete process.env.WORDEDITS_TRANSCRIBER;
-      expect(transcriberPath()).toMatch(/bin\/darwin\/wordedits-transcribe$/);
-    } finally {
-      if (was === undefined) delete process.env.WORDEDITS_TRANSCRIBER;
-      else process.env.WORDEDITS_TRANSCRIBER = was;
-    }
-  });
-});
-
-describe.skipIf(process.platform !== 'darwin')('transcribeAudio (macOS)', () => {
-  beforeAll(() => {
-    if (!existsSync(transcriberPath())) execFileSync('pnpm', ['build:native'], { stdio: 'inherit' });
-  }, 300_000);
-
+describe.skipIf(!(await whisperSetup()).ok)('transcribeAudio (whisper.cpp installed)', () => {
   it('returns timed words, keeps fillers, and finds the pause', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we tx '));
     const wav = join(dir, 'audio.wav');
@@ -66,5 +46,30 @@ describe.skipIf(process.platform !== 'darwin')('transcribeAudio (macOS)', () => 
     expect(t.words.at(-1)!.end).toBeLessThanOrEqual(duration + 0.05);
     expect(t.segments.length).toBeGreaterThanOrEqual(4);
     expect(t.speech.length).toBeGreaterThanOrEqual(2);
+    // The 3 s pause (7.3–10.6 s) is between two speech ranges.
+    expect(t.speech.some(([, end], i) => end < 7.6 && (t.speech[i + 1]?.[0] ?? 0) > 10)).toBe(true);
+    await rm(dir, { recursive: true, force: true });
   }, 300_000);
+
+  it('transcribes with a locale, and names whisper-cli when it cannot run', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we tx '));
+    const wav = join(dir, 'audio.wav');
+    await extractWav('fixtures/speech-retake.mp4', wav);
+    expect((await transcribeAudio(wav, { locale: 'en-US' })).words.length).toBeGreaterThan(20);
+    await expect(transcribeAudio(join(dir, 'missing.wav'))).rejects.toMatchObject({ name: 'SidecarError', tool: 'whisper-cli', code: 'EXIT' });
+    await rm(dir, { recursive: true, force: true });
+  }, 300_000);
+});
+
+describe('transcribeAudio without whisper.cpp', () => {
+  it('says what is missing', async () => {
+    const was = process.env.WORDEDITS_WHISPER_DIR;
+    process.env.WORDEDITS_WHISPER_DIR = join(tmpdir(), 'no-whisper-here');
+    try {
+      await expect(transcribeAudio('x.wav')).rejects.toMatchObject({ name: 'SidecarError', tool: 'whisper-cli', code: 'NOT_FOUND', hint: expect.stringContaining('WORDEDITS_WHISPER_DIR') });
+    } finally {
+      if (was === undefined) delete process.env.WORDEDITS_WHISPER_DIR;
+      else process.env.WORDEDITS_WHISPER_DIR = was;
+    }
+  });
 });

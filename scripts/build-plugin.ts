@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Builds the generated half of plugin/: the engine, hook and viewer bundles (dist/*.mjs), the viewer page (dist/viewer-ui/),
-// the speech helper source (native/transcribe.swift), the licence (LICENSE) and the notices of every bundled npm package
+// the licence (LICENSE) and the notices of every bundled npm package
 // (THIRD_PARTY_NOTICES.txt). The output is the same on every run (no dates, no absolute paths in the banner), so a test can
 // compare a rebuild with what is committed.
 import { readdirSync, readFileSync } from 'node:fs';
@@ -130,8 +130,6 @@ export async function buildPlugin(outRoot: string = PLUGIN_DIR): Promise<{ input
     else process.env.NODE_ENV = nodeEnv;
   }
 
-  await mkdir(join(outRoot, 'native'), { recursive: true });
-  await copyFile(join(ROOT, 'native/macos/transcribe.swift'), join(outRoot, 'native/transcribe.swift'));
   await copyFile(join(ROOT, 'LICENSE'), join(outRoot, 'LICENSE'));
   await writeFile(join(outRoot, 'THIRD_PARTY_NOTICES.txt'), thirdPartyNotices(inputs));
   return { inputs: [...inputs].sort() };

@@ -2,7 +2,6 @@
 // The hook script Claude Code runs: `hook.mjs <session-start|pre|post|stop>` with the event's JSON on stdin. It always exits
 // 0; any failure prints nothing and adds a line to ${CLAUDE_PLUGIN_DATA}/hook-errors.log. Outside a Mirage project it only
 // reads stdin and looks for mirage.json (findProject), so it stays fast in every other session of the person.
-import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { findProject } from './project-root.js';
@@ -12,7 +11,6 @@ type Event = (typeof EVENTS)[number];
 
 const event = process.argv[2] ?? '';
 const pluginData = process.env.CLAUDE_PLUGIN_DATA ?? '';
-const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT ?? '';
 const projectDir = process.env.CLAUDE_PROJECT_DIR || undefined;
 
 /** The same line format as hook.ts's logHookError, without loading hook.ts. */
@@ -33,33 +31,6 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-/**
- * `swiftc -parse-as-library -O <src> -o <out>`, detached: into a temp name, then renamed, so a half-made helper is never
- * used. It outlives the hook, so it records its own result: `failed.text` into `failed.path` on failure, that file removed on success.
- */
-function swiftc(src: string, out: string, failed: { path: string; text: string }): Promise<boolean> {
-  if (process.platform !== 'darwin') return Promise.resolve(false);
-  return new Promise((resolveOk) => {
-    const script =
-      'tmp="$2.tmp.$$" && swiftc -parse-as-library -O "$1" -o "$tmp" && mv -f "$tmp" "$2"; s=$?; rm -f "$tmp"; ' +
-      'if [ $s -eq 0 ]; then rm -f "$3"; else printf \'%s\\n\' "$4" > "$3"; fi; exit $s';
-    const child = spawn('/bin/sh', ['-c', script, 'sh', src, out, failed.path, failed.text], { detached: true, stdio: 'ignore' });
-    child.on('error', () => resolveOk(false));
-    child.on('exit', (code) => resolveOk(code === 0));
-    child.unref();
-  });
-}
-
-/** `xcode-select -p`: exit 0 when Apple's developer tools are installed. It never opens a dialog. */
-function developerTools(): Promise<boolean> {
-  if (process.platform !== 'darwin') return Promise.resolve(false);
-  return new Promise((resolveOk) => {
-    const child = spawn('xcode-select', ['-p'], { stdio: 'ignore' });
-    child.on('error', () => resolveOk(false));
-    child.on('exit', (code) => resolveOk(code === 0));
-  });
-}
-
 async function main(): Promise<void> {
   if (!(EVENTS as readonly string[]).includes(event)) return;
   const input = JSON.parse(await readStdin()) as { cwd?: unknown };
@@ -70,9 +41,6 @@ async function main(): Promise<void> {
     now: () => new Date(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     pluginData,
-    pluginRoot,
-    swiftc,
-    developerTools,
     ppid: process.ppid,
     projectDir,
   });

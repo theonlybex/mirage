@@ -23,7 +23,8 @@ export interface MediaTools {
   makeProxy(src: string, out: string, opts?: { height?: number; onProgress?: (f: number) => void }): Promise<void>;
   measureLoudness(file: string, opts?: { audioStream?: number; maxSec?: number }): Promise<{ integratedLufs: number; truePeakDb: number }>;
   extractWav(src: string, out: string, opts?: { timeoutMs?: number; audioStream?: number; signal?: AbortSignal }): Promise<void>;
-  transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number; signal?: AbortSignal; transcriber?: string }): Promise<Transcript>;
+  /** Speech to timed words with whisper.cpp (`locale` 'en-US' or none for auto-detect). */
+  transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<Transcript>;
 }
 
 // A static import, not import(): the plugin's bundler turns a dynamic import into lazily started modules, and that breaks the
