@@ -19,8 +19,15 @@ export const TimelineItemSchema = strictObject({
   speed: z.number().min(0.25).max(400).default(1),
   /** keep = the clip's own sound (live commentary, pieces to camera). Ignored when speed ≠ 1. */
   audio: z.enum(['keep', 'mute']).default('mute'),
-  /** Centred punch-in, 1 = none. */
+  /** Punch-in around `focus`, 1 = none. */
   zoom: z.number().min(1).max(2).default(1),
+  /**
+   * How a picture of another shape meets the output frame: fit = whole picture with black bars, fill = cropped around
+   * `focus` to fill the frame, blur = whole picture over a blurred copy of itself that fills the frame.
+   */
+  frame: z.enum(['fit', 'fill', 'blur']).default('fit'),
+  /** The point of the picture kept in view when it is cropped (zoom, fill): 0–1 from the left and from the top. */
+  focus: strictObject({ x: z.number().min(0).max(1).default(0.5), y: z.number().min(0).max(1).default(0.5) }).default({ x: 0.5, y: 0.5 }),
   /** Seconds of frozen last frame appended (set by voice-over fitting). */
   hold: z.number().min(0).max(10).default(0),
   /** No narration over this item (reveals, silences). */

@@ -29101,8 +29101,15 @@ var init_episode = __esm({
       speed: external_exports.number().min(0.25).max(400).default(1),
       /** keep = the clip's own sound (live commentary, pieces to camera). Ignored when speed ≠ 1. */
       audio: external_exports.enum(["keep", "mute"]).default("mute"),
-      /** Centred punch-in, 1 = none. */
+      /** Punch-in around `focus`, 1 = none. */
       zoom: external_exports.number().min(1).max(2).default(1),
+      /**
+       * How a picture of another shape meets the output frame: fit = whole picture with black bars, fill = cropped around
+       * `focus` to fill the frame, blur = whole picture over a blurred copy of itself that fills the frame.
+       */
+      frame: external_exports.enum(["fit", "fill", "blur"]).default("fit"),
+      /** The point of the picture kept in view when it is cropped (zoom, fill): 0–1 from the left and from the top. */
+      focus: strictObject2({ x: external_exports.number().min(0).max(1).default(0.5), y: external_exports.number().min(0).max(1).default(0.5) }).default({ x: 0.5, y: 0.5 }),
       /** Seconds of frozen last frame appended (set by voice-over fitting). */
       hold: external_exports.number().min(0).max(10).default(0),
       /** No narration over this item (reveals, silences). */
@@ -31549,7 +31556,8 @@ function undoFitEdits(ep) {
     let frames = laid[i2].frames;
     const b = out.items[i2 + 1];
     const same = (k) => b !== void 0 && b[k] === item[k];
-    if (h2.split && next.hold === 0 && b?.id === h2.split && Math.abs(b.src.in - next.src.out) < 1e-6 && ["clip", "speed", "audio", "zoom", "quiet", "onBeat", "beat"].every(same)) {
+    const sameFocus = b !== void 0 && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
+    if (h2.split && next.hold === 0 && b?.id === h2.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && ["clip", "speed", "audio", "zoom", "frame", "quiet", "onBeat", "beat"].every(same)) {
       next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold };
       items.splice(i2 + 1, 1);
       frames += laid[i2 + 1].frames;
@@ -31862,6 +31870,19 @@ function chunkItems(laid, size = CHUNK_ITEMS) {
 function chunkSize(sources) {
   return [...sources.values()].some((s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
 }
+function cropAt(focus) {
+  return Math.abs(focus.x - 0.5) < 1e-6 && Math.abs(focus.y - 0.5) < 1e-6 ? "" : `:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)}`;
+}
+function framed(frame, at2, o2, k) {
+  const { width: W, height: H } = o2;
+  if (frame === "fill") return `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}${at2}`;
+  if (frame === "blur") {
+    const w = Math.max(2, Math.round(W / 8) * 2);
+    const h2 = Math.max(2, Math.round(H / 8) * 2);
+    return `split[fg${k}][bg${k}];[bg${k}]scale=${w}:${h2}:force_original_aspect_ratio=increase,crop=${w}:${h2}${at2},gblur=sigma=12,eq=brightness=-0.08,scale=${W}:${H}[bb${k}];[fg${k}]scale=${W}:${H}:force_original_aspect_ratio=decrease[ff${k}];[bb${k}][ff${k}]overlay=(W-w)/2:(H-h)/2`;
+  }
+  return `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`;
+}
 function itemChunkArgs(laid, o2, sources, output2) {
   const inputs = [];
   const chains = [];
@@ -31872,9 +31893,10 @@ function itemChunkArgs(laid, o2, sources, output2) {
     inputs.push("-threads", item.speed <= 1 ? "1" : "4");
     if (item.src.in < (src.videoStartSec ?? 0)) inputs.push(...item.src.in > 0 ? ["-itsoffset", ffNum(-item.src.in)] : [], "-i", src.path);
     else inputs.push("-noaccurate_seek", "-ss", ffNum(item.src.in), "-i", src.path);
-    const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2,` : "";
+    const at2 = cropAt(item.focus);
+    const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2${at2},` : "";
     chains.push(
-      `[${k}:v]setpts=(PTS-${frameTolerance(o2.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o2.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}scale=${o2.width}:${o2.height}:force_original_aspect_ratio=decrease,pad=${o2.width}:${o2.height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`
+      `[${k}:v]setpts=(PTS-${frameTolerance(o2.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o2.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}${framed(item.frame, at2, o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`
     );
     const dur = ffNum(l.frames / o2.fps);
     if (item.audio === "keep" && item.speed === 1 && src.hasAudio) {

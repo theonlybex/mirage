@@ -71,6 +71,21 @@ describe('itemChunkArgs', () => {
     expect(graph).toContain('[v0][a0][v1][a1]concat=n=2:v=1:a=1[vcat][acat]');
     expect(args.at(-1)).toBe('/w/chunk-000.mov');
   });
+  it('fills the frame by cropping around the focus point, and punches in around it too', () => {
+    const f = ep([{ id: 'f', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, frame: 'fill', focus: { x: 0.25, y: 0.5 }, zoom: 1.5 }]);
+    const g = itemChunkArgs(layoutTimeline(f), { width: 1080, height: 1920, fps: 30 }, sourcesFor(f, cat), '/w/c.mov');
+    expect(g[g.indexOf('-filter_complex') + 1]).toContain(
+      'trim=end_frame=61,crop=trunc(iw/1.5/2)*2:trunc(ih/1.5/2)*2:(iw-ow)*0.25:(ih-oh)*0.5,scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920:(iw-ow)*0.25:(ih-oh)*0.5,setsar=1,tpad=',
+    );
+  });
+  it('puts the whole picture over a blurred, darkened copy of itself that fills the frame', () => {
+    const b = ep([{ id: 'b', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, frame: 'blur' }]);
+    const g = itemChunkArgs(layoutTimeline(b), { width: 1080, height: 1920, fps: 30 }, sourcesFor(b, cat), '/w/c.mov');
+    expect(g[g.indexOf('-filter_complex') + 1]).toContain(
+      'trim=end_frame=61,split[fg0][bg0];[bg0]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,gblur=sigma=12,eq=brightness=-0.08,scale=1080:1920[bb0];' +
+        '[fg0]scale=1080:1920:force_original_aspect_ratio=decrease[ff0];[bb0][ff0]overlay=(W-w)/2:(H-h)/2,setsar=1,tpad=',
+    );
+  });
   it('cuts live audio at the end of the source before padding silence under a hold', () => {
     const h = ep([{ id: 'h', beat: 'problem', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep', hold: 0.5 }]);
     const g = itemChunkArgs(layoutTimeline(h), { width: 960, height: 540, fps: 30 }, sourcesFor(h, cat), '/w/c.mov');

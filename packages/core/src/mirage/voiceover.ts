@@ -181,8 +181,9 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
     const end = laid[i].end;
     let frames = laid[i].frames;
     const b = out.items[i + 1];
-    const same = (k: 'clip' | 'speed' | 'audio' | 'zoom' | 'quiet' | 'onBeat' | 'beat') => b !== undefined && b[k] === item[k];
-    if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && (['clip', 'speed', 'audio', 'zoom', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
+    const same = (k: 'clip' | 'speed' | 'audio' | 'zoom' | 'frame' | 'quiet' | 'onBeat' | 'beat') => b !== undefined && b[k] === item[k];
+    const sameFocus = b !== undefined && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
+    if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && (['clip', 'speed', 'audio', 'zoom', 'frame', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
       next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold };
       items.splice(i + 1, 1);
       frames += laid[i + 1].frames;

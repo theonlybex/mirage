@@ -110,12 +110,13 @@ A minimal file:
 }
 ```
 The fields you can write (any other key is refused):
-- items: `id`, `beat` (`cold-open`, `title`, `recap`, `new-toy`, `problem`, `montage`, `twist`, `truth`, `outro`, `blooper`), `clip`, `src` `{ in, out }`, `speed` (0.25–400, default 1), `audio` (`keep` or `mute`, default `mute`), `zoom` (1–2, default 1), `hold` (seconds of frozen last frame, 0–10), `quiet` (no narration over it), `onBeat`.
+- items: `id`, `beat` (`cold-open`, `title`, `recap`, `new-toy`, `problem`, `montage`, `twist`, `truth`, `outro`, `blooper`), `clip`, `src` `{ in, out }`, `speed` (0.25–400, default 1), `audio` (`keep` or `mute`, default `mute`), `zoom` (1–2, default 1, a punch-in around `focus`), `frame` (`fit`, `fill` or `blur`, default `fit`), `focus` `{ x, y }` (0–1 from the left and top, default 0.5, 0.5), `hold` (seconds of frozen last frame, 0–10), `quiet` (no narration over it), `onBeat`.
 - overlays: `kind` (`callout`, `counter`, `badge`, `label`, `chapter`, `before`, `after`), `text`, `tone` (`neutral`, `fail`, `pass`, `live`), `start`, `end`.
 - music cues: `track`, `start`, `end`, `gainDb` (0 or less, default −5), `fadeIn` (default 0.5), `fadeOut` (default 1), `offset` (where in the track the cue starts, default 0).
 - `slots`, `slotsCut` and `voiceover` are written by `slots` and `vo`; in a slot you write only `line`.
 
 - `output`: 1920×1080 unless the user says otherwise; `fps` 30 or 60.
+- Vertical videos (Shorts, Reels, TikTok): `output` 1080×1920. A landscape clip in a vertical frame needs a `frame` on each item: `fill` crops it to fill the frame (pick `focus.x` from the frames so the action stays in view: the crosshair, the character, a facecam corner), `blur` shows the whole picture over a blurred copy of itself (for HUDs, maps or text that a crop would cut off). `fit` keeps black bars, so don't use it for vertical. `focus` also moves a `zoom` off-centre.
 - `items[].clip` is a catalog id (`c001`…); `src` is in that clip's own seconds, and must end by the clip's `probe.videoDurationSec` when it has one (its sound can run on after the picture): otherwise `check` stops with `item …: c019 has video only until 3.0 s`. Item `id`s are yours (short, unique).
 - Overlay text can be in any script, and symbols such as © ® ™ ▶ ⚠ ✔ ↔ draw; colour emoji (🚀 ✅ 👩‍💻, flags) are left out (they can't be drawn; `check` warns).
 - `overlays` and `music` are in output-timeline seconds; `track` is a file name in `music/`.

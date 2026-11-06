@@ -9,7 +9,7 @@ const base = { version: 2, number: 1, title: 'Weather app, part 1', output: { wi
 describe('EpisodeSchema', () => {
   it('fills defaults', () => {
     const ep = EpisodeSchema.parse(base);
-    expect(ep.items[0]).toMatchObject({ speed: 1, audio: 'mute', zoom: 1, hold: 0, quiet: false, onBeat: false });
+    expect(ep.items[0]).toMatchObject({ speed: 1, audio: 'mute', zoom: 1, frame: 'fit', focus: { x: 0.5, y: 0.5 }, hold: 0, quiet: false, onBeat: false });
     expect(ep).toMatchObject({ overlays: [], music: [], slots: [], voiceover: null, loudnessLufs: -14 });
   });
   it('rejects src.out <= src.in, naming the item', () => {
@@ -26,6 +26,12 @@ describe('EpisodeSchema', () => {
     expect(EpisodeSchema.safeParse({ ...base, music: [{ track: 'a.mp3', start: 5, end: 5 }] }).success).toBe(false);
     expect(EpisodeSchema.safeParse({ ...base, output: { width: 1921, height: 1080, fps: 30 } }).success).toBe(false);
   });
+  it('takes a frame mode and a focus point inside the picture', () => {
+    const ep = EpisodeSchema.parse({ ...base, items: [{ ...item, frame: 'fill', focus: { x: 0.8 } }] });
+    expect(ep.items[0]).toMatchObject({ frame: 'fill', focus: { x: 0.8, y: 0.5 } });
+    expect(EpisodeSchema.safeParse({ ...base, items: [{ ...item, frame: 'stretch' }] }).success).toBe(false);
+    expect(EpisodeSchema.safeParse({ ...base, items: [{ ...item, focus: { x: 1.2, y: 0.5 } }] }).success).toBe(false);
+  });
 });
 
 const firstIssue = (r: { error?: { issues: { path: PropertyKey[]; message: string }[] } }) => r.error && { path: r.error.issues[0].path, message: r.error.issues[0].message };
@@ -34,7 +40,7 @@ describe('EpisodeSchema unknown keys', () => {
   it('rejects a misspelled key anywhere, naming it and the valid keys', () => {
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [item, { ...item, id: 'i2', speeed: 2 }] }))).toEqual({
       path: ['items', 1],
-      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, hold, quiet, onBeat)',
+      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, frame, focus, hold, quiet, onBeat)',
     });
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, extra: 1 }))?.message).toMatch(/^unknown key "extra" \(valid keys: version, number, title, /);
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [{ ...item, src: { in: 0, out: 2, end: 3 } }] }))?.path).toEqual(['items', 0, 'src']);

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type Transcript, type VoiceLine } from '@wordedits/shared';
+import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type TimelineItem, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { encodeArgs, ffNum } from './encode.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
@@ -76,6 +76,29 @@ const lufs = (n: number) => ffNum(Math.min(-5, Math.max(-70, n)));
 /** Seconds a source frame may be stamped after the time it is picked for (a quarter of a frame at `fps`). */
 export const frameTolerance = (fps: number) => ffNum(1 / (4 * fps));
 
+/** A crop's offset that keeps `focus` in view; nothing for the centre (crop's own default). */
+function cropAt(focus: TimelineItem['focus']): string {
+  return Math.abs(focus.x - 0.5) < 1e-6 && Math.abs(focus.y - 0.5) < 1e-6 ? '' : `:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)}`;
+}
+
+/**
+ * Filters that bring a picture of any shape to the output size: fit letterboxes it, fill crops it around the focus,
+ * blur puts it over a copy of itself filled, blurred and darkened (blurred at an eighth of the area, so it stays cheap).
+ */
+function framed(frame: TimelineItem['frame'], at: string, o: { width: number; height: number }, k: number): string {
+  const { width: W, height: H } = o;
+  if (frame === 'fill') return `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}${at}`;
+  if (frame === 'blur') {
+    const w = Math.max(2, Math.round(W / 8) * 2);
+    const h = Math.max(2, Math.round(H / 8) * 2);
+    return (
+      `split[fg${k}][bg${k}];[bg${k}]scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}${at},gblur=sigma=12,eq=brightness=-0.08,scale=${W}:${H}[bb${k}];` +
+      `[fg${k}]scale=${W}:${H}:force_original_aspect_ratio=decrease[ff${k}];[bb${k}][ff${k}]overlay=(W-w)/2:(H-h)/2`
+    );
+  }
+  return `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`;
+}
+
 export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: number; fps: number }, sources: Map<string, ClipSource>, output: string): string[] {
   const inputs: string[] = [];
   const chains: string[] = [];
@@ -93,7 +116,8 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     // video's first frame too, losing the sound before it. Read from the start instead, on the same clock.
     if (item.src.in < (src.videoStartSec ?? 0)) inputs.push(...(item.src.in > 0 ? ['-itsoffset', ffNum(-item.src.in)] : []), '-i', src.path);
     else inputs.push('-noaccurate_seek', '-ss', ffNum(item.src.in), '-i', src.path);
-    const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2,` : '';
+    const at = cropAt(item.focus);
+    const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2${at},` : '';
     // fps (right after setpts, so it drops frames before any crop or scale touches them) shows at each output frame
     // the latest source frame at or before its time: it holds a frame across a gap, and the first frame until a late
     // video stream starts. A frame up to a quarter of an output frame late still counts as on time: MKV and WebM store
@@ -102,7 +126,7 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     // decoding there.
     chains.push(
       `[${k}:v]setpts=(PTS-${frameTolerance(o.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}` +
-        `scale=${o.width}:${o.height}:force_original_aspect_ratio=decrease,pad=${o.width}:${o.height}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,` +
+        `${framed(item.frame, at, o, k)},setsar=1,` +
         `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`,
     );
     const dur = ffNum(l.frames / o.fps);
