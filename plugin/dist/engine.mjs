@@ -38368,7 +38368,7 @@ function soundOf(sources, clip) {
   if (sources instanceof Map) return sources.get(clip);
   return sources.clips.find((c3) => c3.id === clip)?.probe;
 }
-var hasSpill = (item) => !isCard(item) && (item.leadIn !== void 0 || item.tailOut !== void 0);
+var hasSpill = (item) => !isCard(item) && ((item.leadIn ?? 0) > 0 || (item.tailOut ?? 0) > 0);
 var playsOwnSound = (item) => !!item && !isCard(item) && item.audio === "keep" && item.speed === 1;
 function keepsOwnSound(item, sources) {
   return playsOwnSound(item) && soundOf(sources, item.clip)?.hasAudio === true;
@@ -38485,13 +38485,7 @@ function speechWords(ep, catalog, vo) {
       out.push({ ...w, start: r35(l.start + w.start - item.src.in), end: r35(l.start + Math.min(w.end, srcEnd) - item.src.in) });
     }
   }
-  for (const s of spills(ep, catalog, laid).spills) {
-    const words = catalog.clips.find((c3) => c3.id === s.clip)?.transcript?.words ?? [];
-    for (const w of words) {
-      if (w.start < s.srcIn - EPS4 || w.start >= s.srcOut || isFiller(w)) continue;
-      out.push({ ...w, start: r35(s.at + w.start - s.srcIn), end: r35(s.at + Math.min(w.end, s.srcOut) - s.srcIn) });
-    }
-  }
+  for (const { words } of spilledWords(ep, catalog, laid)) out.push(...words);
   if (vo && ep.voiceover) {
     for (const line of ep.voiceover.lines) {
       const tx = vo instanceof Map ? vo.get(line.recording ?? ep.voiceover.recording) : vo;
@@ -38510,6 +38504,13 @@ function speechWords(ep, catalog, vo) {
     }
   }
   return out.sort((a2, b) => a2.start - b.start);
+}
+function spilledWords(ep, catalog, laid = layoutTimeline(ep)) {
+  return spills(ep, catalog, laid).spills.map((s) => {
+    const said = catalog.clips.find((c3) => c3.id === s.clip)?.transcript?.words ?? [];
+    const words = said.filter((w) => w.start >= s.srcIn - EPS4 && w.start < s.srcOut && !isFiller(w)).map((w) => ({ ...w, start: r35(s.at + w.start - s.srcIn), end: r35(s.at + Math.min(w.end, s.srcOut) - s.srcIn) }));
+    return { spill: s, words };
+  });
 }
 var SENTENCE_END3 = /[.?!]["'”’)\]]*$/;
 var PICTO = String.raw`[\p{Emoji_Presentation}]|(?=\p{Extended_Pictographic})[\u{1F000}-\u{1FAFF}]|\p{Extended_Pictographic}(?=\u{FE0F}?\u{200D})|(?<=\u{200D})\p{Extended_Pictographic}`;
@@ -39075,9 +39076,10 @@ function checkCardImages(project2, ep) {
 // packages/core/src/mirage/slots.ts
 var r36 = (n2) => Math.round(n2 * 1e3) / 1e3;
 var shown = (item) => isCard(item) ? { in: 0, out: item.card.sec, speed: 1 } : { in: item.src.in, out: item.src.out, speed: item.speed, clip: item.clip };
+var SPEECH_PAD_SEC = 0.3;
 function computeSlots(ep, catalog, o2 = {}) {
   const minLen = o2.minLen ?? 2.5;
-  const pad2 = o2.pad ?? 0.3;
+  const pad2 = o2.pad ?? SPEECH_PAD_SEC;
   const wpm = o2.wpm ?? 170;
   const D = timelineDuration(ep);
   const busy = [];
@@ -39333,9 +39335,10 @@ function undoFitEdits(ep) {
     const sameFocus = b !== void 0 && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
     const asSplit = (x) => sameMove(x.move, x.splitFrom?.move);
     const sameMoves = b !== void 0 && b.splitFrom?.item === item.splitFrom?.item && sameMove(b.splitFrom?.move, item.splitFrom?.move) && asSplit(item) && asSplit(b);
-    const noSpillAtSeam = item.tailOut === void 0 && b?.leadIn === void 0;
+    const noSpillAtSeam = (item.tailOut ?? 0) <= 0 && (b?.leadIn ?? 0) <= 0;
     if (h2.split && next.hold === 0 && b?.id === h2.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && noSpillAtSeam && ["clip", "speed", "audio", "zoom", "frame", "quiet", "onBeat", "beat"].every(same)) {
-      next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold, ...b.tailOut !== void 0 ? { tailOut: b.tailOut } : {} };
+      const { tailOut: _seam, ...merged } = next;
+      next = { ...merged, src: { in: next.src.in, out: b.src.out }, hold: b.hold, ...b.tailOut !== void 0 ? { tailOut: b.tailOut } : {} };
       items2.splice(i2 + 1, 1);
       frames += laid[i2 + 1].frames;
     }
@@ -40963,7 +40966,7 @@ function timelineWarnings(ep, lib, snapped) {
 function spillWarnings(ep, catalog) {
   if (!ep.items.some(hasSpill)) return [];
   const out = [];
-  const { spills: played, shortened } = spills(ep, catalog);
+  const { shortened } = spills(ep, catalog);
   for (const item of ep.items) {
     if (!hasSpill(item)) continue;
     if (!keepsOwnSound(item, catalog)) {
@@ -40972,15 +40975,18 @@ function spillWarnings(ep, catalog) {
     }
     for (const x of shortened) if (x.item === item.id) out.push(`item ${x.item}'s ${x.field} of ${s22(x.asked)} s is shortened to ${s22(x.got)} s \u2014 ${x.reason}`);
   }
+  const carried = spilledWords(ep, catalog);
   for (const line of ep.voiceover?.lines ?? []) {
     const segs = keptSegments(line);
     const last = segs[segs.length - 1];
     if (!last) continue;
     const end = line.at + last.offset + last.out - last.in;
-    for (const s of played) {
-      if (Math.min(end, s.at + s.sec) - Math.max(line.at, s.at) > 1e-6) {
-        out.push(`voice-over line ${line.slot} plays over item ${s.item}'s carried-over sound (${s22(s.at)}\u2013${s22(s.at + s.sec)} s) \u2014 shorten the leadIn/tailOut or move the line`);
-      }
+    for (const { spill, words } of carried) {
+      const under = words.filter((w) => Math.min(end, w.end + SPEECH_PAD_SEC) - Math.max(line.at, w.start - SPEECH_PAD_SEC) > 1e-6);
+      if (!under.length) continue;
+      const from = Math.min(...under.map((w) => w.start));
+      const to = Math.max(...under.map((w) => w.end));
+      out.push(`voice-over line ${line.slot} plays over item ${spill.item}'s carried-over sound (${s22(from)}\u2013${s22(to)} s) \u2014 shorten the leadIn/tailOut or move the line`);
     }
   }
   return out;

@@ -221,10 +221,11 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
     // person changed or added on either half keeps them apart, like a changed zoom on one).
     const asSplit = (x: typeof item) => sameMove(x.move, x.splitFrom?.move);
     const sameMoves = b !== undefined && b.splitFrom?.item === item.splitFrom?.item && sameMove(b.splitFrom?.move, item.splitFrom?.move) && asSplit(item) && asSplit(b);
-    // Sound carried across the seam (a tail on the first half, a lead on the second) keeps the halves apart too.
-    const noSpillAtSeam = item.tailOut === undefined && b?.leadIn === undefined;
+    // Sound carried across the seam (a tail on the first half, a lead on the second) keeps the halves apart too; 0 is none.
+    const noSpillAtSeam = (item.tailOut ?? 0) <= 0 && (b?.leadIn ?? 0) <= 0;
     if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && noSpillAtSeam && (['clip', 'speed', 'audio', 'zoom', 'frame', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
-      next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold, ...(b.tailOut !== undefined ? { tailOut: b.tailOut } : {}) };
+      const { tailOut: _seam, ...merged } = next;
+      next = { ...merged, src: { in: next.src.in, out: b.src.out }, hold: b.hold, ...(b.tailOut !== undefined ? { tailOut: b.tailOut } : {}) };
       items.splice(i + 1, 1);
       frames += laid[i + 1].frames;
     }

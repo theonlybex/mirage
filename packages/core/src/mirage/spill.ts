@@ -44,8 +44,8 @@ function soundOf(sources: SoundSources, clip: string): { hasAudio: boolean; dura
   return sources.clips.find((c) => c.id === clip)?.probe;
 }
 
-/** True when the item has a leadIn or a tailOut written (0 included). */
-export const hasSpill = (item: TimelineItem): item is ClipItem => !isCard(item) && (item.leadIn !== undefined || item.tailOut !== undefined);
+/** True when the item asks for a leadIn or a tailOut: one written as 0 is none. */
+export const hasSpill = (item: TimelineItem): item is ClipItem => !isCard(item) && ((item.leadIn ?? 0) > 0 || (item.tailOut ?? 0) > 0);
 
 /** True when the item plays its own sound: a clip item with `audio: "keep"` at speed 1 (whether its clip has sound aside). */
 export const playsOwnSound = (item: TimelineItem | undefined): item is ClipItem => !!item && !isCard(item) && item.audio === 'keep' && item.speed === 1;

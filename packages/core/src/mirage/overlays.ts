@@ -2,8 +2,8 @@ import { isCard, type CardItem, type Catalog, type Episode, type Overlay, type S
 import { isFiller, normalizeWord } from '../autoedit/takes.js';
 import { HIGHLIGHT_COLOR, type CaptionLine, type CaptionPart } from './captions.js';
 import { CAPTION_FONT, MONO_FONT } from './fonts.js';
-import { spills } from './spill.js';
-import { layoutTimeline } from './timeline.js';
+import { spills, type Spill } from './spill.js';
+import { layoutTimeline, type LaidItem } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const EPS = 1e-6;
@@ -107,14 +107,7 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
       out.push({ ...w, start: r3(l.start + w.start - item.src.in), end: r3(l.start + Math.min(w.end, srcEnd) - item.src.in) });
     }
   }
-  // A word belongs to a lead or a tail when it starts inside it, as a word belongs to its shot.
-  for (const s of spills(ep, catalog, laid).spills) {
-    const words = catalog.clips.find((c) => c.id === s.clip)?.transcript?.words ?? [];
-    for (const w of words) {
-      if (w.start < s.srcIn - EPS || w.start >= s.srcOut || isFiller(w)) continue;
-      out.push({ ...w, start: r3(s.at + w.start - s.srcIn), end: r3(s.at + Math.min(w.end, s.srcOut) - s.srcIn) });
-    }
-  }
+  for (const { words } of spilledWords(ep, catalog, laid)) out.push(...words);
   if (vo && ep.voiceover) {
     for (const line of ep.voiceover.lines) {
       const tx = vo instanceof Map ? vo.get(line.recording ?? ep.voiceover.recording) : vo;
@@ -135,6 +128,20 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
     }
   }
   return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * Each usable lead and tail (spills) with the spoken (non-filler) words it carries, on the output timeline: a word
+ * belongs to a lead or a tail when it starts inside it, as a word belongs to its shot.
+ */
+export function spilledWords(ep: Episode, catalog: Catalog, laid: LaidItem[] = layoutTimeline(ep)): { spill: Spill; words: Word[] }[] {
+  return spills(ep, catalog, laid).spills.map((s) => {
+    const said = catalog.clips.find((c) => c.id === s.clip)?.transcript?.words ?? [];
+    const words = said
+      .filter((w) => w.start >= s.srcIn - EPS && w.start < s.srcOut && !isFiller(w))
+      .map((w) => ({ ...w, start: r3(s.at + w.start - s.srcIn), end: r3(s.at + Math.min(w.end, s.srcOut) - s.srcIn) }));
+    return { spill: s, words };
+  });
 }
 
 const SENTENCE_END = /[.?!]["'”’)\]]*$/;

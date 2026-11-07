@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EpisodeSchema, isCard, type Catalog, type ClipItem, type TimelineItem } from '@wordedits/shared';
+import { EpisodeSchema, isCard, type Catalog, type ClipItem, type Episode, type TimelineItem } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { realMediaTools } from '../media-tools.js';
 import { checkEpisode } from './check.js';
@@ -9,7 +9,7 @@ import { formatsDir } from './formats.js';
 import { saveCatalog } from './ingest.js';
 import { saveEpisode } from './render-episode.js';
 import { checkReport } from './reports.js';
-import { cutOf } from './slots.js';
+import { computeSlots, cutOf } from './slots.js';
 import { fitVoiceover, holdAt } from './voiceover.js';
 
 /** The item as a clip item (a card here is a mistake in the test). */
@@ -387,19 +387,41 @@ describe('checkEpisode with leadIn and tailOut', () => {
     expect((await checkEpisode(dir, 1)).warnings).toEqual(['item b has leadIn/tailOut but doesn\'t keep its own sound (audio "keep" at speed 1) — it does nothing']);
   });
 
-  it('a voice-over line over carried-over sound: the fit stays fitted, and check says which line and where', async () => {
-    const { dir, catalog } = await project({ words: [], segments: [], speech: [] });
+  it('a voice-over line over carried-over words: the fit stays fitted, and check says which line and where', async () => {
+    // talk's own words, then "Ha!" just after its src.out: a 1.5 s tail carries it under the screen shot at 3.4–3.9 s.
+    const said = [{ w: 'Hi', start: 0.5, end: 1 }, { w: 'there.', start: 1.1, end: 2.5 }, { w: 'Ha!', start: 3.4, end: 3.9 }].map((w) => ({ ...w, conf: 1 }));
+    const { dir, catalog } = await project({ words: said, segments: [], speech: [] });
     const words = 'This is the line.'.split(' ').map((w, i) => ({ w, start: i * 0.3, end: i * 0.3 + 0.25, conf: 1 }));
-    const cut = base({ music: [], items: [live('a', 0, 2), live('b', 10, 16, { audio: 'mute' })], slots: [{ id: 'n1', start: 1.5, end: 5, maxWords: 8, line: 'This is the line.' }] });
-    const fitted = fitVoiceover({ episode: cut, catalog, recording: 'vo.wav', transcript: { words, segments: [], speech: [] } }).episode;
+    const fit = (slot: { start: number; end: number }) => {
+      const cut = base({ music: [], items: [live('talk', 0, 3), live('screen', 10, 16, { audio: 'mute' })], slots: [{ id: 'n1', maxWords: 8, line: 'This is the line.', ...slot }] });
+      return fitVoiceover({ episode: cut, catalog, recording: 'vo.wav', transcript: { words, segments: [], speech: [] } }).episode;
+    };
+    const tailed = (e: Episode) => ({ ...e, items: e.items.map((i) => (i.id === 'talk' ? { ...i, tailOut: 1.5 } : i)) });
+    const over = fit({ start: 3, end: 6 });
+    await saveEpisode(dir, over);
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    await saveEpisode(dir, tailed(over));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["voice-over line n1 plays over item talk's carried-over sound (3.40–3.90 s) — shorten the leadIn/tailOut or move the line"]);
+  });
+
+  it('a line in the slot Mirage proposes for a cut with a tail is never warned about, though it plays inside the tail', async () => {
+    const said = [{ w: 'Hi', start: 0.5, end: 1 }, { w: 'there.', start: 1.1, end: 2.5 }, { w: 'Ha!', start: 3.4, end: 3.9 }].map((w) => ({ ...w, conf: 1 }));
+    const { dir, catalog } = await project({ words: said, segments: [], speech: [] });
+    const cut = base({ music: [], items: [live('talk', 0, 3, { tailOut: 1.5 }), live('screen', 10, 16, { audio: 'mute' })] });
+    const slots = computeSlots(cut, catalog).map((x) => ({ ...x, line: 'This is the line.' }));
+    expect(slots.map((x) => [x.id, x.start])).toEqual([['n1', 4.2]]);
+    const words = 'This is the line.'.split(' ').map((w, i) => ({ w, start: i * 0.3, end: i * 0.3 + 0.25, conf: 1 }));
+    const fitted = fitVoiceover({ episode: { ...cut, slots }, catalog, recording: 'vo.wav', transcript: { words, segments: [], speech: [] } }).episode;
+    // Inside the tail's window (3.0–4.5 s), after its last word and the slots' padding.
+    expect(fitted.voiceover!.lines[0].at).toBeLessThan(4.5);
     await saveEpisode(dir, fitted);
     expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
-    await saveEpisode(dir, { ...fitted, items: fitted.items.map((i) => (i.id === 'a' ? { ...i, tailOut: 1 } : i)) });
-    expect((await checkEpisode(dir, 1)).warnings).toEqual(["voice-over line n1 plays over item a's carried-over sound (2.00–3.00 s) — shorten the leadIn/tailOut or move the line"]);
-    // A tail that ends before the line starts: nothing to say.
-    const at = fitted.voiceover!.lines[0].at;
-    await saveEpisode(dir, { ...fitted, items: fitted.items.map((i) => (i.id === 'a' ? { ...i, src: { in: 0, out: 1 }, tailOut: Math.max(0.1, Math.floor((at - 1.05) * 10) / 10) } : i)) });
-    expect((await checkEpisode(dir, 1)).warnings.filter((x) => x.startsWith('voice-over line'))).toEqual([]);
+  });
+
+  it('a leadIn or tailOut of 0 is none: no warning, even where it would do nothing', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base({ music: [], items: [live('a', 0, 2, { leadIn: 0 }), live('b', 5, 7, { audio: 'mute', leadIn: 0, tailOut: 0 }), live('c', 8, 9, { speed: 2, tailOut: 0 })] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
   });
 });
 

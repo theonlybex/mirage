@@ -7,10 +7,10 @@ import { loadFormats, type Format } from './formats.js';
 import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
 import { splitShots } from './move.js';
-import { keptSegments, OVERLAY_STYLE, speechWords, styleGeometry, undrawable, type StyleGeometry } from './overlays.js';
+import { keptSegments, OVERLAY_STYLE, speechWords, spilledWords, styleGeometry, undrawable, type StyleGeometry } from './overlays.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { fileUnreadable, sfxSource, unreadableSfx } from './sfx.js';
-import { slotsStale } from './slots.js';
+import { slotsStale, SPEECH_PAD_SEC } from './slots.js';
 import { hasSpill, keepsOwnSound, spills } from './spill.js';
 import { dropCollapsed, formatTime, layoutTimeline, timelineDuration } from './timeline.js';
 import { readVideo } from './video.js';
@@ -113,12 +113,13 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
 /**
  * What the leads and tails (leadIn, tailOut) do that the user should hear about, from the final layout: one that does
  * nothing (the item doesn't keep its own sound), one that plays shorter than written and why, and a fitted voice-over
- * line over sound one of them carries. Nothing at all for an episode without them.
+ * line over words one of them carries (each word padded as slots pad speech, so a line in a slot never warns). Nothing
+ * at all for an episode without them.
  */
 function spillWarnings(ep: Episode, catalog: Catalog): string[] {
   if (!ep.items.some(hasSpill)) return [];
   const out: string[] = [];
-  const { spills: played, shortened } = spills(ep, catalog);
+  const { shortened } = spills(ep, catalog);
   for (const item of ep.items) {
     if (!hasSpill(item)) continue;
     if (!keepsOwnSound(item, catalog)) {
@@ -127,15 +128,18 @@ function spillWarnings(ep: Episode, catalog: Catalog): string[] {
     }
     for (const x of shortened) if (x.item === item.id) out.push(`item ${x.item}'s ${x.field} of ${s2(x.asked)} s is shortened to ${s2(x.got)} s — ${x.reason}`);
   }
+  const carried = spilledWords(ep, catalog);
   for (const line of ep.voiceover?.lines ?? []) {
     const segs = keptSegments(line);
     const last = segs[segs.length - 1];
     if (!last) continue;
     const end = line.at + last.offset + last.out - last.in;
-    for (const s of played) {
-      if (Math.min(end, s.at + s.sec) - Math.max(line.at, s.at) > 1e-6) {
-        out.push(`voice-over line ${line.slot} plays over item ${s.item}'s carried-over sound (${s2(s.at)}–${s2(s.at + s.sec)} s) — shorten the leadIn/tailOut or move the line`);
-      }
+    for (const { spill, words } of carried) {
+      const under = words.filter((w) => Math.min(end, w.end + SPEECH_PAD_SEC) - Math.max(line.at, w.start - SPEECH_PAD_SEC) > 1e-6);
+      if (!under.length) continue;
+      const from = Math.min(...under.map((w) => w.start));
+      const to = Math.max(...under.map((w) => w.end));
+      out.push(`voice-over line ${line.slot} plays over item ${spill.item}'s carried-over sound (${s2(from)}–${s2(to)} s) — shorten the leadIn/tailOut or move the line`);
     }
   }
   return out;

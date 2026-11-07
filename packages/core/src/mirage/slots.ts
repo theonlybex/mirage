@@ -12,9 +12,12 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const shown = (item: TimelineItem): { in: number; out: number; speed: number; clip?: string } =>
   isCard(item) ? { in: 0, out: item.card.sec, speed: 1 } : { in: item.src.in, out: item.src.out, speed: item.speed, clip: item.clip };
 
+/** Seconds kept clear of narration either side of a spoken word (check pads carried-over words the same). */
+export const SPEECH_PAD_SEC = 0.3;
+
 export function computeSlots(ep: Episode, catalog: Catalog, o: { minLen?: number; pad?: number; wpm?: number } = {}): Slot[] {
   const minLen = o.minLen ?? 2.5;
-  const pad = o.pad ?? 0.3;
+  const pad = o.pad ?? SPEECH_PAD_SEC;
   const wpm = o.wpm ?? 170;
   const D = timelineDuration(ep);
   const busy: [number, number][] = [];

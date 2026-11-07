@@ -668,6 +668,16 @@ describe('leadIn and tailOut across voice-over fits', () => {
     const refit = fitVoiceover({ episode: { ...recut, slotsCut: cutOf(recut) }, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
     expect(refit.items).toEqual([ep0.items[0], tail]);
   });
+
+  it('after a re-cut, a tailOut of 0 on the first half or a leadIn of 0 on the second is none: the halves still merge', () => {
+    const ep0 = spilled({ leadIn: 0.5, tailOut: 1 });
+    const first = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    const zeroed = { ...first, items: first.items.map((i) => ({ ...i, ...(i.id === 'a' ? { tailOut: 0 } : { leadIn: 0 }) })) };
+    const recut = { ...zeroed, items: [...zeroed.items, tail] };
+    const refit = fitVoiceover({ episode: { ...recut, slotsCut: cutOf(recut) }, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
+    expect(refit.items.map((i) => [i.id, clip(i).src.in, clip(i).src.out, i.hold, clip(i).leadIn])).toEqual([['a', 0, 20, 0, 0.5], ['c', 0, 2, 0, undefined]]);
+    expect(clip(refit.items[0]).tailOut).toBe(1);
+  });
 });
 
 describe('lines with no words', () => {
