@@ -31711,20 +31711,23 @@ function alignWritten(spoken, text) {
   gap(i2, n2, j, m);
   return out;
 }
+function shotWords(l, catalog, fps) {
+  const { item } = l;
+  if (isCard(item) || item.audio !== "keep" || item.speed !== 1) return [];
+  const words = catalog.clips.find((c3) => c3.id === item.clip)?.transcript?.words ?? [];
+  const srcEnd = item.src.in + l.srcFrames / fps;
+  const out = [];
+  for (const w of words) {
+    if (w.start < item.src.in - EPS4 || w.start >= srcEnd || isFiller(w)) continue;
+    out.push({ ...w, start: r35(l.start + w.start - item.src.in), end: r35(l.start + Math.min(w.end, srcEnd) - item.src.in) });
+  }
+  return out;
+}
 function speechWords(ep, catalog, vo) {
   const fps = ep.output.fps;
   const out = [];
   const laid = layoutTimeline(ep);
-  for (const l of laid) {
-    const { item } = l;
-    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
-    const words = catalog.clips.find((c3) => c3.id === item.clip)?.transcript?.words ?? [];
-    const srcEnd = item.src.in + l.srcFrames / fps;
-    for (const w of words) {
-      if (w.start < item.src.in - EPS4 || w.start >= srcEnd || isFiller(w)) continue;
-      out.push({ ...w, start: r35(l.start + w.start - item.src.in), end: r35(l.start + Math.min(w.end, srcEnd) - item.src.in) });
-    }
-  }
+  for (const l of laid) out.push(...shotWords(l, catalog, fps));
   for (const { words } of spilledWords(ep, catalog, laid)) out.push(...words);
   if (vo && ep.voiceover) {
     for (const line of ep.voiceover.lines) {
@@ -34409,7 +34412,19 @@ function spillWarnings(ep, catalog) {
     }
     for (const x of shortened) if (x.item === item.id) out.push(`item ${x.item}'s ${x.field} of ${s22(x.asked)} s is shortened to ${s22(x.got)} s \u2014 ${x.reason}`);
   }
-  const carried = spilledWords(ep, catalog);
+  const laid = layoutTimeline(ep);
+  const carried = spilledWords(ep, catalog, laid);
+  for (const { spill, words } of carried) {
+    const i2 = laid.findIndex((l) => l.item.id === spill.item);
+    const next = laid[spill.kind === "tail" ? i2 + 1 : i2 - 1];
+    if (i2 < 0 || !next) continue;
+    const own2 = shotWords(next, catalog, ep.output.fps);
+    const under = words.filter((w) => own2.some((o2) => Math.min(w.end, o2.end) + SPEECH_PAD_SEC - Math.max(w.start, o2.start) + SPEECH_PAD_SEC > 1e-6));
+    if (!under.length) continue;
+    const from = Math.min(...under.map((w) => w.start));
+    const to = Math.max(...under.map((w) => w.end));
+    out.push(`item ${spill.item}'s carried-over sound (${s22(from)}\u2013${s22(to)} s) plays over item ${next.item.id}'s own words \u2014 shorten the leadIn/tailOut, or let the next shot start quieter`);
+  }
   for (const line of ep.voiceover?.lines ?? []) {
     const segs = keptSegments(line);
     const last = segs[segs.length - 1];
@@ -35287,6 +35302,7 @@ __export(src_exports2, {
   sha256File: () => sha256File,
   shiftAfter: () => shiftAfter,
   shotStarts: () => shotStarts,
+  shotWords: () => shotWords,
   similarity: () => similarity,
   slotsReport: () => slotsReport,
   slotsStale: () => slotsStale,

@@ -418,6 +418,49 @@ describe('checkEpisode with leadIn and tailOut', () => {
     expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
   });
 
+  describe('carried-over sound over the next shot\'s own words', () => {
+    const word = (w: string, start: number, end: number) => ({ w, start, end, conf: 1 });
+    const warned = async (words: ReturnType<typeof word>[], items: object[]) => {
+      const { dir } = await project({ words, segments: [], speech: [] });
+      await saveEpisode(dir, base({ music: [], items }));
+      return (await checkEpisode(dir, 1)).warnings;
+    };
+
+    it('a tail into a shot that opens with a line warns, naming the spilled words\' span', async () => {
+      // talk ends at 3 s; "Ha!" at 3.4–3.9 s in the source plays 3.4–3.9 s in the tail; the next shot's first line starts at 3.1 s.
+      const words = [word('Hi', 0.5, 1), word('Ha!', 3.4, 3.9), word('Next', 10.1, 10.5), word('line.', 10.6, 11)];
+      expect(await warned(words, [live('talk', 0, 3, { tailOut: 1 }), live('next', 10, 16)])).toEqual([
+        "item talk's carried-over sound (3.40–3.90 s) plays over item next's own words — shorten the leadIn/tailOut, or let the next shot start quieter",
+      ]);
+    });
+
+    it('a tail into a quiet stretch does not warn', async () => {
+      const words = [word('Hi', 0.5, 1), word('Ha!', 3.4, 3.9), word('Later', 23, 23.5)];
+      expect(await warned(words, [live('talk', 0, 3, { tailOut: 1 }), live('next', 20, 26)])).toEqual([]);
+    });
+
+    it('a tail into the next shot cut from the same take, whose source overlaps, warns', async () => {
+      const words = [word('Hi', 0.5, 1), word('Ha!', 3.4, 3.9), word('Ha!', 3.4, 3.9)];
+      expect(await warned(words, [live('talk', 0, 3, { tailOut: 1 }), live('again', 3, 8)])).toEqual([
+        "item talk's carried-over sound (3.40–3.90 s) plays over item again's own words — shorten the leadIn/tailOut, or let the next shot start quieter",
+      ]);
+    });
+
+    it('a lead under a shot that ends on a line warns, naming the shot before', async () => {
+      // talk's line ends at 2.5 s; the lead plays 9–10 s of the source at 2–3 s, its word at 9.5–9.9 s lands at 2.5–2.9 s.
+      const words = [word('Hi', 0.5, 1), word('there.', 1.1, 2.5), word('Door', 9.5, 9.9)];
+      expect(await warned(words, [live('talk', 0, 3), live('next', 10, 16, { leadIn: 1 })])).toEqual([
+        "item next's carried-over sound (2.50–2.90 s) plays over item talk's own words — shorten the leadIn/tailOut, or let the next shot start quieter",
+      ]);
+    });
+
+    it('a lead into a quiet stretch does not warn, and no neighbour words means none either', async () => {
+      const words = [word('Hi', 0.5, 1), word('Door', 9.5, 9.9)];
+      expect(await warned(words, [live('talk', 0, 3), live('next', 10, 16, { leadIn: 1 })])).toEqual([]);
+      expect(await warned(words, [live('talk', 0, 3, { tailOut: 1 }), live('screen', 10, 16, { audio: 'mute' })])).toEqual([]);
+    });
+  });
+
   it('a leadIn or tailOut of 0 is none: no warning, even where it would do nothing', async () => {
     const { dir } = await project({ words: [], segments: [], speech: [] });
     await saveEpisode(dir, base({ music: [], items: [live('a', 0, 2, { leadIn: 0 }), live('b', 5, 7, { audio: 'mute', leadIn: 0, tailOut: 0 }), live('c', 8, 9, { speed: 2, tailOut: 0 })] }));

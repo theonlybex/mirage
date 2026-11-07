@@ -128,9 +128,13 @@ describe('the plugin skills', () => {
       "`⚠ item <id> has leadIn/tailOut but doesn't keep its own sound (audio \"keep\" at speed 1) — it does nothing`",
       "`⚠ item <id>'s leadIn of <x> s is shortened to <y> s — <reason>`",
       "`⚠ voice-over line <slot> plays over item <id>'s carried-over sound (<a>–<b> s) — shorten the leadIn/tailOut or move the line`",
+      "`⚠ item <id>'s carried-over sound (<a>–<b> s) plays over item <other>'s own words — shorten the leadIn/tailOut, or let the next shot start quieter`",
     ]) expect(edit, `edit never explains ${message}`).toContain(message);
+    expect(edit).toContain("A `leadIn` or `tailOut` into a text card brings its words' captions over the card, as narration does.");
     const vlog = readFileSync(join(ROOT, 'plugin', 'formats', 'vlog.md'), 'utf8');
     expect(vlog).toContain('tailOut');
+    expect(vlog).toContain('Let the laugh ring with a short `tailOut` when the next shot is quiet.');
+    expect(vlog.match(/Cut out on the laugh/g)).toHaveLength(1);
   });
 
   it('edit teaches card items and the name, subtitle and timecard overlays', () => {

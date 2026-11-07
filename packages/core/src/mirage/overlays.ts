@@ -89,6 +89,24 @@ export function alignWritten(spoken: Word[], text: string): Word[] {
 export type VoTranscripts = Transcript | Map<string, Transcript>;
 
 /**
+ * The spoken (non-filler) words of one laid-out shot's own sound, on the output timeline: those starting inside its source
+ * range. None for a card or a shot that doesn't play its own sound (audio "keep" at speed 1).
+ */
+export function shotWords(l: LaidItem, catalog: Catalog, fps: number): Word[] {
+  const { item } = l;
+  // A card has no speech.
+  if (isCard(item) || item.audio !== 'keep' || item.speed !== 1) return [];
+  const words = catalog.clips.find((c) => c.id === item.clip)?.transcript?.words ?? [];
+  const srcEnd = item.src.in + l.srcFrames / fps;
+  const out: Word[] = [];
+  for (const w of words) {
+    if (w.start < item.src.in - EPS || w.start >= srcEnd || isFiller(w)) continue;
+    out.push({ ...w, start: r3(l.start + w.start - item.src.in), end: r3(l.start + Math.min(w.end, srcEnd) - item.src.in) });
+  }
+  return out;
+}
+
+/**
  * Every spoken (non-filler) word on the output timeline: live audio of kept real-time items, the words their leads and
  * tails carry outside their shots (spills), plus the fitted voice-over.
  */
@@ -96,17 +114,7 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
   const fps = ep.output.fps;
   const out: Word[] = [];
   const laid = layoutTimeline(ep);
-  for (const l of laid) {
-    const { item } = l;
-    // A card has no speech.
-    if (isCard(item) || item.audio !== 'keep' || item.speed !== 1) continue;
-    const words = catalog.clips.find((c) => c.id === item.clip)?.transcript?.words ?? [];
-    const srcEnd = item.src.in + l.srcFrames / fps;
-    for (const w of words) {
-      if (w.start < item.src.in - EPS || w.start >= srcEnd || isFiller(w)) continue;
-      out.push({ ...w, start: r3(l.start + w.start - item.src.in), end: r3(l.start + Math.min(w.end, srcEnd) - item.src.in) });
-    }
-  }
+  for (const l of laid) out.push(...shotWords(l, catalog, fps));
   for (const { words } of spilledWords(ep, catalog, laid)) out.push(...words);
   if (vo && ep.voiceover) {
     for (const line of ep.voiceover.lines) {
