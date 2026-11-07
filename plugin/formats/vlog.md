@@ -31,9 +31,9 @@ Pass `vlog: { name, date }` to `new_video`: `name` is what the person calls thei
 
 ## Text on screen
 - `captions` `chosen`: no automatic captions. Put a few yellow `subtitle` overlays on chosen lines only, words copied from the transcript.
-- A `name` label the first time someone appears: their name in bold, and under it a joke line that is true to them and never mean.
+- A `name` label the first time someone appears: their name in bold, and under it a joke line that is true to them and never mean. The line comes from what the footage or the person says about them: ask the person when unsure, and never invent one.
 - Time cards for jumps in time: a `bold` card ("Not even 2 days later...") or a yellow `timecard` overlay ("EARLIER") when the picture should keep playing.
-- Plug cards near the end (above), and the `mono` title card. Nothing else full screen.
+- Plug cards near the end (above), and the `mono` title card. No other full-screen cards (phone screens, texts and video calls full frame are fine).
 
 ## Title and thumbnail
 Suggest titles in either style and let the person pick: the classic, ALL CAPS, 3–8 words ending "!!", hiding who and what ("SURPRISING BEST FRIEND WITH LAMBORGHINI!!"); or the current one, sentence case, first person, no "!!" ("This was a bad idea"). For the thumbnail, suggest a frame with a wide-open laughing or shocked face and the cause in frame, with no text on it.
@@ -42,5 +42,5 @@ Suggest titles in either style and let the person pick: the classic, ALL CAPS, 3
 - Only people who agreed to be on camera. Leave out bystanders and anyone who didn't agree to be shown; if they matter to a bit, ask the person.
 - What the person said must not show (`hide`) stays out.
 - The edit shapes how people come across: never make anyone look worse than they were.
-- No storylines built around anyone drunk, and never glorify injuries from stunts.
+- No sexual storylines built around anyone drunk, and never glorify injuries from stunts.
 - A gambling sponsor read follows the ad rules (18+, local limits): pass that on to the person.

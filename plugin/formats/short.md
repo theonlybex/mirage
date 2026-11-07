@@ -39,4 +39,4 @@ The short's `summary.md` says what to set when posting it:
 - On Instagram, which has no links on Reels: a caption line pointing to the full video, and the link in the bio.
 - Post the shorts after the big video is live, so the link exists. Mirage posts nothing itself.
 
-The finished short is copied like the person's other finished videos (wherever they keep them). The same file is what they upload to Instagram: there is no second export.
+The finished short is copied like the person's other finished videos (wherever they keep them), named after its title. The same file is what they upload to Instagram: there is no second export.
