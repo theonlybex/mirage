@@ -27409,12 +27409,19 @@ var TimelineItemSchema = external_exports.union([ClipItemSchema, CardItemSchema]
 var isCard = (item) => "card" in item;
 var OverlaySchema = range(
   {
-    kind: external_exports.enum(["callout", "counter", "badge", "label", "chapter", "before", "after"]),
+    // name: a lower-third name label (text, and `sub` under it); subtitle: a chosen subtitle; timecard: a time tag.
+    kind: external_exports.enum(["callout", "counter", "badge", "label", "chapter", "before", "after", "name", "subtitle", "timecard"]),
     text: external_exports.string().min(1),
-    tone: external_exports.enum(["neutral", "fail", "pass", "live"]).default("neutral")
+    tone: external_exports.enum(["neutral", "fail", "pass", "live"]).default("neutral"),
+    /** The second line of a name label (a role, a place). Only on `name`; left out of the file when there is none. */
+    sub: external_exports.string().min(1).optional()
   },
   "overlay"
-);
+).superRefine((o2, ctx) => {
+  if (o2.sub !== void 0 && o2.kind !== "name") {
+    ctx.addIssue({ code: "custom", path: ["sub"], message: `overlay "${o2.text}": sub (the second line) is only for a name label \u2014 a ${o2.kind} overlay has none` });
+  }
+});
 var MusicCueSchema = range(
   {
     track: external_exports.string().min(1),

@@ -7,7 +7,7 @@ import { encodeArgs, ffNum } from './encode.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 import { asCancelled } from './cancel.js';
-import { captionWarnings, karaokeLines, popLines, type CaptionLine } from './captions.js';
+import { captionWarnings, karaokeLines, popLines, subtitleWarnings, type CaptionLine } from './captions.js';
 import { MirageError } from './errors.js';
 import { measureSfxLevel, resolveSfx, sfxSource, sfxVolumeDb, type SfxLevel } from './sfx.js';
 import { bundledFontsDir } from './fonts.js';
@@ -620,11 +620,12 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
       throw new MirageError('BAD_ITEM', `voice-over recording ${abs} changed since vo fitted it`, `Put back the recording you fitted, or run vo again with the new one: pnpm mirage vo <project> ${o.episode} <recording> (then --add for lines from other recordings).`);
     }
   }
-  // Pop and karaoke captions and cards are drawn in the bundled fonts: a broken install stops here, not with libass's
-  // fallback font.
+  // Pop and karaoke captions, cards, name labels, chosen subtitles and time tags are drawn in the bundled fonts: a broken
+  // install stops here, not with libass's fallback font.
   const style = o.mode === 'guide' ? 'off' : (ep.captions?.style ?? 'phrase');
   const cards = laid.flatMap((l) => (isCard(l.item) ? [{ start: l.start, end: l.end, card: l.item.card }] : []));
-  const fontsDir = style === 'pop' || style === 'karaoke' || cards.length ? bundledFontsDir() : undefined;
+  const labels = ep.overlays.some((ov) => ov.kind === 'name' || ov.kind === 'subtitle' || ov.kind === 'timecard');
+  const fontsDir = style === 'pop' || style === 'karaoke' || cards.length || labels ? bundledFontsDir() : undefined;
   // Every render's last pass draws overlays.ass with FFmpeg's ass filter: an FFmpeg without libass fails there, after all the work.
   const captions = await o.tools.ffmpegCaptions?.();
   if (captions && !captions.ok) {
@@ -735,7 +736,8 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     // A highlight word "never said" is known only with the narration's words (final): a rough cut says only that a
     // highlight does nothing with a style other than pop.
     const captionNotes = final || (o.mode === 'rough' && ep.captions?.style !== 'pop') ? captionWarnings(words, ep.captions) : [];
-    const warnings = [...(final ? lineChangeWarnings(ep, 'render') : []), ...captionNotes];
+    // Likewise a chosen subtitle the narration doesn't say: only the final render knows the voice-over's words.
+    const warnings = [...(final ? lineChangeWarnings(ep, 'render') : []), ...captionNotes, ...(final ? subtitleWarnings(words, ep.overlays) : [])];
     return { outputPath, srtPath, durationSec: D, warnings };
   } catch (e) {
     await rm(partial, { force: true }).catch(() => {});

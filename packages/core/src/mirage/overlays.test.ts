@@ -5,7 +5,9 @@ import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@worded
 import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
 import type { CaptionLine } from './captions.js';
+import { bundledFontsDir } from './fonts.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt, undrawable } from './overlays.js';
+import { filterValue } from './render-episode.js';
 
 const w = (text: string, start: number, end: number): Word => ({ w: text, start, end, conf: 1 });
 const tx = (words: Word[]): Transcript => ({ words, segments: [], speech: [] });
@@ -352,4 +354,100 @@ describe('buildAss cards', () => {
     expect(buildAss({ ...o, cards: [] })).toBe(buildAss(o));
     expect(buildAss(o)).not.toContain('Card');
   });
+});
+
+describe('buildAss name labels, chosen subtitles and time tags', () => {
+  const base = { cjkFont: null, captions: [], prompts: [] };
+  const style = (ass: string, name: string) => ass.split('\n').find((l) => l.startsWith(`Style: ${name},`))?.split(',');
+  const lines = (ass: string, name: string) => ass.split('\n').filter((l) => l.startsWith('Dialogue:') && l.split(',')[3] === name);
+  const name = { kind: 'name' as const, text: 'Sam Rivera', sub: 'Founder, Wondish', start: 1, end: 4, tone: 'neutral' as const };
+  const subtitle = { kind: 'subtitle' as const, text: 'So I went back to the start.', start: 2, end: 5, tone: 'neutral' as const };
+  const timecard = { kind: 'timecard' as const, text: '9:41 AM', start: 0, end: 3, tone: 'neutral' as const };
+  const YELLOW = '&H0000D4FF';
+
+  it('draws a name label as a lower third: left at 6% of the width, 18% of the height up, yellow name over a white sub line', () => {
+    const ass = buildAss({ ...base, width: 1920, height: 1080, overlays: [name] });
+    // Montserrat ExtraBold 64 px in yellow (no faux bold), a black 5 px outline, bottom-left (1), margins 115 px (6% of 1920) both sides, 194 px (18% of 1080) up.
+    expect(style(ass, 'Name')).toEqual(['Style: Name', 'Montserrat ExtraBold', '64', YELLOW, YELLOW, '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '5', '0', '1', '115', '115', '194', '1']);
+    expect(lines(ass, 'Name')).toEqual(['Dialogue: 3,0:00:01.00,0:00:04.00,Name,,0,0,0,,{\\fad(150,150)}Sam Rivera\\N{\\fs40\\c&H00FFFFFF&}Founder, Wondish']);
+    expect(style(ass, 'Subtitle')).toBeUndefined();
+    expect(style(ass, 'Timecard')).toBeUndefined();
+  });
+
+  it('draws a name label without a sub as the name alone', () => {
+    const ass = buildAss({ ...base, width: 1920, height: 1080, overlays: [{ ...name, sub: undefined }, { ...name, sub: '🚀', start: 5, end: 6 }] });
+    expect(lines(ass, 'Name').map((l) => l.split(',,0,0,0,,')[1])).toEqual(['{\\fad(150,150)}Sam Rivera', '{\\fad(150,150)}Sam Rivera']);
+  });
+
+  it('draws a chosen subtitle yellow, 44 px, black 4 px outline, bottom-centre with 80 px up', () => {
+    const ass = buildAss({ ...base, width: 1920, height: 1080, overlays: [subtitle] });
+    expect(style(ass, 'Subtitle')).toEqual(['Style: Subtitle', 'Montserrat ExtraBold', '44', YELLOW, YELLOW, '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '4', '0', '2', '96', '96', '80', '1']);
+    expect(lines(ass, 'Subtitle')).toEqual(['Dialogue: 3,0:00:02.00,0:00:05.00,Subtitle,,0,0,0,,{\\fad(150,150)}So I went back to the start.']);
+  });
+
+  it('puts a chosen subtitle where captions would sit for captions.position middle (38% of the height up)', () => {
+    const mid = buildAss({ ...base, width: 1920, height: 1080, position: 'middle', overlays: [subtitle] });
+    expect(style(mid, 'Subtitle')![21]).toBe('410');
+    expect(style(buildAss({ ...base, width: 1920, height: 1080, position: 'bottom', overlays: [subtitle] }), 'Subtitle')![21]).toBe('80');
+    // The same as the phrase caption's: both at 38% in the middle.
+    expect(style(buildAss({ ...base, width: 1080, height: 1920, position: 'middle', overlays: [subtitle], captions: [{ start: 0, end: 1, text: 'x' }] }), 'Subtitle')![21]).toBe(style(buildAss({ ...base, width: 1080, height: 1920, position: 'middle', overlays: [], captions: [{ start: 0, end: 1, text: 'x' }] }), 'Caption')![21]);
+  });
+
+  it('draws a time tag as black 40 px text in a yellow box (BorderStyle 3), top-left at 5% margins', () => {
+    const ass = buildAss({ ...base, width: 1920, height: 1080, overlays: [timecard] });
+    expect(style(ass, 'Timecard')).toEqual(['Style: Timecard', 'Montserrat ExtraBold', '40', '&H00000000', '&H00000000', YELLOW, YELLOW, '0', '0', '0', '0', '100', '100', '0', '0', '3', '14', '0', '7', '96', '96', '54', '1']);
+    expect(lines(ass, 'Timecard')).toEqual(['Dialogue: 3,0:00:00.00,0:00:03.00,Timecard,,0,0,0,,{\\fad(150,150)}9:41 AM']);
+  });
+
+  it('scales every size with the frame (a vertical rough cut at 540 x 960) and declares only the styles used', () => {
+    const ass = buildAss({ ...base, width: 540, height: 960, overlays: [name, subtitle, timecard] });
+    expect(style(ass, 'Name')!.slice(2, 3).concat(style(ass, 'Name')!.slice(16, 17), style(ass, 'Name')!.slice(19, 22))).toEqual(['32', '3', '32', '32', '173']);
+    expect(style(ass, 'Subtitle')!.slice(2, 3).concat(style(ass, 'Subtitle')!.slice(16, 17), style(ass, 'Subtitle')!.slice(21, 22))).toEqual(['22', '2', '40']);
+    expect(style(ass, 'Timecard')!.slice(2, 3).concat(style(ass, 'Timecard')!.slice(16, 17), style(ass, 'Timecard')!.slice(19, 22))).toEqual(['20', '7', '27', '27', '48']);
+    expect(lines(ass, 'Name')[0]).toContain('\\fs20\\c&H00FFFFFF&}');
+    expect(style(buildAss({ ...base, width: 540, height: 960, overlays: [timecard] }), 'Name')).toBeUndefined();
+  });
+
+  it('draws their text as other overlay text is drawn: braces escaped, emoji left out, CJK in a font that has it', () => {
+    const ass = buildAss({ ...base, cjkFont: 'Hiragino Sans GB', width: 1920, height: 1080, overlays: [{ ...name, text: '{Sam} 🚀 山田', sub: '東京 ✅ editor' }, { ...subtitle, text: 'Hello 🚀 世界' }, { ...timecard, text: '午前 9:41 🕘' }] });
+    expect(lines(ass, 'Name')[0]).toContain('}(Sam) {\\fnHiragino Sans GB}山田{\\fn}\\N{\\fs40\\c&H00FFFFFF&}{\\fnHiragino Sans GB}東京{\\fn} editor');
+    expect(lines(ass, 'Subtitle')[0]).toMatch(/\}Hello \{\\fnHiragino Sans GB\}世界\{\\fn\}$/);
+    expect(lines(ass, 'Timecard')[0]).toMatch(/\}\{\\fnHiragino Sans GB\}午前\{\\fn\} 9:41$/);
+  });
+
+  it('writes exactly what it always has without the new kinds', () => {
+    const o = { ...base, width: 1920, height: 1080, font: 'Helvetica Neue', overlays: [{ kind: 'badge' as const, text: 'FAILED', start: 3, end: 5, tone: 'fail' as const }] };
+    expect(buildAss(o)).not.toMatch(/Style: (Name|Subtitle|Timecard),/);
+  });
+
+  it('keeps a very long sub inside the frame: margins on both sides for libass to wrap within (real frame)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we-label-'));
+    const long = 'Founder, head of everything, and the person who stayed up far too late to get this video out of the door on time ' + '山田太郎'.repeat(12) + ' 🚀 and then some more words after that';
+    const W = 640;
+    const H = 360;
+    const render = async (overlays: Parameters<typeof buildAss>[0]['overlays']) => {
+      await writeFile(join(dir, 'l.ass'), buildAss({ ...base, cjkFont: process.platform === 'darwin' ? 'Hiragino Sans GB' : null, width: W, height: H, overlays }));
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=black:s=${W}x${H}:d=1`, '-vf', `ass=l.ass:fontsdir=${filterValue(bundledFontsDir())},format=gray`, '-ss', '0.5', '-frames:v', '1', '-f', 'rawvideo', 'l.gray'], { cwd: dir });
+      return readFile(join(dir, 'l.gray'));
+    };
+    const lit = (b: Buffer, x0: number, x1: number, y0 = 0, y1 = H) => {
+      let n = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (b[y * W + x] > 40) n++;
+      return n;
+    };
+    // Name label: 6% margins, so nothing is drawn in the outer 4% of the frame on either side, and the text wraps onto
+    // several lines (more than the two of a short label) without climbing out of the frame or past the 18% line.
+    const f = await render([{ ...name, sub: long, start: 0, end: 1 }]);
+    expect(lit(f, 0, 3) + lit(f, W - 3, W)).toBe(0);
+    expect(lit(f, 0, W)).toBeGreaterThan(500);
+    expect(lit(f, 0, W, H - Math.round(H * 0.18) + 8, H)).toBe(0);
+    expect(lit(f, 0, W, 0, 4)).toBe(0);
+    const short = await render([{ ...name, sub: 'Founder', start: 0, end: 1 }]);
+    const rows = (b: Buffer) => { let first = H; for (let y = 0; y < H; y++) if (lit(b, 0, W, y, y + 1)) { first = y; break; } return first; };
+    expect(rows(f)).toBeLessThan(rows(short) - 20);
+    // A long chosen subtitle wraps inside the 5% side margins too.
+    const s = await render([{ ...subtitle, text: long, start: 0, end: 1 }]);
+    expect(lit(s, 0, 3) + lit(s, W - 3, W)).toBe(0);
+    expect(lit(s, 0, W)).toBeGreaterThan(500);
+  }, 60_000);
 });

@@ -36269,12 +36269,19 @@ var TimelineItemSchema = external_exports.union([ClipItemSchema, CardItemSchema]
 var isCard = (item) => "card" in item;
 var OverlaySchema = range(
   {
-    kind: external_exports.enum(["callout", "counter", "badge", "label", "chapter", "before", "after"]),
+    // name: a lower-third name label (text, and `sub` under it); subtitle: a chosen subtitle; timecard: a time tag.
+    kind: external_exports.enum(["callout", "counter", "badge", "label", "chapter", "before", "after", "name", "subtitle", "timecard"]),
     text: external_exports.string().min(1),
-    tone: external_exports.enum(["neutral", "fail", "pass", "live"]).default("neutral")
+    tone: external_exports.enum(["neutral", "fail", "pass", "live"]).default("neutral"),
+    /** The second line of a name label (a role, a place). Only on `name`; left out of the file when there is none. */
+    sub: external_exports.string().min(1).optional()
   },
   "overlay"
-);
+).superRefine((o2, ctx) => {
+  if (o2.sub !== void 0 && o2.kind !== "name") {
+    ctx.addIssue({ code: "custom", path: ["sub"], message: `overlay "${o2.text}": sub (the second line) is only for a name label \u2014 a ${o2.kind} overlay has none` });
+  }
+});
 var MusicCueSchema = range(
   {
     track: external_exports.string().min(1),
@@ -38300,6 +38307,20 @@ function captionWarnings(words, captions) {
   }
   return out;
 }
+var SUBTITLE_SAID = 0.8;
+var SUBTITLE_NEAR = 0.5;
+function subtitleWarnings(words, overlays) {
+  const out = [];
+  overlays.forEach((o2, i2) => {
+    if (o2.kind !== "subtitle") return;
+    const wanted = o2.text.split(/\s+/).map(normalizeWord).filter(Boolean);
+    if (!wanted.length) return;
+    const near = new Set(words.filter((x) => x.end > o2.start - SUBTITLE_NEAR && x.start < o2.end + SUBTITLE_NEAR).map((x) => normalizeWord(x.w)));
+    if (wanted.filter((x) => near.has(x)).length >= wanted.length * SUBTITLE_SAID - EPS2) return;
+    out.push(`subtitle overlay ${i2 + 1} ("${o2.text}") doesn't match what's said at ${o2.start.toFixed(2)}\u2013${o2.end.toFixed(2)} s \u2014 copy the words from the transcript`);
+  });
+  return out;
+}
 
 // packages/core/src/mirage/fonts.ts
 import { existsSync as existsSync5 } from "node:fs";
@@ -38482,6 +38503,7 @@ function defaultFont() {
 var WHITE = "&H00FFFFFF";
 var BLACK = "&H00000000";
 var BOX = "&H4D000000";
+var YELLOW = "&H0000D4FF";
 var assColor = (hex3) => `&H00${hex3.slice(5, 7)}${hex3.slice(3, 5)}${hex3.slice(1, 3)}&`.toUpperCase();
 var POP_IN = (scale) => `\\fscx${Math.round(scale * 1.15)}\\fscy${Math.round(scale * 1.15)}\\t(0,120,\\fscx${scale}\\fscy${scale})`;
 function buildAss(o2) {
@@ -38515,6 +38537,10 @@ function buildAss(o2) {
   const cardStyle = (c3) => c3.style === "mono" ? "CardMono" : "CardBold";
   if (cards.some((c3) => cardStyle(c3.card) === "CardMono")) styles.push(["CardMono", px(72), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, MONO_FONT]);
   if (cards.some((c3) => cardStyle(c3.card) === "CardBold")) styles.push(["CardBold", px(110), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, CAPTION_FONT, Math.round(o2.width * 0.1)]);
+  const uses = (kind) => o2.overlays.some((ov) => ov.kind === kind);
+  if (uses("name")) styles.push(["Name", px(64), YELLOW, BLACK, BLACK, 0, 1, px(5), 1, Math.round(o2.height * 0.18), CAPTION_FONT, Math.round(o2.width * 0.06)]);
+  if (uses("subtitle")) styles.push(["Subtitle", px(44), YELLOW, BLACK, BLACK, 0, 1, px(4), 2, captionMv(px(80)), CAPTION_FONT]);
+  if (uses("timecard")) styles.push(["Timecard", px(40), BLACK, YELLOW, YELLOW, 0, 3, px(14), 7, Math.round(o2.height * 0.05), CAPTION_FONT]);
   const styleLines = styles.map(
     ([name, size, primary, outline, back, bold2, border, outw, align, mv, face = font, margin = side]) => `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold2},0,0,0,100,100,0,0,${border},${outw},0,${align},${margin},${margin},${mv},1`
   );
@@ -38565,6 +38591,17 @@ function buildAss(o2) {
       case "before":
       case "after":
         ev(4, ov.start, ov.end, "Before", text);
+        break;
+      case "name": {
+        const sub = ov.sub ? draw(ov.sub) : "";
+        ev(3, ov.start, ov.end, "Name", `{\\fad(150,150)}${text}${sub ? `\\N{\\fs${px(40)}\\c${assColor("#FFFFFF")}}${sub}` : ""}`);
+        break;
+      }
+      case "subtitle":
+        ev(3, ov.start, ov.end, "Subtitle", `{\\fad(150,150)}${text}`);
+        break;
+      case "timecard":
+        ev(3, ov.start, ov.end, "Timecard", `{\\fad(150,150)}${text}`);
         break;
     }
   }
@@ -39799,7 +39836,8 @@ async function renderLocked(o2) {
   }
   const style = o2.mode === "guide" ? "off" : ep.captions?.style ?? "phrase";
   const cards = laid.flatMap((l) => isCard(l.item) ? [{ start: l.start, end: l.end, card: l.item.card }] : []);
-  const fontsDir = style === "pop" || style === "karaoke" || cards.length ? bundledFontsDir() : void 0;
+  const labels = ep.overlays.some((ov) => ov.kind === "name" || ov.kind === "subtitle" || ov.kind === "timecard");
+  const fontsDir = style === "pop" || style === "karaoke" || cards.length || labels ? bundledFontsDir() : void 0;
   const captions = await o2.tools.ffmpegCaptions?.();
   if (captions && !captions.ok) {
     throw new MirageError("NO_CAPTIONS", `FFmpeg can't draw captions or text: ${captions.path} was built without libass.`, captions.hint);
@@ -39916,7 +39954,7 @@ async function renderLocked(o2) {
     }
     report(1);
     const captionNotes = final || o2.mode === "rough" && ep.captions?.style !== "pop" ? captionWarnings(words, ep.captions) : [];
-    const warnings = [...final ? lineChangeWarnings(ep, "render") : [], ...captionNotes];
+    const warnings = [...final ? lineChangeWarnings(ep, "render") : [], ...captionNotes, ...final ? subtitleWarnings(words, ep.overlays) : []];
     return { outputPath, srtPath, durationSec: D, warnings };
   } catch (e) {
     await rm7(partial2, { force: true }).catch(() => {
@@ -40318,6 +40356,7 @@ function timelineWarnings(ep, lib, snapped) {
   ep.overlays.forEach((o2, i2) => {
     if (o2.start >= D - 1e-6) out.push(`overlay ${i2 + 1} ("${o2.text}") starts at ${s2(o2.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never show`);
     if (undrawable(o2.text)) out.push(`overlay ${i2 + 1} ("${o2.text}") has emoji, which can't be drawn \u2014 they are left out`);
+    if (o2.sub && undrawable(o2.sub)) out.push(`overlay ${i2 + 1} ("${o2.sub}") has emoji, which can't be drawn \u2014 they are left out`);
   });
   const fps = ep.output.fps;
   const moveWarning = (id, m, frames) => {

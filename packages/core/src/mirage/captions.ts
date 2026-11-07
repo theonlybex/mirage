@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import type { Captions, Word } from '@wordedits/shared';
+import type { Captions, Overlay, Word } from '@wordedits/shared';
 import { normalizeWord } from '../autoedit/takes.js';
 import { groupSpans, groupWords, type GroupedWord } from './overlays.js';
 
@@ -112,5 +112,27 @@ export function captionWarnings(words: Word[], captions: Captions | undefined): 
     const msg = `captions.highlight "${word}" is never said in this video — check the spelling or remove it`;
     if (!said.has(normalizeWord(word)) && !out.includes(msg)) out.push(msg);
   }
+  return out;
+}
+
+/** How much of a chosen subtitle's words the narration must say near it, and how far (seconds) either side of it counts as near. */
+const SUBTITLE_SAID = 0.8;
+const SUBTITLE_NEAR = 0.5;
+
+/**
+ * A chosen subtitle is copied from the transcript: ⚠ for each `subtitle` overlay with fewer than 80% of its words (compared
+ * with `normalizeWord`) said between half a second before it starts and half a second after it ends. `words` are the
+ * narration's words on the output timeline, so this is known only in the final render. Overlays are numbered from 1.
+ */
+export function subtitleWarnings(words: Word[], overlays: Overlay[]): string[] {
+  const out: string[] = [];
+  overlays.forEach((o, i) => {
+    if (o.kind !== 'subtitle') return;
+    const wanted = o.text.split(/\s+/).map(normalizeWord).filter(Boolean);
+    if (!wanted.length) return;
+    const near = new Set(words.filter((x) => x.end > o.start - SUBTITLE_NEAR && x.start < o.end + SUBTITLE_NEAR).map((x) => normalizeWord(x.w)));
+    if (wanted.filter((x) => near.has(x)).length >= wanted.length * SUBTITLE_SAID - EPS) return;
+    out.push(`subtitle overlay ${i + 1} ("${o.text}") doesn't match what's said at ${o.start.toFixed(2)}–${o.end.toFixed(2)} s — copy the words from the transcript`);
+  });
   return out;
 }

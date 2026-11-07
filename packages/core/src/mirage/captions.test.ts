@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import type { Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { captionWarnings, groupWords, karaokeLines, keyWords, popLines } from './captions.js';
+import { captionWarnings, groupWords, karaokeLines, keyWords, popLines, subtitleWarnings } from './captions.js';
 import { groupCaptions } from './overlays.js';
 
 const w = (text: string, start: number, end: number): Word => ({ w: text, start, end, conf: 1 });
@@ -136,5 +136,35 @@ describe('captionWarnings', () => {
     expect(captionWarnings(words, { style: 'pop', position: 'bottom', highlight: [] })).toEqual([]);
     expect(captionWarnings(words, { style: 'phrase', position: 'bottom', highlight: [] })).toEqual([]);
     expect(captionWarnings(words, undefined)).toEqual([]);
+  });
+});
+
+describe('subtitleWarnings', () => {
+  const said = [w('Hello,', 1, 1.3), w('world', 1.4, 1.8), w('this', 1.9, 2.1), w('is', 2.1, 2.2), w('Mirage.', 2.3, 2.9)];
+  const sub = (text: string, start: number, end: number, kind: 'subtitle' | 'label' | 'name' = 'subtitle') => ({ kind, text, start, end, tone: 'neutral' as const });
+  const msg = (k: number, text: string, a: string, b: string) => `subtitle overlay ${k} ("${text}") doesn't match what's said at ${a}–${b} s — copy the words from the transcript`;
+
+  it('is quiet for a subtitle whose words are said in its time, however they are cased or punctuated', () => {
+    expect(subtitleWarnings(said, [sub('hello world, THIS is Mirage!', 1, 3)])).toEqual([]);
+  });
+  it('wants 80% of the words: 4 of 5 is enough, 3 of 5 is not', () => {
+    expect(subtitleWarnings(said, [sub('hello world this is Dave', 1, 3)])).toEqual([]);
+    expect(subtitleWarnings(said, [sub('hello world this Dave Dave', 1, 3)])).toEqual([msg(1, 'hello world this Dave Dave', '1.00', '3.00')]);
+  });
+  it('looks half a second before the subtitle starts and after it ends, and no further', () => {
+    expect(subtitleWarnings(said, [sub('Mirage', 3.3, 4)])).toEqual([]);
+    expect(subtitleWarnings(said, [sub('Mirage', 3.5, 4)])).toEqual([msg(1, 'Mirage', '3.50', '4.00')]);
+    expect(subtitleWarnings(said, [sub('Hello', 0, 0.6)])).toEqual([]);
+    expect(subtitleWarnings(said, [sub('Hello', 0, 0.4)])).toEqual([msg(1, 'Hello', '0.00', '0.40')]);
+  });
+  it('numbers overlays from 1 across all kinds, and judges only subtitles', () => {
+    expect(subtitleWarnings(said, [sub('nonsense', 1, 2, 'label'), sub('nonsense', 1, 2, 'name'), sub('nonsense', 1, 2)])).toEqual([msg(3, 'nonsense', '1.00', '2.00')]);
+  });
+  it('says nothing about a subtitle with no words to compare (only emoji or marks)', () => {
+    expect(subtitleWarnings(said, [sub('🚀 —', 1, 2)])).toEqual([]);
+    expect(subtitleWarnings([], [])).toEqual([]);
+  });
+  it('warns about every subtitle when nothing is said', () => {
+    expect(subtitleWarnings([], [sub('anything', 1, 2)])).toEqual([msg(1, 'anything', '1.00', '2.00')]);
   });
 });

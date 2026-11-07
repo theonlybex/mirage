@@ -113,12 +113,19 @@ export const isCard = (item: TimelineItem): item is CardItem => 'card' in item;
 
 export const OverlaySchema = range(
   {
-    kind: z.enum(['callout', 'counter', 'badge', 'label', 'chapter', 'before', 'after']),
+    // name: a lower-third name label (text, and `sub` under it); subtitle: a chosen subtitle; timecard: a time tag.
+    kind: z.enum(['callout', 'counter', 'badge', 'label', 'chapter', 'before', 'after', 'name', 'subtitle', 'timecard']),
     text: z.string().min(1),
     tone: z.enum(['neutral', 'fail', 'pass', 'live']).default('neutral'),
+    /** The second line of a name label (a role, a place). Only on `name`; left out of the file when there is none. */
+    sub: z.string().min(1).optional(),
   },
   'overlay',
-);
+).superRefine((o, ctx) => {
+  if (o.sub !== undefined && o.kind !== 'name') {
+    ctx.addIssue({ code: 'custom', path: ['sub'], message: `overlay "${o.text}": sub (the second line) is only for a name label — a ${o.kind} overlay has none` });
+  }
+});
 export type Overlay = z.infer<typeof OverlaySchema>;
 
 export const MusicCueSchema = range(

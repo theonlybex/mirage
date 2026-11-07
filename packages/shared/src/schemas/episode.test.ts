@@ -199,4 +199,25 @@ describe('EpisodeSchema card items', () => {
     const text = JSON.stringify(saved, null, 2);
     expect(JSON.stringify(EpisodeSchema.parse(JSON.parse(text)), null, 2)).toBe(text);
   });
+
+  describe('name labels, chosen subtitles and time tags', () => {
+    const ov = (o: object) => EpisodeSchema.safeParse({ ...base, overlays: [{ text: 'Sam', start: 0, end: 2, ...o }] });
+    it('takes the kinds name, subtitle and timecard', () => {
+      for (const kind of ['name', 'subtitle', 'timecard']) expect(ov({ kind }).success, kind).toBe(true);
+    });
+    it('takes a sub line on a name label only, and says so on any other kind', () => {
+      const parsed = ov({ kind: 'name', sub: 'Founder, Wondish' });
+      expect(parsed.success && parsed.data.overlays[0]).toMatchObject({ kind: 'name', text: 'Sam', sub: 'Founder, Wondish' });
+      for (const kind of ['callout', 'counter', 'badge', 'label', 'chapter', 'before', 'after', 'subtitle', 'timecard']) {
+        expect(firstIssue(ov({ kind, sub: 'x' })), kind).toEqual({ path: ['overlays', 0, 'sub'], message: `overlay "Sam": sub (the second line) is only for a name label — a ${kind} overlay has none` });
+      }
+      expect(ov({ kind: 'name', sub: '' }).success).toBe(false);
+    });
+    it('writes no sub for a name without one, and keeps the old kinds unchanged', () => {
+      const saved = { kind: 'badge', text: 'FAILED', tone: 'fail', start: 3, end: 5 };
+      const out = EpisodeSchema.parse({ ...base, overlays: [saved, { kind: 'name', text: 'Sam', start: 0, end: 2 }] });
+      expect(out.overlays[0]).toEqual(saved);
+      expect('sub' in out.overlays[1]).toBe(false);
+    });
+  });
 });

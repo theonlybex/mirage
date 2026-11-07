@@ -24,6 +24,7 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
   ep.overlays.forEach((o, i) => {
     if (o.start >= D - 1e-6) out.push(`overlay ${i + 1} ("${o.text}") starts at ${s2(o.start)} s, after the episode ends (${s2(D)} s) — it will never show`);
     if (undrawable(o.text)) out.push(`overlay ${i + 1} ("${o.text}") has emoji, which can't be drawn — they are left out`);
+    if (o.sub && undrawable(o.sub)) out.push(`overlay ${i + 1} ("${o.sub}") has emoji, which can't be drawn — they are left out`);
   });
   // A move's times are seconds of the shot's output length, held frames included. It never plays when it starts on the
   // frame after the shot's last (moveFrames' timing).

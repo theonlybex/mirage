@@ -852,6 +852,45 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(await peakHz(3.5, 700)).toBeGreaterThan((await peakHz(3.5, 500)) + 10);
   }, 120_000);
 
+  it("warns in the final render about a chosen subtitle the narration doesn't say (80% of its words within half a second), and judges a voice-over-only subtitle there", async () => {
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=500:sample_rate=48000:duration=3', join(project, 'take40.wav')]);
+    const dir = join(project, 'episodes', '40');
+    await mkdir(dir, { recursive: true });
+    // Said at output 0.4, 0.8, 1.2, 1.6 and 2.0 s (the line sits at 0.2 s, its first word 0.2 s into the recording).
+    const line = 'First line here again today.';
+    await writeFile(join(dir, 't40.json'), JSON.stringify({ words: line.split(' ').map((w, i) => ({ w, start: 0.2 + i * 0.4, end: 0.5 + i * 0.4, conf: 1 })), segments: [], speech: [] }));
+    const sub = (text: string, start: number, end: number) => ({ kind: 'subtitle', text, start, end });
+    const e = ep([{ id: 'v', beat: 'problem', clip: 'c003', src: { in: 0, out: 6 } }], {
+      number: 40,
+      slots: [{ id: 'n1', start: 0, end: 3, maxWords: 8, line }],
+      voiceover: { recording: 'take40.wav', transcripts: { 'take40.wav': 't40.json' }, lines: [{ slot: 'n1', at: 0.2, src: { in: 0, out: 2.2 }, text: line }] },
+      overlays: [
+        sub('First line here again today', 0.3, 1.7),
+        sub('FIRST line, HERE! Again?', 0.3, 1.7),
+        // 4 of 5 words said: exactly 80% is enough.
+        sub('First line here again oops', 0.3, 1.7),
+        // 3 of 5: warns.
+        sub('First line here oops oops', 0.3, 1.7),
+        // Nothing like it.
+        sub('Completely invented words', 0.3, 1.7),
+        // Said, but at 0.4-2.3 s: a subtitle at 3-4 s is more than half a second away.
+        sub('First line here again today', 3, 4),
+        // Half a second early is fine.
+        sub('today', 2.5, 3.5),
+        // Only a subtitle is checked: a name label and a label can say what they like.
+        { kind: 'name', text: 'Sam Rivera', sub: 'Founder', start: 0.3, end: 1.7 },
+        { kind: 'label', text: 'Anything at all', start: 0.3, end: 1.7 },
+      ],
+    });
+    await saveEpisode(project, e);
+    const made = (k: number, text: string, a: string, b: string) => `subtitle overlay ${k} ("${text}") doesn't match what's said at ${a}–${b} s — copy the words from the transcript`;
+    const r = await renderEpisode({ project, episode: 40, mode: 'final', tools });
+    expect(r.warnings).toEqual([made(4, 'First line here oops oops', '0.30', '1.70'), made(5, 'Completely invented words', '0.30', '1.70'), made(6, 'First line here again today', '3.00', '4.00')]);
+    // The rough cut and the guide cut have no narration to judge them by.
+    expect((await renderEpisode({ project, episode: 40, mode: 'rough', tools })).warnings).toEqual([]);
+    expect((await renderEpisode({ project, episode: 40, mode: 'guide', tools })).warnings).toEqual([]);
+  }, 180_000);
+
   it('burns pop captions into a vertical video in the bundled font; final.srt keeps phrase cues; no captions setting changes nothing', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we speech '));
     await copyFile('fixtures/speech-retake.mp4', join(dir, 'speech-retake.mp4'));
@@ -1608,4 +1647,100 @@ describe('cards (real ffmpeg)', () => {
     expect(calls).toEqual([]);
     expect((await readdir(join(project, 'episodes', '2'))).filter((f) => f.startsWith('.work-'))).toEqual([]);
   }, 120_000);
+
+  it('draws a name label, a chosen subtitle and a time tag in yellow where they belong, at their times (real frames), in the bundled font', async () => {
+    const card = (id: string, text: string) => ({ id, beat: 'title', card: { style: 'bold', text, sec: 2 } });
+    const overlays = [
+      { kind: 'name', text: 'Sam Rivera', sub: 'Founder, Wondish', start: 0.5, end: 1.5 },
+      { kind: 'subtitle', text: 'So I went back to the start.', start: 2.5, end: 3.5 },
+      { kind: 'timecard', text: '9:41 AM', start: 4.5, end: 5.5 },
+    ];
+    const e = ep([card('a', 'one'), card('b', 'two'), card('c', 'three')], { number: 3, overlays });
+    await saveEpisode(project, e);
+    const logs: string[] = [];
+    const graphs: string[] = [];
+    const verbose: MediaTools = {
+      ...tools,
+      runFfmpeg: async (args, opts) => {
+        const graph = args[args.indexOf('-filter_complex') + 1] ?? '';
+        if (!graph.includes(']ass=')) return tools.runFfmpeg(args, opts);
+        graphs.push(graph);
+        logs.push((await run('ffmpeg', ['-hide_banner', '-v', 'verbose', '-nostats', '-y', ...args], { cwd: opts?.cwd, timeoutMs: opts?.timeoutMs })).stderr);
+      },
+    };
+    const r = await renderEpisode({ project, episode: 3, mode: 'final', tools: verbose });
+    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout];`)).toBe(true);
+    expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
+    expect(logs[0]).not.toContain('Error opening memory font');
+
+    const W = 1920;
+    const H = 1080;
+    const yellow = ([r, g, b]: readonly number[]) => r! > 225 && g! > 180 && g! < 235 && b! < 70;
+    const white = ([r, g, b]: readonly number[]) => r! > 225 && g! > 225 && b! > 225;
+    const black = ([r, g, b]: readonly number[]) => Math.max(r!, g!, b!) < 40;
+    /** The pixels of `f` where `is` holds: their count and the box around them. */
+    const find = (f: Buffer, is: (p: readonly number[]) => boolean) => {
+      let n = 0;
+      let [x0, y0, x1, y1] = [W, H, -1, -1];
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        if (!is([f[(y * W + x) * 3]!, f[(y * W + x) * 3 + 1]!, f[(y * W + x) * 3 + 2]!])) continue;
+        n++;
+        [x0, y0, x1, y1] = [Math.min(x0, x), Math.min(y0, y), Math.max(x1, x), Math.max(y1, y)];
+      }
+      return { n, x0, y0, x1, y1 };
+    };
+
+    // Name label at 1 s: yellow name, its left edge at 6% of the width (115 px), and under it, higher up than the 18% line
+    // (194 px from the bottom), the white sub line.
+    const nameFrame = await frameAt(r.outputPath, 1);
+    const y1 = find(nameFrame, yellow);
+    expect(y1.n).toBeGreaterThan(800);
+    expect(y1.x0).toBeGreaterThan(105);
+    expect(y1.x0).toBeLessThan(140);
+    expect(y1.x1).toBeLessThan(900);
+    expect(y1.y1).toBeLessThan(H - 194 - 20);
+    expect(y1.y0).toBeGreaterThan(H - 194 - 200);
+    // White text under the yellow: the sub line, left-aligned with it, ending at the 18% line. (The card's own text is in the middle.)
+    const subLine = find(nameFrame.subarray(Math.round(y1.y1 + 4) * W * 3, (H - 194 + 8) * W * 3), white);
+    expect(subLine.n).toBeGreaterThan(400);
+    expect(subLine.x0).toBeGreaterThan(105);
+    expect(subLine.x0).toBeLessThan(145);
+
+    // Subtitle at 3 s: yellow, centred, its bottom 80 px above the bottom edge.
+    const subtitleFrame = await frameAt(r.outputPath, 3);
+    const y2 = find(subtitleFrame, yellow);
+    expect(y2.n).toBeGreaterThan(800);
+    expect(Math.abs((y2.x0 + y2.x1) / 2 - W / 2)).toBeLessThan(20);
+    expect(y2.y1).toBeLessThan(H - 80);
+    expect(y2.y1).toBeGreaterThan(H - 80 - 40);
+    expect(y2.y0).toBeGreaterThan(H - 80 - 120);
+
+    // Time tag at 5 s: a solid yellow box in the top-left corner (5% margins), the text in it black.
+    const tagFrame = await frameAt(r.outputPath, 5);
+    const y3 = find(tagFrame, yellow);
+    expect(y3.n).toBeGreaterThan(8000);
+    expect(y3.x0).toBeGreaterThan(60);
+    expect(y3.x0).toBeLessThan(110);
+    expect(y3.y0).toBeGreaterThan(25);
+    expect(y3.y0).toBeLessThan(70);
+    expect(y3.x1).toBeLessThan(500);
+    expect(y3.y1).toBeLessThan(200);
+    let darkInBox = 0;
+    for (let y = y3.y0 + 6; y < y3.y1 - 6; y++) for (let x = y3.x0 + 6; x < y3.x1 - 6; x++) if (black([tagFrame[(y * W + x) * 3]!, tagFrame[(y * W + x) * 3 + 1]!, tagFrame[(y * W + x) * 3 + 2]!])) darkInBox++;
+    expect(darkInBox).toBeGreaterThan(100);
+
+    // Each shows only at its time: no yellow before it, between them or after.
+    for (const t of [0.1, 2.2, 4.2, 5.8]) expect(find(await frameAt(r.outputPath, t), yellow).n, `no yellow at ${t} s`).toBe(0);
+    // Faded in and out: a sixth of a second in, it is already clear, but at its very start it is not drawn yet.
+    expect(find(await frameAt(r.outputPath, 0.5), yellow).n).toBeLessThan(y1.n / 4);
+
+    // An old overlay kind alone (on a clip, no card): today's ass= argument, no fontsdir. Any of the new kinds brings it back.
+    const onClip = (extra: object[]) => ep([{ id: 'talk', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1 } }], { number: 4, overlays: [{ kind: 'callout', text: '3 DAYS', start: 0.2, end: 1 }, ...extra] });
+    await saveEpisode(project, onClip([]));
+    await renderEpisode({ project, episode: 4, mode: 'rough', tools: verbose });
+    expect(graphs[1].split(';')[0]).toBe('[0:v]ass=overlays.ass[vout]');
+    await saveEpisode(project, onClip([{ kind: 'timecard', text: '9:41', start: 0.2, end: 1 }]));
+    await renderEpisode({ project, episode: 4, mode: 'rough', tools: verbose });
+    expect(graphs[2].split(';')[0]).toBe(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout]`);
+  }, 300_000);
 });

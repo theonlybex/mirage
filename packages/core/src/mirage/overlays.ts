@@ -228,6 +228,8 @@ function defaultFont(): string {
 const WHITE = '&H00FFFFFF';
 const BLACK = '&H00000000';
 const BOX = '&H4D000000';
+/** The yellow of name labels, chosen subtitles and time tags (#FFD400), as an ASS style colour. */
+const YELLOW = '&H0000D4FF';
 
 /** '#RRGGBB' as an ASS override colour (&H00BBGGRR&). */
 const assColor = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex.slice(1, 3)}&`.toUpperCase();
@@ -288,6 +290,14 @@ export function buildAss(o: {
   const cardStyle = (c: CardItem['card']) => (c.style === 'mono' ? 'CardMono' : 'CardBold');
   if (cards.some((c) => cardStyle(c.card) === 'CardMono')) styles.push(['CardMono', px(72), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, MONO_FONT]);
   if (cards.some((c) => cardStyle(c.card) === 'CardBold')) styles.push(['CardBold', px(110), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, CAPTION_FONT, Math.round(o.width * 0.1)]);
+  // Name labels, chosen subtitles and time tags: the bundled face, declared only when an overlay uses them. A name label
+  // is a lower third, left-aligned 6% of the width in and 18% of the height up, with margins on both sides so a long
+  // line wraps inside the frame; a subtitle sits where captions would; a time tag is a yellow box in the top-left
+  // corner (BorderStyle 3: the box takes the outline colour, its padding the outline width).
+  const uses = (kind: Overlay['kind']) => o.overlays.some((ov) => ov.kind === kind);
+  if (uses('name')) styles.push(['Name', px(64), YELLOW, BLACK, BLACK, 0, 1, px(5), 1, Math.round(o.height * 0.18), CAPTION_FONT, Math.round(o.width * 0.06)]);
+  if (uses('subtitle')) styles.push(['Subtitle', px(44), YELLOW, BLACK, BLACK, 0, 1, px(4), 2, captionMv(px(80)), CAPTION_FONT]);
+  if (uses('timecard')) styles.push(['Timecard', px(40), BLACK, YELLOW, YELLOW, 0, 3, px(14), 7, Math.round(o.height * 0.05), CAPTION_FONT]);
   const styleLines = styles.map(
     ([name, size, primary, outline, back, bold, border, outw, align, mv, face = font, margin = side]) =>
       `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold},0,0,0,100,100,0,0,${border},${outw},0,${align},${margin},${margin},${mv},1`,
@@ -351,6 +361,18 @@ export function buildAss(o: {
       case 'before':
       case 'after':
         ev(4, ov.start, ov.end, 'Before', text);
+        break;
+      case 'name': {
+        // The name, and on the line below it the sub line in white at 40 px (the style's colour and size are the name's).
+        const sub = ov.sub ? draw(ov.sub) : '';
+        ev(3, ov.start, ov.end, 'Name', `{\\fad(150,150)}${text}${sub ? `\\N{\\fs${px(40)}\\c${assColor('#FFFFFF')}}${sub}` : ''}`);
+        break;
+      }
+      case 'subtitle':
+        ev(3, ov.start, ov.end, 'Subtitle', `{\\fad(150,150)}${text}`);
+        break;
+      case 'timecard':
+        ev(3, ov.start, ov.end, 'Timecard', `{\\fad(150,150)}${text}`);
         break;
     }
   }

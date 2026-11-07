@@ -178,6 +178,12 @@ describe('checkEpisode', () => {
     ]);
   });
 
+  it("names a name label's sub line that has emoji, as it does the text", async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base({ overlays: [{ kind: 'name', text: 'Sam', sub: 'Founder 🚀', start: 1, end: 2 }, { kind: 'name', text: 'Ana', sub: 'Founder', start: 1, end: 2 }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['overlay 1 ("Founder 🚀") has emoji, which can\'t be drawn — they are left out']);
+  });
+
   it('warns when a move ends after the shot, or starts after it', async () => {
     const { dir } = await project({ words: [], segments: [], speech: [] });
     await saveEpisode(dir, base({
