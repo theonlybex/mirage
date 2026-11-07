@@ -32,6 +32,8 @@ export interface HookDeps {
   ppid: number;
   /** ${CLAUDE_PROJECT_DIR}, when set: the project root if it holds a mirage.json. */
   projectDir?: string;
+  /** The SessionStart notice asking whether Mirage may install what is missing (setupNotice), or null/absent for none. */
+  setupNotice?: string | null;
 }
 
 export const STOP_REASON = 'The person stopped the edit. Stop now and say in one line what was finished.';
@@ -195,7 +197,8 @@ class Handler {
     const k = videoNumbers(this.project).length;
     // The title is the person's text: one line, so it can't add instructions of its own to Claude's context.
     const line = `This folder is a Mirage project (“${this.core.oneLine(p?.title ?? '', 200)}”, ${k} ${k === 1 ? 'video' : 'videos'}). Use the mirage:edit skill to make or change a video.`;
-    return result(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line } }));
+    const additionalContext = this.deps.setupNotice ? `${line} ${this.deps.setupNotice}` : line;
+    return result(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext } }));
   }
 
   async pre(): Promise<Result> {
