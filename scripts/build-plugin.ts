@@ -45,7 +45,7 @@ function packageNotice(dir: string): PackageNotice {
 const RULE = '='.repeat(80);
 
 /** The fonts in plugin/fonts/ (written by hand, not built): name and version, licence id, and the licence file beside them. */
-const FONTS = [{ name: 'Montserrat ExtraBold v7.222 (fonts/Montserrat-ExtraBold.ttf)', licence: 'OFL-1.1', file: 'OFL.txt' }];
+const FONTS = [{ name: 'Montserrat ExtraBold v7.222 (fonts/files/Montserrat-ExtraBold.ttf)', licence: 'OFL-1.1', file: 'OFL.txt' }];
 
 function fontNotices(): string[] {
   return FONTS.map((f) => [RULE, f.name, `License: ${f.licence}`, '', `${f.file}:\n\n${readFileSync(join(PLUGIN_DIR, 'fonts', f.file), 'utf8').replace(/\r\n/g, '\n').trimEnd()}`].join('\n'));

@@ -38004,7 +38004,7 @@ var CAPTION_FONT = "Montserrat ExtraBold";
 var CAPTION_FONT_FILE = "Montserrat-ExtraBold.ttf";
 function bundledFontsDir(from = import.meta.url) {
   const here = dirname3(from.startsWith("file:") ? fileURLToPath3(from) : resolve3(from));
-  const candidates = [resolve3(here, "..", "fonts"), resolve3(here, "..", "..", "..", "..", "plugin", "fonts")];
+  const candidates = [resolve3(here, "..", "fonts", "files"), resolve3(here, "..", "..", "..", "..", "plugin", "fonts", "files")];
   const found = candidates.find((d) => existsSync5(join8(d, CAPTION_FONT_FILE)));
   if (found) return found;
   const folder = candidates.find((d) => existsSync5(d)) ?? candidates[0];
@@ -39183,7 +39183,8 @@ async function renderLocked(o2) {
       await writeFile4(srtPath, toSrt(cues));
     }
     report(1);
-    const warnings = [...final ? lineChangeWarnings(ep, "render") : [], ...o2.mode === "guide" ? [] : captionWarnings(words, ep.captions)];
+    const captionNotes = final || o2.mode === "rough" && ep.captions?.style !== "pop" ? captionWarnings(words, ep.captions) : [];
+    const warnings = [...final ? lineChangeWarnings(ep, "render") : [], ...captionNotes];
     return { outputPath, srtPath, durationSec: D, warnings };
   } catch (e) {
     await rm6(partial2, { force: true }).catch(() => {

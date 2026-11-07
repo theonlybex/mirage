@@ -493,22 +493,30 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect([p.width, p.height]).toEqual([1080, 1920]);
     expect(logs[0]).toContain(`Loading font file '${join(bundledFontsDir(), CAPTION_FONT_FILE)}'`);
     expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
-    expect(graphs[0]).toMatch(/\[0:v\]ass=overlays\.ass:fontsdir=.*fonts\[vout\]/);
+    expect(graphs[0]).toMatch(/\[0:v\]ass=overlays\.ass:fontsdir=.*fonts\/files\[vout\]/);
+    // Only font files in the folder libass reads: it opens no licence or readme as a font.
+    expect(logs[0]).not.toContain('Error opening memory font');
     const zebra = 'captions.highlight "zebra" is never said in this video — check the spelling or remove it';
     expect(r.warnings).toEqual([zebra]);
     const said = speechWords(e, await loadCatalog(project), null);
     expect(said.map((x) => x.w)).toContain('say');
     expect(await readFile(r.srtPath!, 'utf8')).toBe(toSrt(groupCaptions(said, { durationSec: 6 })));
 
-    // The rough cut shows them too, at its own size, and warns the same way.
+    // The rough cut shows them too, at its own size. It has no narration, so it never says a highlight word is not said.
     const rough = await renderEpisode({ project, episode: 15, mode: 'rough', tools: verbose });
-    expect(rough.warnings).toEqual([zebra]);
+    expect(rough.warnings).toEqual([]);
     expect(logs[1]).toMatch(/fontselect: .*Montserrat-ExtraBold/);
+
+    // A highlight with another style: the rough cut (and the render) say it does nothing. Karaoke uses the font too.
+    await saveEpisode(project, ep(items, { number: 15, output, captions: { style: 'karaoke', highlight: ['say'] } }));
+    const style = 'captions.highlight only works with the "pop" style — it does nothing with "karaoke"';
+    expect((await renderEpisode({ project, episode: 15, mode: 'rough', tools: verbose })).warnings).toEqual([style]);
+    expect(logs[2]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
 
     // Without captions: today's ass= argument, no fontsdir, no warnings.
     await saveEpisode(project, ep(items, { number: 15, output }));
     const plain = await renderEpisode({ project, episode: 15, mode: 'rough', tools: verbose });
-    expect(graphs[2].split(';')[0]).toBe('[0:v]ass=overlays.ass[vout]');
+    expect(graphs[3].split(';')[0]).toBe('[0:v]ass=overlays.ass[vout]');
     expect(plain.warnings).toEqual([]);
   }, 180_000);
 

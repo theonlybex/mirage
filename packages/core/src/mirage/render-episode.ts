@@ -513,7 +513,10 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     }
     report(1);
     // The voice-over says what was fitted, and its captions say the same: a line edited since then is only flagged.
-    const warnings = [...(final ? lineChangeWarnings(ep, 'render') : []), ...(o.mode === 'guide' ? [] : captionWarnings(words, ep.captions))];
+    // A highlight word "never said" is known only with the narration's words (final): a rough cut says only that a
+    // highlight does nothing with a style other than pop.
+    const captionNotes = final || (o.mode === 'rough' && ep.captions?.style !== 'pop') ? captionWarnings(words, ep.captions) : [];
+    const warnings = [...(final ? lineChangeWarnings(ep, 'render') : []), ...captionNotes];
     return { outputPath, srtPath, durationSec: D, warnings };
   } catch (e) {
     await rm(partial, { force: true }).catch(() => {});

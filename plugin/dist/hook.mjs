@@ -31176,7 +31176,7 @@ import { dirname as dirname3, join as join9, resolve as resolve4 } from "node:pa
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function bundledFontsDir(from = import.meta.url) {
   const here = dirname3(from.startsWith("file:") ? fileURLToPath3(from) : resolve4(from));
-  const candidates = [resolve4(here, "..", "fonts"), resolve4(here, "..", "..", "..", "..", "plugin", "fonts")];
+  const candidates = [resolve4(here, "..", "fonts", "files"), resolve4(here, "..", "..", "..", "..", "plugin", "fonts", "files")];
   const found2 = candidates.find((d) => existsSync5(join9(d, CAPTION_FONT_FILE)));
   if (found2) return found2;
   const folder = candidates.find((d) => existsSync5(d)) ?? candidates[0];
@@ -32390,7 +32390,8 @@ async function renderLocked(o2) {
       await writeFile3(srtPath, toSrt(cues));
     }
     report(1);
-    const warnings = [...final ? lineChangeWarnings(ep, "render") : [], ...o2.mode === "guide" ? [] : captionWarnings(words, ep.captions)];
+    const captionNotes = final || o2.mode === "rough" && ep.captions?.style !== "pop" ? captionWarnings(words, ep.captions) : [];
+    const warnings = [...final ? lineChangeWarnings(ep, "render") : [], ...captionNotes];
     return { outputPath, srtPath, durationSec: D, warnings };
   } catch (e) {
     await rm5(partial2, { force: true }).catch(() => {

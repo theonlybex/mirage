@@ -1588,7 +1588,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-Montserrat ExtraBold v7.222 (fonts/Montserrat-ExtraBold.ttf)
+Montserrat ExtraBold v7.222 (fonts/files/Montserrat-ExtraBold.ttf)
 License: OFL-1.1
 
 OFL.txt:
