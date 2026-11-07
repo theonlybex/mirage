@@ -14,7 +14,7 @@ import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
 import { buildVoiceTrack, chunkItems, chunkSize, type ClipSource, commandLength, episodeChunks, MAX_COMMAND, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
-import { fitVoiceover } from './voiceover.js';
+import { fitVoiceover, holdAt } from './voiceover.js';
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
 // Clip files must exist: sourcesFor refuses a catalogued clip whose file is gone.
@@ -879,6 +879,30 @@ describe('itemChunkArgs with a move (real ffmpeg)', () => {
       const { frames } = await render({ clip: 'odd', src: { in: 0, out: 2 }, frame, focus: { x: 0.7, y: 0.3 }, move: { zoom: 1.37, focus: { x: 0.1 } } }, { width: 1080, height: 1920 });
       expect(frames).toHaveLength(60);
     }
+  }, 120_000);
+
+  it('plays a move on across a voice-over split: no jump back at the seam, moving through the frozen frames', async () => {
+    const o = { width: 1920, height: 1080, fps: 30 };
+    // 2 s pushing in, split at 1 s and frozen for 0.5 s: 30 frames, 15 frozen, 30.
+    const e = holdAt(ep([{ id: 'm', beat: 'montage', clip: 'sq', src: { in: 0, out: 2 }, move: { zoom: 1.1 } }], { output: o }), { version: 1, clips: [] }, 1, 0.5);
+    expect(e.items.map((i) => i.id)).toEqual(['m', 'm-b']);
+    const out = join(dir, `${randomUUID()}.mov`);
+    await ff(itemChunkArgs(layoutTimeline(e), o, sources, out));
+    const raw = join(dir, `${randomUUID()}.gray`);
+    await ff(['-i', out, '-f', 'rawvideo', '-pix_fmt', 'gray', raw]);
+    const buf = await readFile(raw);
+    const frames = Array.from({ length: buf.length / (1920 * 1080) }, (_, i) => buf.subarray(i * 1920 * 1080, (i + 1) * 1920 * 1080));
+    expect(frames).toHaveLength(75);
+    const c = frames.map((f) => centroid(f, 1920));
+    const { second, back } = steadiness(c);
+    const seam = [c[44].x - c[43].x, c[45].x - c[44].x, c[46].x - c[45].x];
+    console.log(`split push-in: steps at the seam ${seam.map((d) => d.toFixed(3)).join(', ')} px, largest second difference ${second.toFixed(3)} px`);
+    // The square keeps moving out on every frame, the frozen ones too, and never jumps back to where it started.
+    expect(back).toBeGreaterThan(-NOISE);
+    expect(second).toBeLessThan(0.25);
+    expect(c[44].x - c[30].x).toBeGreaterThan(5);
+    expect(Math.abs(c[0].x - 1419.5)).toBeLessThan(0.3);
+    expect(Math.abs(c[74].x - (960 + 459.5 * 1.1))).toBeLessThan(0.3);
   }, 120_000);
 
   it('punches in over 3 frames: start, between, end', async () => {

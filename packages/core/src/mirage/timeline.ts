@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Episode, TimelineItem } from '@wordedits/shared';
+import { moveClocks, type MoveClock } from './move.js';
 
 export interface LaidItem {
   item: TimelineItem;
@@ -9,6 +10,8 @@ export interface LaidItem {
   srcFrames: number;
   holdFrames: number;
   frames: number;
+  /** On a part of a split shot that plays the shot's move: where the move runs in this item's frames (moveClocks). */
+  clock?: MoveClock;
 }
 
 export function itemFrames(item: TimelineItem, fps: number): { srcFrames: number; holdFrames: number; frames: number } {
@@ -20,12 +23,16 @@ export function itemFrames(item: TimelineItem, fps: number): { srcFrames: number
 export function layoutTimeline(ep: Episode): LaidItem[] {
   const fps = ep.output.fps;
   let frame = 0;
-  return ep.items.map((item, index) => {
+  const laid: LaidItem[] = ep.items.map((item, index) => {
     const f = itemFrames(item, fps);
     const start = frame / fps;
     frame += f.frames;
     return { item, index, start, end: frame / fps, ...f };
   });
+  moveClocks(laid, fps).forEach((clock, i) => {
+    if (clock) laid[i].clock = clock;
+  });
+  return laid;
 }
 
 /**

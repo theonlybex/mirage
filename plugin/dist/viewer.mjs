@@ -27368,7 +27368,15 @@ var TimelineItemSchema = strictObject2({
   /** No narration over this item (reveals, silences). */
   quiet: external_exports.boolean().default(false),
   /** Snap this item's length to whole beats of the music under it. */
-  onBeat: external_exports.boolean().default(false)
+  onBeat: external_exports.boolean().default(false),
+  /**
+   * Written by voice-over fitting, never by hand: fitting split item `item`, which had a move, to freeze its picture
+   * partway, and this item is one of its parts; `move` is that item's move as it was. The parts (the items next to each
+   * other with the same `splitFrom.item`) play the move on one clock, as the item would have with the frozen frames in
+   * it, so the picture doesn't jump at the seam: each part whose own `move` is still that one plays its share. A part
+   * whose `move` was changed plays it on its own. A full re-fit merges the parts back into the item.
+   */
+  splitFrom: strictObject2({ item: external_exports.string().min(1), move: MoveSchema }).optional()
 }).superRefine((it, ctx) => {
   if (it.src.out <= it.src.in) ctx.addIssue({ code: "custom", path: ["src"], message: `item ${it.id}: src.out must be greater than src.in` });
 });
@@ -28122,6 +28130,52 @@ function describeError(e) {
   return { message: err.message, hint: err.hint };
 }
 
+// packages/core/src/mirage/move.ts
+function sameMove(p, q) {
+  if (!p || !q) return p === q;
+  return p.zoom === q.zoom && p.ease === q.ease && p.start === q.start && p.end === q.end && p.focus?.x === q.focus?.x && p.focus?.y === q.focus?.y;
+}
+function splitShots(items) {
+  const out = [];
+  for (let i2 = 0; i2 < items.length; ) {
+    const shot = items[i2].splitFrom?.item;
+    let j = i2;
+    while (shot !== void 0 && j + 1 < items.length && items[j + 1].splitFrom?.item === shot) j++;
+    if (j > i2) out.push({ from: i2, to: j });
+    i2 = j + 1;
+  }
+  return out;
+}
+function moveClocks(laid, fps) {
+  const out = laid.map(() => void 0);
+  for (const { from, to } of splitShots(laid.map((l) => l.item))) {
+    const parts = laid.slice(from, to + 1);
+    const m = parts[0].item.splitFrom.move;
+    const offsets = [];
+    const srcStarts = [];
+    let frames = 0;
+    let src = 0;
+    for (const p of parts) {
+      offsets.push(frames);
+      srcStarts.push(src);
+      frames += p.frames;
+      src += p.srcFrames;
+    }
+    const last = parts.length - 1;
+    const at = (x) => {
+      const j = parts.findIndex((p, k) => x < srcStarts[k] + p.srcFrames);
+      return j < 0 ? offsets[last] + parts[last].srcFrames + (x - src) : offsets[j] + (x - srcStarts[j]);
+    };
+    const a2 = at(Math.round((m.start ?? 0) * fps));
+    const end2 = m.end === void 0 ? void 0 : Math.round(m.end * fps);
+    const b = end2 === void 0 ? frames : end2 <= 0 ? 0 : at(end2 - 1) + 1;
+    parts.forEach((p, k) => {
+      if (sameMove(p.item.move, m)) out[from + k] = { a: a2 - offsets[k], b: b - offsets[k] };
+    });
+  }
+  return out;
+}
+
 // packages/core/src/mirage/timeline.ts
 function itemFrames(item, fps) {
   const srcFrames = Math.max(1, Math.round((item.src.out - item.src.in) / item.speed * fps));
@@ -28131,12 +28185,16 @@ function itemFrames(item, fps) {
 function layoutTimeline(ep) {
   const fps = ep.output.fps;
   let frame = 0;
-  return ep.items.map((item, index) => {
+  const laid = ep.items.map((item, index) => {
     const f = itemFrames(item, fps);
     const start = frame / fps;
     frame += f.frames;
     return { item, index, start, end: frame / fps, ...f };
   });
+  moveClocks(laid, fps).forEach((clock, i2) => {
+    if (clock) laid[i2].clock = clock;
+  });
+  return laid;
 }
 function timelineDuration(ep) {
   const laid = layoutTimeline(ep);

@@ -7,7 +7,7 @@ import { checkEpisode } from './check.js';
 import { saveCatalog } from './ingest.js';
 import { saveEpisode } from './render-episode.js';
 import { cutOf } from './slots.js';
-import { fitVoiceover } from './voiceover.js';
+import { fitVoiceover, holdAt } from './voiceover.js';
 
 async function project(transcript: Catalog['clips'][number]['transcript']) {
   const dir = await mkdtemp(join(tmpdir(), 'we-check-'));
@@ -189,6 +189,32 @@ describe('checkEpisode', () => {
       "item c's move starts at 3.00 s, after the shot ends (3.00 s) — it never plays",
       "item d's move ends at 4.00 s, after the shot ends (3.00 s) — it stops at the end of the shot",
     ]);
+  });
+
+  it('warns that a move starting within half a frame of the shot end never plays, and not one that starts on its last frame', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base({
+      items: [
+        { id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 3 }, move: { zoom: 1.2, start: 2.99 } },
+        { id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 8 }, move: { zoom: 1.2, start: 2.98 } },
+      ],
+      music: [],
+    }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["item a's move starts at 2.99 s, after the shot ends (3.00 s) — it never plays"]);
+  });
+
+  it('gives no warning for a moving shot voice-over fitting split, and the person\'s own warning once', async () => {
+    const { dir, catalog } = await project({ words: [], segments: [], speech: [] });
+    const split = (move: object) =>
+      holdAt(base({ items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 6 }, move }, { id: 'b', beat: 'problem', clip: 'c001', src: { in: 7, out: 9 } }], music: [] }), catalog, 3, 1);
+    for (const move of [{ zoom: 1.2, start: 1, end: 6 }, { zoom: 1.2, start: 4, end: 6 }, { zoom: 1.2, start: 5.98 }, { zoom: 1.2 }]) {
+      await saveEpisode(dir, split(move));
+      expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    }
+    await saveEpisode(dir, split({ zoom: 1.2, end: 8 }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["item a's move ends at 8.00 s, after the shot ends (6.00 s) — it stops at the end of the shot"]);
+    await saveEpisode(dir, split({ zoom: 1.2, start: 6 }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["item a's move starts at 6.00 s, after the shot ends (6.00 s) — it never plays"]);
   });
 
   it('warns when an onBeat item could not reach a beat, saying why for an item that keeps its audio', async () => {

@@ -57,6 +57,28 @@ describe('moveFrames', () => {
     expect(f.map((p) => p.y)).toEqual([0.4, 0.4, 0.4]);
   });
 
+  it('eases in (slow, then faster) and out (fast, then slower) on a steady zoom rate', () => {
+    const exps = (ease: 'in' | 'out') => moveFrames(item({ move: { zoom: 2, ease } }), 5, 30).map((x) => Math.log2(x.zoom));
+    // p = 0, 0.25, 0.5, 0.75, 1: in is p², out is 1 − (1 − p)².
+    expect(exps('in')).toEqual([0, 0.0625, 0.25, 0.5625, 1].map((v) => expect.closeTo(v, 12)));
+    expect(exps('out')).toEqual([0, 0.4375, 0.75, 0.9375, 1].map((v) => expect.closeTo(v, 12)));
+  });
+
+  it('moves both focus axes when the move sets both', () => {
+    const f = moveFrames(item({ focus: { x: 0.2, y: 0.4 }, move: { zoom: 1.2, focus: { x: 0.8, y: 0.1 }, ease: 'linear' } }), 3, 30);
+    expect(f.map((p) => p.x)).toEqual([0.2, expect.closeTo(0.5, 12), 0.8]);
+    expect(f.map((p) => p.y)).toEqual([0.4, expect.closeTo(0.25, 12), 0.1]);
+  });
+
+  it('runs on a clock that replaces start and end, beginning before the item or ending after it', () => {
+    const m = item({ move: { zoom: 2, ease: 'linear' } });
+    // Frames −10 … 19 of a 30-frame move: this 10-frame item is its middle third.
+    const f = moveFrames(m, 10, 30, { a: -10, b: 20 });
+    expect(f.map((x) => Math.log2(x.zoom))).toEqual(Array.from({ length: 10 }, (_, i) => expect.closeTo((i + 10) / 29, 12)));
+    expect(moveFrames(m, 3, 30, { a: -5, b: -1 }).map((x) => x.zoom)).toEqual([2, 2, 2]);
+    expect(moveFrames(m, 3, 30, { a: 3, b: 9 }).map((x) => x.zoom)).toEqual([1, 1, 1]);
+  });
+
   it('moves from the item zoom, so a pull-out goes 1.5 to 1', () => {
     const f = moveFrames(item({ zoom: 1.5, move: { zoom: 1 } }), 10, 30);
     expect(f[0]!.zoom).toBe(1.5);
@@ -98,6 +120,12 @@ describe('moveFrames', () => {
     expect(f.every((p) => Number.isFinite(p.zoom))).toBe(true);
   });
 
+  it('cuts to the end value on the last frame when the move starts there', () => {
+    const f = moveFrames(item({ move: { zoom: 1.5, start: 0.98 } }), 30, 30);
+    expect(f[28]!.zoom).toBe(1);
+    expect(f[29]!.zoom).toBe(1.5);
+  });
+
   it('never plays a move that starts after the shot ends, and clamps one that ends after it', () => {
     const late = moveFrames(item({ move: { zoom: 1.5, start: 10 } }), 30, 30);
     expect(late.every((p) => p.zoom === 1)).toBe(true);
@@ -129,9 +157,9 @@ const evalExpr = (expr: string, n: number): number => {
 };
 
 describe('moveExprs', () => {
-  const agree = (it: ReturnType<typeof item>, frames: number) => {
-    const want = moveFrames(it, frames, 30);
-    const x = moveExprs(it, frames, 30, 'n');
+  const agree = (it: ReturnType<typeof item>, frames: number, clock?: { a: number; b: number }) => {
+    const want = moveFrames(it, frames, 30, clock);
+    const x = moveExprs(it, frames, 30, 'n', 0, clock);
     want.forEach((w, i) => {
       expect(evalExpr(`${x.e};${x.zoom}`, i)).toBeCloseTo(w.zoom, 9);
       expect(evalExpr(`${x.e};${x.x}`, i)).toBeCloseTo(w.x, 9);
@@ -151,6 +179,14 @@ describe('moveExprs', () => {
     agree(item({ move: { zoom: 1.5, start: 0, end: 10, ease: 'linear' } }), 30);
     agree(item({ hold: 1, move: { zoom: 1.2 } }), 180);
     agree(item({ move: { zoom: 1.5 } }), 1);
+  });
+  it('agrees on a clock that begins before the item or ends after it (a part of a split shot)', () => {
+    for (const e of ['linear', 'in', 'out', 'inOut'] as const) {
+      agree(item({ move: { zoom: 1.3, focus: { x: 0.1, y: 0.9 }, ease: e } }), 60, { a: -40, b: 50 });
+      agree(item({ move: { zoom: 1.3, ease: e } }), 60, { a: 10, b: 200 });
+    }
+    agree(item({ move: { zoom: 1.3 } }), 30, { a: -5, b: -4 });
+    expect(moveExprs(item({ move: { zoom: 1.2, ease: 'linear' } }), 60, 30, 'in', 1, { a: -40, b: 50 }).e).toBe('st(0,clip((in+39)/89,0,1))');
   });
   it('writes the eased progress once, in slot 0, and reads it back', () => {
     const x = moveExprs(item({ focus: { x: 0.5, y: 0.5 }, move: { zoom: 1.5, focus: { x: 0.25 }, ease: 'linear' } }), 60, 30, 'in');

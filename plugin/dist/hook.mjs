@@ -29242,7 +29242,15 @@ var init_episode = __esm({
       /** No narration over this item (reveals, silences). */
       quiet: external_exports.boolean().default(false),
       /** Snap this item's length to whole beats of the music under it. */
-      onBeat: external_exports.boolean().default(false)
+      onBeat: external_exports.boolean().default(false),
+      /**
+       * Written by voice-over fitting, never by hand: fitting split item `item`, which had a move, to freeze its picture
+       * partway, and this item is one of its parts; `move` is that item's move as it was. The parts (the items next to each
+       * other with the same `splitFrom.item`) play the move on one clock, as the item would have with the frozen frames in
+       * it, so the picture doesn't jump at the seam: each part whose own `move` is still that one plays its share. A part
+       * whose `move` was changed plays it on its own. A full re-fit merges the parts back into the item.
+       */
+      splitFrom: strictObject2({ item: external_exports.string().min(1), move: MoveSchema }).optional()
     }).superRefine((it, ctx) => {
       if (it.src.out <= it.src.in) ctx.addIssue({ code: "custom", path: ["src"], message: `item ${it.id}: src.out must be greater than src.in` });
     });
@@ -30382,6 +30390,126 @@ var init_errors4 = __esm({
   }
 });
 
+// packages/core/src/mirage/encode.ts
+function bitrateFor(width, height, fps) {
+  const longSide = Math.max(width, height);
+  if (longSide >= 3840) return "40M";
+  if (longSide >= 1920) return fps > 40 ? "12M" : "8M";
+  return "5M";
+}
+function encodeArgs(o2) {
+  const video = o2.mode === "preview" ? ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28"] : ["-c:v", o2.encoder.name, ...o2.encoder.extraArgs, "-b:v", bitrateFor(o2.width, o2.height, o2.fps), "-g", String(Math.round(o2.fps * 2))];
+  const audio = o2.mode === "preview" ? ["-c:a", "aac", "-b:a", "128k"] : ["-c:a", "aac", "-b:a", "384k"];
+  return [
+    ...video,
+    "-pix_fmt",
+    "yuv420p",
+    "-colorspace",
+    "bt709",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+    ...audio,
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-movflags",
+    "+faststart"
+  ];
+}
+var ffNum;
+var init_encode = __esm({
+  "packages/core/src/mirage/encode.ts"() {
+    "use strict";
+    ffNum = (n2) => String(Math.round(n2 * 1e6) / 1e6);
+  }
+});
+
+// packages/core/src/mirage/move.ts
+function moveSpan(item, frames, fps, clock) {
+  const m = item.move;
+  return {
+    z0: item.zoom,
+    z1: m?.zoom ?? item.zoom,
+    x0: item.focus.x,
+    x1: m?.focus?.x ?? item.focus.x,
+    y0: item.focus.y,
+    y1: m?.focus?.y ?? item.focus.y,
+    a: clock?.a ?? Math.round((m?.start ?? 0) * fps),
+    b: clock?.b ?? Math.round((m?.end ?? frames / fps) * fps)
+  };
+}
+function sameMove(p, q) {
+  if (!p || !q) return p === q;
+  return p.zoom === q.zoom && p.ease === q.ease && p.start === q.start && p.end === q.end && p.focus?.x === q.focus?.x && p.focus?.y === q.focus?.y;
+}
+function splitShots(items) {
+  const out = [];
+  for (let i2 = 0; i2 < items.length; ) {
+    const shot = items[i2].splitFrom?.item;
+    let j = i2;
+    while (shot !== void 0 && j + 1 < items.length && items[j + 1].splitFrom?.item === shot) j++;
+    if (j > i2) out.push({ from: i2, to: j });
+    i2 = j + 1;
+  }
+  return out;
+}
+function moveClocks(laid, fps) {
+  const out = laid.map(() => void 0);
+  for (const { from, to } of splitShots(laid.map((l) => l.item))) {
+    const parts = laid.slice(from, to + 1);
+    const m = parts[0].item.splitFrom.move;
+    const offsets = [];
+    const srcStarts = [];
+    let frames = 0;
+    let src = 0;
+    for (const p of parts) {
+      offsets.push(frames);
+      srcStarts.push(src);
+      frames += p.frames;
+      src += p.srcFrames;
+    }
+    const last = parts.length - 1;
+    const at2 = (x) => {
+      const j = parts.findIndex((p, k) => x < srcStarts[k] + p.srcFrames);
+      return j < 0 ? offsets[last] + parts[last].srcFrames + (x - src) : offsets[j] + (x - srcStarts[j]);
+    };
+    const a2 = at2(Math.round((m.start ?? 0) * fps));
+    const end = m.end === void 0 ? void 0 : Math.round(m.end * fps);
+    const b = end === void 0 ? frames : end <= 0 ? 0 : at2(end - 1) + 1;
+    parts.forEach((p, k) => {
+      if (sameMove(p.item.move, m)) out[from + k] = { a: a2 - offsets[k], b: b - offsets[k] };
+    });
+  }
+  return out;
+}
+function moveExprs(item, frames, fps, n2, first = 0, clock) {
+  const { z0, z1, x0, x1, y0, y1, a: a2, b } = moveSpan(item, frames, fps, clock);
+  const f = ffNum;
+  const at2 = a2 + first;
+  let e;
+  if (b - a2 <= 1) e = `st(0,gte(${n2},${at2}))`;
+  else {
+    const p = `st(0,clip(${at2 === 0 ? n2 : at2 < 0 ? `(${n2}+${-at2})` : `(${n2}-${at2})`}/${b - a2 - 1},0,1))`;
+    const curve = { linear: "", in: "ld(0)^2", out: "1-(1-ld(0))^2", inOut: "if(lt(ld(0),0.5),2*ld(0)^2,1-2*(1-ld(0))^2)" }[item.move.ease];
+    e = curve ? `${p};st(0,${curve})` : p;
+  }
+  return {
+    e,
+    zoom: z1 === z0 ? f(z0) : `${f(z0)}*(${f(z1)}/${f(z0)})^ld(0)`,
+    x: x1 === x0 ? f(x0) : `${f(x0)}+(${f(x1)}-${f(x0)})*ld(0)`,
+    y: y1 === y0 ? f(y0) : `${f(y0)}+(${f(y1)}-${f(y0)})*ld(0)`
+  };
+}
+var init_move = __esm({
+  "packages/core/src/mirage/move.ts"() {
+    "use strict";
+    init_encode();
+  }
+});
+
 // packages/core/src/mirage/timeline.ts
 import { createHash } from "node:crypto";
 function itemFrames(item, fps) {
@@ -30392,12 +30520,16 @@ function itemFrames(item, fps) {
 function layoutTimeline(ep) {
   const fps = ep.output.fps;
   let frame = 0;
-  return ep.items.map((item, index) => {
+  const laid = ep.items.map((item, index) => {
     const f = itemFrames(item, fps);
     const start = frame / fps;
     frame += f.frames;
     return { item, index, start, end: frame / fps, ...f };
   });
+  moveClocks(laid, fps).forEach((clock, i2) => {
+    if (clock) laid[i2].clock = clock;
+  });
+  return laid;
 }
 function itemsFingerprint(items) {
   const key = items.map((i2) => [i2.id, i2.clip, i2.src.in, i2.src.out, i2.speed, i2.hold]);
@@ -30440,6 +30572,7 @@ var EPS, shiftEdge, shiftRange;
 var init_timeline = __esm({
   "packages/core/src/mirage/timeline.ts"() {
     "use strict";
+    init_move();
     EPS = 1e-9;
     shiftEdge = (p, after, at2, delta) => after ? p + delta : delta < 0 ? Math.min(p, at2 + delta) : p;
     shiftRange = (r, at2, delta) => ({
@@ -31594,83 +31727,6 @@ var init_overlays = __esm({
   }
 });
 
-// packages/core/src/mirage/encode.ts
-function bitrateFor(width, height, fps) {
-  const longSide = Math.max(width, height);
-  if (longSide >= 3840) return "40M";
-  if (longSide >= 1920) return fps > 40 ? "12M" : "8M";
-  return "5M";
-}
-function encodeArgs(o2) {
-  const video = o2.mode === "preview" ? ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28"] : ["-c:v", o2.encoder.name, ...o2.encoder.extraArgs, "-b:v", bitrateFor(o2.width, o2.height, o2.fps), "-g", String(Math.round(o2.fps * 2))];
-  const audio = o2.mode === "preview" ? ["-c:a", "aac", "-b:a", "128k"] : ["-c:a", "aac", "-b:a", "384k"];
-  return [
-    ...video,
-    "-pix_fmt",
-    "yuv420p",
-    "-colorspace",
-    "bt709",
-    "-color_primaries",
-    "bt709",
-    "-color_trc",
-    "bt709",
-    ...audio,
-    "-ar",
-    "48000",
-    "-ac",
-    "2",
-    "-movflags",
-    "+faststart"
-  ];
-}
-var ffNum;
-var init_encode = __esm({
-  "packages/core/src/mirage/encode.ts"() {
-    "use strict";
-    ffNum = (n2) => String(Math.round(n2 * 1e6) / 1e6);
-  }
-});
-
-// packages/core/src/mirage/move.ts
-function moveSpan(item, frames, fps) {
-  const m = item.move;
-  return {
-    z0: item.zoom,
-    z1: m?.zoom ?? item.zoom,
-    x0: item.focus.x,
-    x1: m?.focus?.x ?? item.focus.x,
-    y0: item.focus.y,
-    y1: m?.focus?.y ?? item.focus.y,
-    a: Math.round((m?.start ?? 0) * fps),
-    b: Math.round((m?.end ?? frames / fps) * fps)
-  };
-}
-function moveExprs(item, frames, fps, n2, first = 0) {
-  const { z0, z1, x0, x1, y0, y1, a: a2, b } = moveSpan(item, frames, fps);
-  const f = ffNum;
-  const at2 = a2 + first;
-  let e;
-  if (!item.move) e = "st(0,0)";
-  else if (b - a2 <= 1) e = `st(0,gte(${n2},${at2}))`;
-  else {
-    const p = `st(0,clip(${at2 === 0 ? n2 : `(${n2}-${at2})`}/${b - a2 - 1},0,1))`;
-    const curve = { linear: "", in: "ld(0)^2", out: "1-(1-ld(0))^2", inOut: "if(lt(ld(0),0.5),2*ld(0)^2,1-2*(1-ld(0))^2)" }[item.move.ease];
-    e = curve ? `${p};st(0,${curve})` : p;
-  }
-  return {
-    e,
-    zoom: z1 === z0 ? f(z0) : `${f(z0)}*(${f(z1)}/${f(z0)})^ld(0)`,
-    x: x1 === x0 ? f(x0) : `${f(x0)}+(${f(x1)}-${f(x0)})*ld(0)`,
-    y: y1 === y0 ? f(y0) : `${f(y0)}+(${f(y1)}-${f(y0)})*ld(0)`
-  };
-}
-var init_move = __esm({
-  "packages/core/src/mirage/move.ts"() {
-    "use strict";
-    init_encode();
-  }
-});
-
 // packages/core/src/mirage/slots.ts
 function computeSlots(ep, catalog, o2 = {}) {
   const minLen = o2.minLen ?? 2.5;
@@ -31881,8 +31937,10 @@ function openAt(ep, catalog, t, delta) {
   const ids = new Set(ep.items.map((x) => x.id));
   let suffix = "b";
   while (ids.has(`${item.id}-${suffix}`)) suffix = String.fromCharCode(suffix.charCodeAt(0) + 1);
-  const first = checkHold({ ...item, src: { in: item.src.in, out: splitSrc }, hold: r62(delta) });
-  const second = { ...item, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
+  const own2 = item.move && !(item.splitFrom && sameMove(item.move, item.splitFrom.move));
+  const parts = own2 ? { splitFrom: { item: item.id, move: item.move } } : {};
+  const first = checkHold({ ...item, ...parts, src: { in: item.src.in, out: splitSrc }, hold: r62(delta) });
+  const second = { ...item, ...parts, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
   const at2 = l.start + splitFrames / fps;
   return { episode: { ...shiftAfter(ep, at2, delta), items }, hold: { at: r62(at2), sec: r62(delta), item: item.id, hold: first.hold, split: second.id } };
@@ -31899,22 +31957,39 @@ function undoFitEdits(ep) {
     if (h2.outAdded && h2.out !== void 0 && Math.abs(item.src.out - h2.out) < 1e-6 && item.src.out - h2.outAdded > item.src.in) {
       next = { ...next, src: { in: item.src.in, out: r62(item.src.out - h2.outAdded) } };
     }
-    const items = [...out.items];
+    const items2 = [...out.items];
     const end = laid[i2].end;
     let frames = laid[i2].frames;
     const b = out.items[i2 + 1];
     const same = (k) => b !== void 0 && b[k] === item[k];
     const sameFocus = b !== void 0 && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
-    if (h2.split && next.hold === 0 && b?.id === h2.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && ["clip", "speed", "audio", "zoom", "frame", "quiet", "onBeat", "beat"].every(same)) {
+    const asSplit = (x) => sameMove(x.move, x.splitFrom?.move);
+    const sameMoves = b !== void 0 && b.splitFrom?.item === item.splitFrom?.item && sameMove(b.splitFrom?.move, item.splitFrom?.move) && asSplit(item) && asSplit(b);
+    if (h2.split && next.hold === 0 && b?.id === h2.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && ["clip", "speed", "audio", "zoom", "frame", "quiet", "onBeat", "beat"].every(same)) {
       next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold };
-      items.splice(i2 + 1, 1);
+      items2.splice(i2 + 1, 1);
       frames += laid[i2 + 1].frames;
     }
-    items[i2] = next;
+    items2[i2] = next;
     const removed = (frames - itemFrames(next, fps).frames) / fps;
-    out = { ...removed > 1e-9 ? shiftAfter(out, end, -removed) : out, items };
+    out = { ...removed > 1e-9 ? shiftAfter(out, end, -removed) : out, items: items2 };
   }
+  const items = out.items;
+  const alone = (i2) => !items[i2].splitFrom || ![items[i2 - 1], items[i2 + 1]].some((x) => x?.splitFrom?.item === items[i2].splitFrom.item);
+  out = { ...out, items: items.map((x, i2) => x.splitFrom && alone(i2) ? withoutSplit(x) : x) };
   return dropCollapsed(out, ep);
+}
+function withoutSplit(item) {
+  const { splitFrom: _, ...rest } = item;
+  return rest;
+}
+function withLook(base, now) {
+  const out = { ...base };
+  for (const k of LOOK) {
+    if (now[k] === void 0) delete out[k];
+    else out[k] = now[k];
+  }
+  return out;
 }
 function revertHolds(ep) {
   const vo = ep.voiceover;
@@ -31922,7 +31997,9 @@ function revertHolds(ep) {
   let out = ep;
   for (const h2 of [...vo.holds ?? []].reverse()) out = shiftAfter(out, h2.at + h2.sec, -h2.sec);
   const r6s = (x) => ({ ...x, start: r62(x.start), end: r62(x.end) });
-  out = { ...out, items: vo.baseItems, overlays: out.overlays.map(r6s), music: out.music.map(r6s), slots: out.slots.map(r6s), voiceover: null };
+  const now = new Map(ep.items.map((x) => [x.id, x]));
+  const items = vo.baseItems.map((x) => now.has(x.id) ? withLook(x, now.get(x.id)) : x);
+  out = { ...out, items, overlays: out.overlays.map(r6s), music: out.music.map(r6s), slots: out.slots.map(r6s), voiceover: null };
   return dropCollapsed(out, ep);
 }
 function lcsLength(a2, b) {
@@ -32162,13 +32239,14 @@ function fitVoiceover(o2) {
   const lines = [...vo.lines].sort((a2, b) => a2.at - b.at);
   return { episode: EpisodeSchema.parse({ ...ep, slotsCut: cutOf(ep), voiceover: { ...vo, lines, fittedItemsFingerprint: itemsFingerprint(ep.items) } }), report };
 }
-var r37, r62, hasWords, notEnglish, MAX_HOLD, HOLD_HINT, placedStatus, RESTART_WORDS, MAX_RESTART_GAP, MAX_SPAN_SENTENCES, worth;
+var r37, r62, hasWords, notEnglish, MAX_HOLD, HOLD_HINT, placedStatus, LOOK, RESTART_WORDS, MAX_RESTART_GAP, MAX_SPAN_SENTENCES, worth;
 var init_voiceover = __esm({
   "packages/core/src/mirage/voiceover.ts"() {
     "use strict";
     init_src();
     init_takes2();
     init_errors4();
+    init_move();
     init_overlays();
     init_slots();
     init_timeline();
@@ -32179,6 +32257,7 @@ var init_voiceover = __esm({
     MAX_HOLD = 10;
     HOLD_HINT = "Shorten the line, or give it a longer slot by extending the picture";
     placedStatus = (s) => s === "placed" || s === "partial";
+    LOOK = ["beat", "zoom", "frame", "focus", "move", "quiet", "onBeat"];
     RESTART_WORDS = 3;
     MAX_RESTART_GAP = 25;
     MAX_SPAN_SENTENCES = 6;
@@ -32254,7 +32333,7 @@ function moveFilters(l, k, o2, src) {
   const fit = fill ? "max" : "min";
   const larger = !!src.width && !!src.height && Math[fit](W / src.width, H / src.height) * zMax < 1;
   const pre = larger ? `scale=w='trunc(iw*${fit}(${W}/iw,${H}/ih)*${ffNum(zMax)}/2)*2':h=-2,` : "";
-  const { e, zoom, x, y } = moveExprs(item, l.frames, o2.fps, "in", 1);
+  const { e, zoom, x, y } = moveExprs(item, l.frames, o2.fps, "in", 1, l.clock);
   const [w, h2] = fill ? [`min(W,H*${W}/${H})`, `min(H,W*${H}/${W})`] : ["W", "H"];
   const left = `${e};st(1,${w}/(${zoom}));(W-ld(1))*(${x})`;
   const top = `${e};st(1,${h2}/(${zoom}));(H-ld(1))*(${y})`;
@@ -33061,12 +33140,23 @@ function timelineWarnings(ep, lib, snapped) {
     if (o2.start >= D - 1e-6) out.push(`overlay ${i2 + 1} ("${o2.text}") starts at ${s2(o2.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never show`);
     if (undrawable(o2.text)) out.push(`overlay ${i2 + 1} ("${o2.text}") has emoji, which can't be drawn \u2014 they are left out`);
   });
-  for (const l of layoutTimeline(ep)) {
+  const fps = ep.output.fps;
+  const moveWarning = (id, m, frames) => {
+    const len = frames / fps;
+    if (m.start !== void 0 && Math.round(m.start * fps) >= frames) out.push(`item ${id}'s move starts at ${s2(m.start)} s, after the shot ends (${s2(len)} s) \u2014 it never plays`);
+    else if (m.end !== void 0 && m.end > len + 0.5 / fps) out.push(`item ${id}'s move ends at ${s2(m.end)} s, after the shot ends (${s2(len)} s) \u2014 it stops at the end of the shot`);
+  };
+  const laid = layoutTimeline(ep);
+  const shotAt = new Map(splitShots(ep.items).map((s) => [s.to, s]));
+  for (const l of laid) {
     const m = l.item.move;
-    if (!m) continue;
-    const len = l.frames / ep.output.fps;
-    if (m.start !== void 0 && m.start >= len - 1e-6) out.push(`item ${l.item.id}'s move starts at ${s2(m.start)} s, after the shot ends (${s2(len)} s) \u2014 it never plays`);
-    else if (m.end !== void 0 && m.end > len + 0.5 / ep.output.fps) out.push(`item ${l.item.id}'s move ends at ${s2(m.end)} s, after the shot ends (${s2(len)} s) \u2014 it stops at the end of the shot`);
+    if (m && !l.clock) moveWarning(l.item.id, m, l.frames);
+    const shot = shotAt.get(l.index);
+    if (!shot) continue;
+    const parts = laid.slice(shot.from, shot.to + 1);
+    if (!parts.some((p) => p.clock)) continue;
+    const frames = parts.reduce((s, p) => s + p.srcFrames, 0) + l.holdFrames;
+    moveWarning(l.item.splitFrom.item, l.item.splitFrom.move, frames);
   }
   ep.music.forEach((c3, i2) => {
     if (c3.start >= D - 1e-6) out.push(`music cue ${i2 + 1} (${c3.track}) starts at ${s2(c3.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never play`);
@@ -33140,6 +33230,7 @@ var init_check = __esm({
     "use strict";
     init_ingest();
     init_music();
+    init_move();
     init_overlays();
     init_render_episode();
     init_slots();

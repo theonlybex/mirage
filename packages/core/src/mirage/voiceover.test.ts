@@ -1,5 +1,6 @@
-import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
+import { EpisodeSchema, type Catalog, type Episode, type Move, type Transcript, type Word } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
+import { moveFrames } from './move.js';
 import { keptSegments } from './overlays.js';
 import { cutOf } from './slots.js';
 import { cutChanged, fitVoiceover, hasWords, holdAt, lineChanges, lineChangeWarnings, missingSlots, notEnglish } from './voiceover.js';
@@ -476,6 +477,128 @@ describe('fitVoiceover from the cut before the voice-over', () => {
     const recut = { ...first.episode, items: [first.episode.items[0], { ...first.episode.items[1], src: { in: 0, out: 9 } }] };
     const refit = fitVoiceover({ episode: { ...recut, slotsCut: cutOf(recut) }, catalog: catalog(20), recording: 'short.m4a', transcript: tx(said(LONG, 0, 0.3)) });
     expect(refit.episode.items.map((i) => [i.id, i.src.in, i.src.out, i.hold])).toEqual([['a', 15, 20, 1], ['b', 0, 9, 0]]);
+  });
+});
+
+describe('a move across voice-over fits', () => {
+  const ep30 = (items: object[]) => EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items });
+  /** The zoom and focus of every output frame, as render plays them. */
+  const played = (e: Episode) => layoutTimeline(e).flatMap((l) => moveFrames(l.item, l.frames, 30, l.clock));
+  /** The largest change of zoom, x or y from one frame to the next. */
+  const maxStep = (f: { zoom: number; x: number; y: number }[]) => Math.max(...f.slice(1).map((p, i) => Math.max(Math.abs(p.zoom - f[i].zoom), Math.abs(p.x - f[i].x), Math.abs(p.y - f[i].y))));
+  const same = (got: ReturnType<typeof played>, want: ReturnType<typeof played>) => {
+    expect(got).toHaveLength(want.length);
+    got.forEach((g, i) => {
+      expect(g.zoom).toBeCloseTo(want[i].zoom, 9);
+      expect(g.x).toBeCloseTo(want[i].x, 9);
+      expect(g.y).toBeCloseTo(want[i].y, 9);
+    });
+  };
+  const shot = { id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 6 }, focus: { x: 0.4, y: 0.6 } };
+
+  it('a split shot plays its move on through the frozen frame, on one clock, with no jump at the seam', () => {
+    // A 6 s shot frozen for 1 s at 3 s: the move plays as on a 7 s shot whose times after 3 s come 1 s later (a move
+    // starting at 3 s starts after the freeze; one ending at 3 s has arrived before it).
+    const later = (t: number | undefined, after: boolean) => (t !== undefined && (after ? t >= 3 : t > 3) ? t + 1 : t);
+    const moves: Partial<Move>[] = [
+      { zoom: 1.2 },
+      { zoom: 1.3, ease: 'in', focus: { x: 0.2, y: 0.8 }, start: 2, end: 4 },
+      { zoom: 1.3, ease: 'out', start: 0.5, end: 2 },
+      { zoom: 1.3, ease: 'linear', focus: { y: 0.1 }, start: 4, end: 5.5 },
+      { zoom: 1.5, start: 1, end: 6 },
+      { zoom: 1.5, start: 3, end: 4 },
+      { zoom: 1.5, start: 1, end: 3 },
+      { zoom: 1.5, start: 2.9, end: 3.1 },
+    ];
+    for (const move of moves) {
+      const ep = ep30([{ ...shot, move }]);
+      const held = holdAt(ep, catalog(20), 3, 1);
+      expect(held.items.map((i) => [i.id, i.src.in, i.src.out, i.hold, i.splitFrom?.item])).toEqual([['a', 0, 3, 1, 'a'], ['a-b', 3, 6, 0, 'a']]);
+      const m = ep.items[0].move!;
+      const want = moveFrames(ep30([{ ...shot, move: { ...m, start: later(m.start, true), end: later(m.end, false) } }]).items[0], 210, 30);
+      const got = played(held);
+      same(got, want);
+      // No jump: no step between frames bigger than the unsplit shot's largest.
+      expect(maxStep(got)).toBeLessThanOrEqual(maxStep(moveFrames(ep.items[0], 180, 30)) + 1e-12);
+    }
+  });
+
+  it('keeps one clock across a second split, a freeze inside a frozen frame and source added at the end', () => {
+    const ep = ep30([{ ...shot, move: { zoom: 1.2 } }]);
+    let held = holdAt(ep, catalog(20), 3, 1); // a | freeze | a-b
+    held = holdAt(held, catalog(20), 5.5, 0.5); // a-b split at 1.5 s into it
+    held = holdAt(held, catalog(20), 3.5, 0.5); // inside a's freeze: it freezes longer
+    held = holdAt(held, catalog(20), timelineDuration(held), 0.5); // the end: the last part gets more source
+    expect(held.items.map((i) => [i.id, i.src.in, i.src.out, i.hold])).toEqual([['a', 0, 3, 1.5], ['a-b', 3, 4.5, 0.5], ['a-b-b', 4.5, 6.5, 0]]);
+    same(played(held), moveFrames(ep.items[0], 255, 30));
+  });
+
+  it('still arrives at the end of a shot that fitting gave more source or a frozen end', () => {
+    const ep = ep30([{ ...shot, src: { in: 0, out: 5 }, move: { zoom: 1.2 } }]);
+    for (const [clip, out, hold] of [[5.5, 5.5, 0.5], [5, 5, 1]] as const) {
+      const held = holdAt(ep, catalog(clip), 5, 1);
+      expect([held.items[0].src.out, held.items[0].hold]).toEqual([out, hold]);
+      const got = played(held);
+      expect(got).toHaveLength(180);
+      expect(got[179].zoom).toBe(1.2);
+      same(got, moveFrames(ep.items[0], 180, 30));
+    }
+  });
+
+  const withMove = (move: object) => EpisodeSchema.parse({ ...episode(SLOTS), items: [{ ...episode(SLOTS).items[0], move }] });
+  const tail = { id: 'c', beat: 'outro' as const, clip: 'c001', src: { in: 0, out: 2 }, speed: 1, audio: 'mute' as const, zoom: 1, frame: 'fit' as const, focus: { x: 0.5, y: 0.5 }, hold: 0, quiet: false, onBeat: false };
+  const short = tx([...said('This is the first line.', 2), ...said('And here is the second one.', 4, 0.2)]);
+  const recutAndRefit = (e: Episode) => {
+    const recut = { ...e, items: [...e.items, tail] };
+    return fitVoiceover({ episode: { ...recut, slotsCut: cutOf(recut) }, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
+  };
+
+  it('a fit that splits a moving item plays the move on, and a full re-fit gives back the item exactly', () => {
+    const ep0 = withMove({ zoom: 1.3, focus: { x: 0.7 }, start: 4, end: 14 });
+    const first = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    expect(first.items.map((i) => [i.id, i.splitFrom?.item])).toEqual([['a', 'a'], ['a-b', 'a']]);
+    expect(maxStep(played(first))).toBeLessThanOrEqual(maxStep(moveFrames(ep0.items[0], 600, 30)) + 1e-12);
+    // No re-cut: the items before the fit.
+    const again = fitVoiceover({ episode: first, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
+    expect(again.items).toStrictEqual(ep0.items);
+    // After a re-cut: the split undone, the halves merged into the item with its move.
+    const refit = recutAndRefit(first);
+    expect(refit.items[0]).toStrictEqual(ep0.items[0]);
+    expect(refit.items).toEqual([ep0.items[0], tail]);
+  });
+
+  it('a full re-fit after a re-cut leaves apart the halves of a split whose move the person changed', () => {
+    const ep0 = withMove({ zoom: 1.3 });
+    const first = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    const edits: [string, (x: Episode['items'][number]) => Episode['items'][number]][] = [
+      ['the second half', (x) => (x.id === 'a-b' ? { ...x, move: { ...x.move!, zoom: 1.4 } } : x)],
+      ['both halves alike', (x) => ({ ...x, move: { ...x.move!, zoom: 1.4 } })],
+      ['the move removed from both', ({ move: _, ...x }) => x],
+    ];
+    for (const [, edit] of edits) {
+      const edited = { ...first, items: first.items.map(edit) };
+      const refit = recutAndRefit(edited);
+      expect(refit.items.map((i) => [i.id, i.hold, i.move?.zoom])).toEqual([['a', 0, edited.items[0].move?.zoom], ['a-b', 0, edited.items[1].move?.zoom], ['c', 0, undefined]]);
+    }    // A move the person added to both halves of a split item that had none.
+    const plain = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    const added = { ...plain, items: plain.items.map((x) => ({ ...x, move: { zoom: 1.2, ease: 'inOut' as const } })) };
+    expect(recutAndRefit(added).items.map((i) => [i.id, i.hold, i.move?.zoom])).toEqual([['a', 0, 1.2], ['a-b', 0, 1.2], ['c', 0, undefined]]);
+  });
+
+  it('a full re-fit keeps a move, zoom, focus and frame the person gave an item after the first fit', () => {
+    const first = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    expect(first.items.map((i) => i.id)).toEqual(['a', 'a-b']);
+    const look = { move: { zoom: 1.4, ease: 'out' as const, start: 1 }, zoom: 1.1, focus: { x: 0.3, y: 0.2 }, frame: 'fill' as const };
+    const edited = { ...first, items: first.items.map((x) => (x.id === 'a' ? { ...x, ...look } : x)) };
+    const again = fitVoiceover({ episode: edited, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
+    expect(again.items).toStrictEqual([{ ...episode(SLOTS).items[0], ...look }]);
+    // Fitted again with the long line: split again, and the new move plays across the parts.
+    const refit = fitVoiceover({ episode: edited, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    expect(refit.items.map((i) => [i.id, i.move, i.splitFrom?.item])).toEqual([['a', look.move, 'a'], ['a-b', look.move, 'a']]);
+    // And a move the person removed stays removed.
+    const removed = fitVoiceover({ episode: { ...refit, items: refit.items.map(({ move: _, ...x }) => x) }, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
+    expect(removed.items[0].move).toBeUndefined();
+    expect('move' in removed.items[0]).toBe(false);
   });
 });
 

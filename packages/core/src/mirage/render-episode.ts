@@ -151,7 +151,7 @@ function moveFilters(l: LaidItem, k: number, o: { width: number; height: number;
   const pre = larger ? `scale=w='trunc(iw*${fit}(${W}/iw,${H}/ih)*${ffNum(zMax)}/2)*2':h=-2,` : '';
   // The window: the picture over the zoom (for fill, cut to the output's shape), its corner at (W−w)·x, (H−h)·y.
   // perspective counts frames from 1.
-  const { e, zoom, x, y } = moveExprs(item, l.frames, o.fps, 'in', 1);
+  const { e, zoom, x, y } = moveExprs(item, l.frames, o.fps, 'in', 1, l.clock);
   const [w, h] = fill ? [`min(W,H*${W}/${H})`, `min(H,W*${H}/${W})`] : ['W', 'H'];
   const left = `${e};st(1,${w}/(${zoom}));(W-ld(1))*(${x})`;
   const top = `${e};st(1,${h}/(${zoom}));(H-ld(1))*(${y})`;

@@ -1,6 +1,7 @@
 import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { isFiller, joinCompounds, matchTokens, normalizeWord, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
 import { MirageError } from './errors.js';
+import { sameMove } from './move.js';
 import { keptSegments } from './overlays.js';
 import { cutOf, slotsStale, slotsStaleError } from './slots.js';
 import { dropCollapsed, itemFrames, itemsFingerprint, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
@@ -151,8 +152,13 @@ function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { epis
   const ids = new Set(ep.items.map((x) => x.id));
   let suffix = 'b';
   while (ids.has(`${item.id}-${suffix}`)) suffix = String.fromCharCode(suffix.charCodeAt(0) + 1);
-  const first = checkHold({ ...item, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) });
-  const second = { ...item, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
+  // A shot with a move plays it across its parts on one clock (layoutTimeline's clocks), so it carries on through the
+  // frozen frame instead of starting again after it. A part of a split shot stays a part of it; a part whose move the
+  // person changed is a shot of its own.
+  const own = item.move && !(item.splitFrom && sameMove(item.move, item.splitFrom.move));
+  const parts = own ? { splitFrom: { item: item.id, move: item.move! } } : {};
+  const first = checkHold({ ...item, ...parts, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) });
+  const second = { ...item, ...parts, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
   const at = l.start + splitFrames / fps;
   return { episode: { ...shiftAfter(ep, at, delta), items }, hold: { at: r6(at), sec: r6(delta), item: item.id, hold: first.hold, split: second.id } };
@@ -162,7 +168,8 @@ function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { epis
  * After a re-cut, undoes what earlier fits did to items that are still there (newest first): the frozen frames they
  * added (never more than the item still has, so a hold the user wrote stays), source they added (when the item still
  * ends where the fit left it), and splits (merged back when both halves are still side by side and unchanged at the
- * seam). The time removed closes at the item's end, moving everything after it back.
+ * seam, their moves included: a split shot's parts merge back into the item with the move it had, and parts whose move
+ * the person changed stay apart). The time removed closes at the item's end, moving everything after it back.
  */
 export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[] } {
   const fps = ep.output.fps;
@@ -183,7 +190,11 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
     const b = out.items[i + 1];
     const same = (k: 'clip' | 'speed' | 'audio' | 'zoom' | 'frame' | 'quiet' | 'onBeat' | 'beat') => b !== undefined && b[k] === item[k];
     const sameFocus = b !== undefined && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
-    if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && (['clip', 'speed', 'audio', 'zoom', 'frame', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
+    // The halves' moves are as the split left them: the split shot's move, or none when the item had none (a move the
+    // person changed or added on either half keeps them apart, like a changed zoom on one).
+    const asSplit = (x: typeof item) => sameMove(x.move, x.splitFrom?.move);
+    const sameMoves = b !== undefined && b.splitFrom?.item === item.splitFrom?.item && sameMove(b.splitFrom?.move, item.splitFrom?.move) && asSplit(item) && asSplit(b);
+    if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && (['clip', 'speed', 'audio', 'zoom', 'frame', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
       next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold };
       items.splice(i + 1, 1);
       frames += laid[i + 1].frames;
@@ -192,13 +203,40 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
     const removed = (frames - itemFrames(next, fps).frames) / fps;
     out = { ...(removed > 1e-9 ? shiftAfter(out, end, -removed) : out), items };
   }
+  // A split shot merged back whole is the item it was: no part of anything.
+  const items = out.items;
+  const alone = (i: number) => !items[i].splitFrom || ![items[i - 1], items[i + 1]].some((x) => x?.splitFrom?.item === items[i].splitFrom!.item);
+  out = { ...out, items: items.map((x, i) => (x.splitFrom && alone(i) ? withoutSplit(x) : x)) };
   return dropCollapsed(out, ep);
+}
+
+function withoutSplit(item: Episode['items'][number]): typeof item {
+  const { splitFrom: _, ...rest } = item;
+  return rest;
+}
+
+/**
+ * The item fields that don't change the timing (the schema's others: id, clip, src, speed, audio and hold do, and
+ * splitFrom is fitting's): a full re-fit keeps the person's current ones.
+ */
+const LOOK = ['beat', 'zoom', 'frame', 'focus', 'move', 'quiet', 'onBeat'] as const;
+
+/** `base` with the LOOK fields of `now` (a field absent from `now` is removed). */
+function withLook(base: Episode['items'][number], now: Episode['items'][number]): typeof base {
+  const out: Record<string, unknown> = { ...base };
+  for (const k of LOOK) {
+    if (now[k] === undefined) delete out[k];
+    else out[k] = now[k];
+  }
+  return out as typeof base;
 }
 
 /**
  * The episode as it was before its voice-over's fits held the picture: the items before the first fit, and every
  * overlay, cue and slot moved back by closing the time each hold opened (newest first). Ranges that were inside a
- * frozen frame shrink to nothing and are dropped (named in `dropped`). The voice-over is cleared.
+ * frozen frame shrink to nothing and are dropped (named in `dropped`). The voice-over is cleared. Each item keeps the
+ * look the person gave it since (LOOK: move, zoom, focus, frame, …, from the item with its id now — for a split
+ * item, its first part).
  */
 export function revertHolds(ep: Episode): { episode: Episode; dropped: string[] } {
   const vo = ep.voiceover;
@@ -206,7 +244,9 @@ export function revertHolds(ep: Episode): { episode: Episode; dropped: string[] 
   let out: Episode = ep;
   for (const h of [...(vo.holds ?? [])].reverse()) out = shiftAfter(out, h.at + h.sec, -h.sec);
   const r6s = <T extends { start: number; end: number }>(x: T): T => ({ ...x, start: r6(x.start), end: r6(x.end) });
-  out = { ...out, items: vo.baseItems, overlays: out.overlays.map(r6s), music: out.music.map(r6s), slots: out.slots.map(r6s), voiceover: null };
+  const now = new Map(ep.items.map((x) => [x.id, x]));
+  const items = vo.baseItems.map((x) => (now.has(x.id) ? withLook(x, now.get(x.id)!) : x));
+  out = { ...out, items, overlays: out.overlays.map(r6s), music: out.music.map(r6s), slots: out.slots.map(r6s), voiceover: null };
   return dropCollapsed(out, ep);
 }
 

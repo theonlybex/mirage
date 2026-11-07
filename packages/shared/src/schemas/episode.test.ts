@@ -84,7 +84,7 @@ describe('EpisodeSchema unknown keys', () => {
   it('rejects a misspelled key anywhere, naming it and the valid keys', () => {
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [item, { ...item, id: 'i2', speeed: 2 }] }))).toEqual({
       path: ['items', 1],
-      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, frame, focus, move, hold, quiet, onBeat)',
+      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, frame, focus, move, hold, quiet, onBeat, splitFrom)',
     });
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, extra: 1 }))?.message).toMatch(/^unknown key "extra" \(valid keys: version, number, title, /);
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [{ ...item, src: { in: 0, out: 2, end: 3 } }] }))?.path).toEqual(['items', 0, 'src']);

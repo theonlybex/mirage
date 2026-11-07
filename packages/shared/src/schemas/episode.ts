@@ -53,6 +53,14 @@ export const TimelineItemSchema = strictObject({
   quiet: z.boolean().default(false),
   /** Snap this item's length to whole beats of the music under it. */
   onBeat: z.boolean().default(false),
+  /**
+   * Written by voice-over fitting, never by hand: fitting split item `item`, which had a move, to freeze its picture
+   * partway, and this item is one of its parts; `move` is that item's move as it was. The parts (the items next to each
+   * other with the same `splitFrom.item`) play the move on one clock, as the item would have with the frozen frames in
+   * it, so the picture doesn't jump at the seam: each part whose own `move` is still that one plays its share. A part
+   * whose `move` was changed plays it on its own. A full re-fit merges the parts back into the item.
+   */
+  splitFrom: strictObject({ item: z.string().min(1), move: MoveSchema }).optional(),
 }).superRefine((it, ctx) => {
   if (it.src.out <= it.src.in) ctx.addIssue({ code: 'custom', path: ['src'], message: `item ${it.id}: src.out must be greater than src.in` });
 });

@@ -1,7 +1,8 @@
 import { join, resolve } from 'node:path';
-import type { Episode, MusicLibrary } from '@wordedits/shared';
+import type { Episode, Move, MusicLibrary } from '@wordedits/shared';
 import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
+import { splitShots } from './move.js';
 import { undrawable } from './overlays.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { slotsStale } from './slots.js';
@@ -21,13 +22,27 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
     if (o.start >= D - 1e-6) out.push(`overlay ${i + 1} ("${o.text}") starts at ${s2(o.start)} s, after the episode ends (${s2(D)} s) — it will never show`);
     if (undrawable(o.text)) out.push(`overlay ${i + 1} ("${o.text}") has emoji, which can't be drawn — they are left out`);
   });
-  // A move's times are seconds of the shot's output length, held frames included.
-  for (const l of layoutTimeline(ep)) {
+  // A move's times are seconds of the shot's output length, held frames included. It never plays when it starts on the
+  // frame after the shot's last (moveFrames' timing).
+  const fps = ep.output.fps;
+  const moveWarning = (id: string, m: Move, frames: number) => {
+    const len = frames / fps;
+    if (m.start !== undefined && Math.round(m.start * fps) >= frames) out.push(`item ${id}'s move starts at ${s2(m.start)} s, after the shot ends (${s2(len)} s) — it never plays`);
+    else if (m.end !== undefined && m.end > len + 0.5 / fps) out.push(`item ${id}'s move ends at ${s2(m.end)} s, after the shot ends (${s2(len)} s) — it stops at the end of the shot`);
+  };
+  const laid = layoutTimeline(ep);
+  // The parts of a shot voice-over fitting split play its move on one clock: checked once, as the shot was before the
+  // fit froze frames inside it (its source frames and its end hold), so fitting never causes a warning.
+  const shotAt = new Map(splitShots(ep.items).map((s) => [s.to, s]));
+  for (const l of laid) {
     const m = l.item.move;
-    if (!m) continue;
-    const len = l.frames / ep.output.fps;
-    if (m.start !== undefined && m.start >= len - 1e-6) out.push(`item ${l.item.id}'s move starts at ${s2(m.start)} s, after the shot ends (${s2(len)} s) — it never plays`);
-    else if (m.end !== undefined && m.end > len + 0.5 / ep.output.fps) out.push(`item ${l.item.id}'s move ends at ${s2(m.end)} s, after the shot ends (${s2(len)} s) — it stops at the end of the shot`);
+    if (m && !l.clock) moveWarning(l.item.id, m, l.frames);
+    const shot = shotAt.get(l.index);
+    if (!shot) continue;
+    const parts = laid.slice(shot.from, shot.to + 1);
+    if (!parts.some((p) => p.clock)) continue;
+    const frames = parts.reduce((s, p) => s + p.srcFrames, 0) + l.holdFrames;
+    moveWarning(l.item.splitFrom!.item, l.item.splitFrom!.move, frames);
   }
   ep.music.forEach((c, i) => {
     if (c.start >= D - 1e-6) out.push(`music cue ${i + 1} (${c.track}) starts at ${s2(c.start)} s, after the episode ends (${s2(D)} s) — it will never play`);
