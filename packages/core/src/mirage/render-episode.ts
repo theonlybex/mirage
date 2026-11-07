@@ -2,13 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type TimelineItem, type Transcript, type VoiceLine } from '@wordedits/shared';
+import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type SfxCue, type TimelineItem, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { encodeArgs, ffNum } from './encode.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 import { asCancelled } from './cancel.js';
 import { captionWarnings, karaokeLines, popLines, type CaptionLine } from './captions.js';
 import { MirageError } from './errors.js';
+import { measureSfxLevel, resolveSfx, sfxSource, sfxVolumeDb, type SfxLevel } from './sfx.js';
 import { bundledFontsDir } from './fonts.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, clearLeftovers, type Lock } from './lock.js';
@@ -229,6 +230,25 @@ export function chunkTimeoutMs(chunk: LaidItem[], fps: number): number {
   return Math.round(Math.max(120, srcSec * 3 + outSec * 30) * 1000);
 }
 
+/** Seconds a dip takes to fade the music out (ending at its start) and back in (starting at its end). */
+const DIP_FADE_SEC = 0.08;
+
+/**
+ * A cue's dips as a gain on every sample, on the cue's own clock (0 = the cue's start): for each dip, 1 → 0 over the 80 ms
+ * before its start, 0 until its end, back to 1 over the 80 ms after; dips multiply. A dip outside the cue does nothing
+ * and adds nothing. Nothing at all for a cue without dips.
+ */
+function dipFilters(c: MusicCue, dur: number): string[] {
+  const terms = (c.dips ?? [])
+    .map((d) => ({ s: d.start - c.start, e: d.end - c.start }))
+    .filter((d) => d.e > 0 && d.s < dur)
+    .map((d) => `(clip((${ffNum(d.s)}-t)/${DIP_FADE_SEC},0,1)+clip((t-${ffNum(d.e)})/${DIP_FADE_SEC},0,1))`);
+  if (!terms.length) return [];
+  const gain = terms.join('*');
+  // Sample-exact time for aeval's t: the number of samples so far.
+  return ['asetpts=N/SR/TB', `aeval='val(0)*${gain}|val(1)*${gain}':c=same`];
+}
+
 export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: string, durationSec: number, loudnessLufs: number, output: string): string[] {
   const inputs: string[] = [];
   const chains: string[] = [];
@@ -252,12 +272,53 @@ export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: st
         `aresample=48000,${FLTP_STEREO}`,
         ...(measured > dur ? [`atrim=duration=${ffNum(dur)}`] : []),
         ...fades,
+        ...dipFilters(c, dur),
         `adelay=delays=${Math.round(c.start * 1000)}:all=1[m${i}]`,
       ].join(','),
     );
   });
   chains.push(`${cues.map((_, i) => `[m${i}]`).join('')}amix=inputs=${cues.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', output];
+}
+
+/** A sound effect ready to place: its file, the output time `at` its peak (`peakSec` into the file) lands on, and its gain. */
+export interface PlacedSfx {
+  file: string;
+  at: number;
+  peakSec: number;
+  durationSec: number;
+  volumeDb: number;
+}
+
+/**
+ * The sound effects track (48 kHz stereo float WAV, `durationSec` long): each sound starts at `at − peakSec`, so its peak
+ * lands on `at`; one that would start before 0 loses its beginning instead (the episode never gets longer), and whatever
+ * runs past the end is cut. Each is set to its `volumeDb` (no loudnorm, which turns short silence into NaN). Overlapping
+ * sounds add; float samples keep a sum over full scale for the final pass's limiter. Every sound must start before `durationSec`.
+ */
+export function sfxTrackArgs(sounds: PlacedSfx[], durationSec: number, output: string): string[] {
+  const SR = 48000;
+  const inputs: string[] = [];
+  const chains: string[] = [];
+  sounds.forEach((x, i) => {
+    const start = x.at - x.peakSec;
+    const skip = Math.max(0, -start);
+    const delay = Math.max(0, start);
+    // Reading stops where the episode ends: a long file isn't decoded to its end.
+    inputs.push('-t', ffNum(skip + durationSec - delay), '-i', x.file);
+    chains.push(
+      [
+        `[${i}:a]aresample=${SR},${FLTP_STEREO}`,
+        // Sample-exact: the cut and the delay count samples, not timestamps.
+        'asetpts=N/SR/TB',
+        ...(skip > 0 ? [`atrim=start_sample=${Math.round(skip * SR)}`, 'asetpts=PTS-STARTPTS'] : []),
+        `volume=${ffNum(x.volumeDb)}dB`,
+        `adelay=delays=${Math.round(delay * SR)}S:all=1[s${i}]`,
+      ].join(','),
+    );
+  });
+  chains.push(`${sounds.map((_, i) => `[s${i}]`).join('')}amix=inputs=${sounds.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', output];
 }
 
 /** Lays the fitted lines out on the timeline. `recording` is one decoded recording, or one per path (lines without their own `recording` use `defaultRecording`). */
@@ -282,6 +343,27 @@ export function buildVoiceTrack(o: { recording: Float32Array | Map<string, Float
   return out;
 }
 
+/**
+ * The sound effects that play (those at or after the end never do), each resolved to its file and peak, measured once
+ * per distinct file and set so its loudest 400 ms sits at `loudnessLufs + gainDb` (sfxVolumeDb). Files are made or read
+ * in `work`.
+ */
+async function placeSfx(project: string, cues: SfxCue[], durationSec: number, loudnessLufs: number, tools: MediaTools, work: string, signal?: AbortSignal): Promise<PlacedSfx[]> {
+  const sounds = new Map<string, { file: string; peakSec: number; durationSec: number }>();
+  const levels = new Map<string, SfxLevel>();
+  const placed: PlacedSfx[] = [];
+  for (const [k, c] of cues.entries()) {
+    if (c.at >= durationSec - 1e-6) continue;
+    if (!sounds.has(c.sound)) sounds.set(c.sound, await resolveSfx(project, c.sound, tools, { label: `sfx ${k + 1}`, tmpDir: work, signal }));
+    const s = sounds.get(c.sound)!;
+    // An empty file has nothing to play.
+    if (!(s.durationSec > 0)) continue;
+    if (!levels.has(s.file)) levels.set(s.file, await measureSfxLevel(s.file, tools, { metaFile: join(work, `level-${levels.size}.txt`), signal }));
+    placed.push({ ...s, at: c.at, volumeDb: sfxVolumeDb(levels.get(s.file)!, loudnessLufs + c.gainDb) });
+  }
+  return placed;
+}
+
 export interface FinalEpisodeOptions {
   chunkList: string;
   output: string;
@@ -297,6 +379,8 @@ export interface FinalEpisodeOptions {
   fontsDir?: string;
   musicWav?: string;
   voiceRaw?: string;
+  /** The sound effects track (sfxTrackArgs): added after the music is ducked, before the limiter, never ducked itself. */
+  sfxWav?: string;
   /** Some item keeps its live sound (default true). */
   liveAudio?: boolean;
 }
@@ -314,6 +398,8 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   if (o.musicWav) inputs.push('-i', o.musicWav);
   const voiceIdx = o.voiceRaw ? next++ : -1;
   if (o.voiceRaw) inputs.push('-f', 'f32le', '-ar', '48000', '-ac', '1', '-i', o.voiceRaw);
+  const sfxIdx = o.sfxWav ? next++ : -1;
+  if (o.sfxWav) inputs.push('-i', o.sfxWav);
   const D = ffNum(o.durationSec);
 
   const chains = [`[0:v]ass=${filterValue(o.assFile)}${o.fontsDir ? `:fontsdir=${filterValue(o.fontsDir)}` : ''}[vout]`];
@@ -329,8 +415,12 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   const short = normalise && o.durationSec < LOUDNORM_MIN_SEC;
   chains.push(
     `[speechraw]highpass=f=90,${normalise ? `${short ? `apad=whole_dur=${LOUDNORM_MIN_SEC},` : ''}loudnorm=I=${lufs(o.loudnessLufs)}:TP=-1:LRA=11,` : ''}` +
-      `aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${short ? `,atrim=end=${D}` : ''}${o.musicWav ? '[speech]' : '[aout]'}`,
+      `aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${short ? `,atrim=end=${D}` : ''}${o.musicWav || o.sfxWav ? '[speech]' : '[aout]'}`,
   );
+  // Sound effects join the mix after the ducking (they never duck) and go through the limiter with everything else.
+  const sfx = o.sfxWav ? '[sfx]' : '';
+  if (o.sfxWav) chains.push(`[${sfxIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=${D}[sfx]`);
+  const limited = (n: number) => `amix=inputs=${n}:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]`;
   if (o.musicWav) {
     chains.push(
       '[speech]asplit=2[smix][skey]',
@@ -338,8 +428,10 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
       // Measured: a -14 LUFS speech key ducks -19 LUFS music by about 16 dB (steady tone) to 17 dB (continuous speech);
       // music on its own is below the threshold and passes untouched.
       '[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck]',
-      '[smix][duck]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]',
+      `[smix][duck]${sfx}${limited(o.sfxWav ? 3 : 2)}`,
     );
+  } else if (o.sfxWav) {
+    chains.push(`[speech][sfx]${limited(2)}`);
   }
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[vout]', '-map', '[aout]', ...encodeArgs(o), '-t', D, o.output];
 }
@@ -469,6 +561,9 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   const musicDir = resolve(o.musicDir ?? join(project, 'music'));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
+  // The guide cut has no sound effects: the person records narration against it.
+  const sfxCues = o.mode === 'guide' ? [] : (ep.sfx ?? []);
+  sfxCues.forEach((c, k) => sfxSource(project, c.sound, `sfx ${k + 1}`));
   const voTranscripts = final && ep.voiceover ? await loadVoiceoverTranscripts(project, ep) : null;
   const recordings = final ? voiceRecordings(ep) : [];
   for (const rec of recordings) {
@@ -496,6 +591,8 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   const report = (f: number) => o.onProgress?.(Math.min(1, Math.max(0, f)));
 
   try {
+    // Before the chunks: a sound file FFmpeg can't read stops the render here.
+    const sfx = await placeSfx(project, sfxCues, D, ep.loudnessLufs, o.tools, work, o.signal);
     const chunks = episodeChunks(laid, { width: W, height: H, fps }, sources, join(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i, chunk] of chunks.entries()) {
@@ -521,6 +618,12 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
         signal: o.signal,
       });
       musicWav = 'music.wav';
+    }
+    let sfxWav: string | undefined;
+    if (sfx.length) {
+      o.signal?.throwIfAborted();
+      await o.tools.runFfmpeg(sfxTrackArgs(sfx, D, join(work, 'sfx.wav')), { expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 10 * 1000), signal: o.signal });
+      sfxWav = 'sfx.wav';
     }
     report(0.7);
     o.signal?.throwIfAborted();
@@ -556,7 +659,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
         // fontsdir only for the plugin's own fonts folder: libass loads every font in it into memory (about 1 GB for
         // /System/Library/Fonts), and it finds system fonts and fallbacks itself; buildAss names a font for the scripts
         // whose fallback it can't open.
-        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir, musicWav, voiceRaw,
+        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir, musicWav, voiceRaw, sfxWav,
         liveAudio: laid.some((l) => l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), signal: o.signal, onProgress: (f) => report(0.7 + 0.3 * f) },

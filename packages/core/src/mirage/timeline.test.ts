@@ -48,6 +48,23 @@ describe('shiftAfter', () => {
     expect(s.slots[0]).toMatchObject({ start: 2, end: 4.5 });
     expect(s.overlays.every((o) => o.end >= o.start)).toBe(true);
   });
+
+  it('moves sound effects and the dips of a music cue with the picture, and leaves absent ones absent', () => {
+    const withSfx = EpisodeSchema.parse({
+      ...ep, sfx: [{ sound: 'hit', at: 1 }, { sound: 'whoosh', at: 2 }, { sound: 'pop', at: 1.8 }],
+      music: [{ track: 'a.mp3', start: 0, end: 6, dips: [{ start: 1, end: 1.4 }, { start: 3, end: 3.5 }, { start: 1.6, end: 1.9 }] }],
+    });
+    const later = shiftAfter(withSfx, 2, 1);
+    expect(later.sfx!.map((x) => x.at)).toEqual([1, 3, 1.8]);
+    expect(later.music[0]!.dips).toEqual([{ start: 1, end: 1.4 }, { start: 4, end: 4.5 }, { start: 1.6, end: 1.9 }]);
+    // Closing 1.5–2 s: what was inside it lands on 1.5.
+    const closed = shiftAfter(withSfx, 2, -0.5);
+    expect(closed.sfx!.map((x) => x.at)).toEqual([1, 1.5, 1.5]);
+    expect(closed.music[0]!.dips).toEqual([{ start: 1, end: 1.4 }, { start: 2.5, end: 3 }, { start: 1.5, end: 1.5 }]);
+    const plain = shiftAfter(EpisodeSchema.parse({ ...ep, music: [{ track: 'a.mp3', start: 3, end: 6 }] }), 2, 1);
+    expect('sfx' in plain).toBe(false);
+    expect('dips' in plain.music[0]!).toBe(false);
+  });
 });
 
 describe('dropCollapsed', () => {
@@ -65,6 +82,15 @@ describe('dropCollapsed', () => {
     expect(r.episode.slots).toEqual([]);
     expect(r.dropped).toEqual(['overlay 1 ("FAILED")', 'music cue 1 (drive.mp3)', 'slot n1 (line "Gone.")']);
     expect(dropCollapsed(ep, ep)).toEqual({ episode: ep, dropped: [] });
+  });
+
+  it('removes a dip that closing a gap left shorter than one frame, naming its cue', () => {
+    const cue = { track: 'drive.mp3', start: 0, end: 6, gainDb: -5, fadeIn: 0, fadeOut: 0, offset: 0 };
+    const before = { ...ep, music: [{ ...cue, dips: [{ start: 1.6, end: 1.9 }, { start: 3, end: 3.5 }] }] };
+    const after = { ...ep, music: [{ ...cue, dips: [{ start: 1.5, end: 1.5 }, { start: 2.5, end: 3 }] }] };
+    const r = dropCollapsed(after, before);
+    expect(r.episode.music[0]!.dips).toEqual([{ start: 2.5, end: 3 }]);
+    expect(r.dropped).toEqual(['music cue 1 (drive.mp3)\'s dip at 1.50 s']);
   });
 
   it('leaves a range that was already shorter than one frame before snapping alone', () => {

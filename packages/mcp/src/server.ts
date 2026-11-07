@@ -223,7 +223,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     return report(await sessionVideo(), musicReport(dir, await analyzeLibrary(dir, tools)));
   });
 
-  tool('check', 'Check the timeline of a video against the catalog and music, snap montages to the beat, and list it.', { video }, async ({ video: n }) => report(n, checkReport(await checkEpisode(project, n))));
+  tool('check', 'Check the timeline of a video against the catalog and music, snap montages to the beat, and list it.', { video }, async ({ video: n }) => report(n, checkReport(await checkEpisode(project, n, tools))));
 
   for (const [name, mode] of Object.entries(MODES) as ['cut' | 'guide' | 'render', EpisodeMode][]) {
     const what = { cut: 'Check the timeline, then render the rough cut (picture, music, overlays).', guide: 'Render the guide video, with the narration lines on screen to record against.', render: 'Render the final video with captions.' }[name];
@@ -233,7 +233,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
         renderEpisode({
           project, episode: n, mode, tools, signal: h.signal, onProgress: h.progress,
           // As the CLI's cut: the check runs under the episode's lock.
-          beforeRender: name === 'cut' ? async () => { lines.push(...checkReport(await checkEpisode(project, n))); } : undefined,
+          beforeRender: name === 'cut' ? async () => { lines.push(...checkReport(await checkEpisode(project, n, tools))); } : undefined,
         }),
       );
       return report(n, [...lines, ...renderReport(r)]);

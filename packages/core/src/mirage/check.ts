@@ -1,10 +1,12 @@
 import { join, resolve } from 'node:path';
 import type { Episode, Move, MusicLibrary } from '@wordedits/shared';
+import type { MediaTools } from '../media-tools.js';
 import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
 import { splitShots } from './move.js';
 import { undrawable } from './overlays.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { fileUnreadable, sfxSource, unreadableSfx } from './sfx.js';
 import { slotsStale } from './slots.js';
 import { dropCollapsed, layoutTimeline, timelineDuration } from './timeline.js';
 import { cutChanged, cutChangedError, hasWords, lineChangeWarnings } from './voiceover.js';
@@ -76,15 +78,39 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
   ep.music.forEach((c, i) => {
     if (c.gainDb === OLD_DEFAULT_GAIN_DB) out.push(`music cue ${i + 1} has gainDb ${OLD_DEFAULT_GAIN_DB}, the old default (now -5) — delete gainDb to use the new one`);
   });
+  const sfx = ep.sfx ?? [];
+  sfx.forEach((x, k) => {
+    if (x.at >= D - 1e-6) out.push(`sfx ${k + 1} (${x.sound}) is at ${s2(x.at)} s, after the episode ends (${s2(D)} s) — it will never play`);
+  });
+  // The busiest minute (from one sound effect's time to just under a minute after it); a shorter video is one window.
+  const times = sfx.map((x) => x.at).filter((t) => t < D - 1e-6).sort((a, b) => a - b);
+  let busiest = { n: 0, from: 0 };
+  times.forEach((t, i) => {
+    const n = times.filter((u, j) => j >= i && u < t + SFX_WINDOW_SEC).length;
+    if (n > busiest.n) busiest = { n, from: t };
+  });
+  if (busiest.n > MAX_SFX_PER_MINUTE) {
+    out.push(`${busiest.n} sound effects within one minute (from ${s1(busiest.from)} s) — sound effects on almost every cut cheapen the video; keep the ones that land a joke or a reveal`);
+  }
+  ep.music.forEach((c, i) => {
+    for (const d of c.dips ?? []) {
+      if (d.end <= c.start || d.start >= c.end) out.push(`music cue ${i + 1} has a dip at ${s2(d.start)}–${s2(d.end)} s outside the cue (${s2(c.start)}–${s2(c.end)} s) — it does nothing`);
+    }
+  });
   return out;
 }
 
+/** More sound effects than this in any minute gets a warning. */
+const MAX_SFX_PER_MINUTE = 6;
+const SFX_WINDOW_SEC = 60;
+
 /**
- * The `check` command: validates the timeline against the catalog (clips exist, ranges fit) and the music library (cue
- * tracks listed and present), snaps montages to the beat (not once a voice-over is fitted), saves it if that changed
- * anything, and collects what the user should know: `warnings` (⚠) and `notes`.
+ * The `check` command: validates the timeline against the catalog (clips exist, ranges fit), the music library (cue
+ * tracks listed and present) and the sound effects (each a built-in or a file in sfx/; with `tools`, a file FFmpeg can
+ * read), snaps montages to the beat (not once a voice-over is fitted), saves it if that changed anything, and collects
+ * what the user should know: `warnings` (⚠) and `notes`.
  */
-export async function checkEpisode(project: string, n: number): Promise<{ episode: Episode; warnings: string[]; notes: string[] }> {
+export async function checkEpisode(project: string, n: number, tools?: MediaTools): Promise<{ episode: Episode; warnings: string[]; notes: string[] }> {
   const root = resolve(project);
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n);
@@ -95,6 +121,15 @@ export async function checkEpisode(project: string, n: number): Promise<{ episod
   const musicDir = join(root, 'music');
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
+  for (const [k, x] of (ep.sfx ?? []).entries()) {
+    const src = sfxSource(root, x.sound, `sfx ${k + 1}`);
+    if (!tools || 'builtin' in src) continue;
+    const p = await tools.probe(src.file).catch((e: unknown) => {
+      if (fileUnreadable(e)) return null;
+      throw e;
+    });
+    if (!p?.hasAudio) throw unreadableSfx(`sfx ${k + 1}`, src.path);
+  }
   if (ep.voiceover) {
     if (ep.items.some((i) => i.onBeat) || ep.music.length) notes.push('Montages were not snapped to the beat: the voice-over is fitted to this cut.');
   } else if (lib) {

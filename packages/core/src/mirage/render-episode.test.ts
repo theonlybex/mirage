@@ -5,14 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
 import { run, SidecarError, wordsFromWhisperJson } from '@wordedits/sidecars';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog, sha256File } from './ingest.js';
 import { bundledFontsDir, CAPTION_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
-import { buildVoiceTrack, chunkItems, chunkSize, type ClipSource, commandLength, episodeChunks, MAX_COMMAND, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkItems, chunkSize, type ClipSource, commandLength, episodeChunks, MAX_COMMAND, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sfxTrackArgs, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover, holdAt } from './voiceover.js';
 
@@ -239,6 +239,195 @@ describe('musicTrackArgs', () => {
   });
   it('throws NO_MUSIC_TRACK for a cue whose track is not in the library', () => {
     expect(() => musicTrackArgs([{ track: 'zz.mp3', start: 0, end: 1, gainDb: -18, fadeIn: 0, fadeOut: 0, offset: 0 }], lib, '/m', 2, -14, '/w/m.wav')).toThrow(expect.objectContaining({ code: 'NO_MUSIC_TRACK' }));
+  });
+});
+
+describe('arguments of an episode without sound effects or dips', () => {
+  const lib: MusicLibrary = { version: 1, tracks: [{ file: 'a.mp3', mood: 'upbeat', licence: '', bpm: 120, beatOffset: 0, durationSec: 8 }] };
+  it('are exactly what they were before sound effects', () => {
+    const cue = { track: 'a.mp3', start: 2, end: 12, gainDb: -5, fadeIn: 0.5, fadeOut: 1, offset: 0.5 };
+    expect(musicTrackArgs([cue, { ...cue, start: 0, end: 1, fadeIn: 0, fadeOut: 0, offset: 0 }], lib, '/m', 15, -14, '/w/music.wav')).toMatchInlineSnapshot(`
+      [
+        "-stream_loop",
+        "-1",
+        "-ss",
+        "0.5",
+        "-i",
+        "/m/a.mp3",
+        "-stream_loop",
+        "-1",
+        "-ss",
+        "0",
+        "-i",
+        "/m/a.mp3",
+        "-filter_complex",
+        "[0:a]asetpts=N/SR/TB,atrim=duration=10,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,loudnorm=I=-19:TP=-2:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:d=0.5,afade=t=out:st=9:d=1,adelay=delays=2000:all=1[m0];[1:a]asetpts=N/SR/TB,atrim=duration=3.1,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,loudnorm=I=-19:TP=-2:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=1,adelay=delays=0:all=1[m1];[m0][m1]amix=inputs=2:duration=longest:normalize=0,apad,atrim=end=15[out]",
+        "-map",
+        "[out]",
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "/w/music.wav",
+      ]
+    `);
+    const base = { chunkList: 'chunks.txt', encoder: enc, width: 1920, height: 1080, fps: 30, loudnessLufs: -14, assFile: 'overlays.ass' };
+    expect(episodeFinalArgs({ ...base, output: '/o/final.mp4', mode: 'final', durationSec: 20, musicWav: 'music.wav', voiceRaw: 'vo.f32' })).toMatchInlineSnapshot(`
+      [
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        "chunks.txt",
+        "-i",
+        "music.wav",
+        "-f",
+        "f32le",
+        "-ar",
+        "48000",
+        "-ac",
+        "1",
+        "-i",
+        "vo.f32",
+        "-filter_complex",
+        "[0:v]ass=overlays.ass[vout];[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[live];[2:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[vo];[live][vo]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB[speech];[speech]asplit=2[smix][skey];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[mus];[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck];[smix][duck]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]",
+        "-map",
+        "[vout]",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "libx264",
+        "-b:v",
+        "8M",
+        "-g",
+        "60",
+        "-pix_fmt",
+        "yuv420p",
+        "-colorspace",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "384k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-movflags",
+        "+faststart",
+        "-t",
+        "20",
+        "/o/final.mp4",
+      ]
+    `);
+    expect(episodeFinalArgs({ ...base, output: '/o/rough.mp4', mode: 'preview', durationSec: 2.5 })).toMatchInlineSnapshot(`
+      [
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        "chunks.txt",
+        "-filter_complex",
+        "[0:v]ass=overlays.ass[vout];[0:a]anull[speechraw];[speechraw]highpass=f=90,apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB,atrim=end=2.5[aout]",
+        "-map",
+        "[vout]",
+        "-map",
+        "[aout]",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "28",
+        "-pix_fmt",
+        "yuv420p",
+        "-colorspace",
+        "bt709",
+        "-color_primaries",
+        "bt709",
+        "-color_trc",
+        "bt709",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "-movflags",
+        "+faststart",
+        "-t",
+        "2.5",
+        "/o/rough.mp4",
+      ]
+    `);
+  });
+});
+
+describe('musicTrackArgs with dips', () => {
+  const lib: MusicLibrary = { version: 1, tracks: [{ file: 'a.mp3', mood: 'upbeat', licence: '', bpm: 120, beatOffset: 0, durationSec: 8 }] };
+  const cue = { track: 'a.mp3', start: 2, end: 12, gainDb: -5, fadeIn: 0.5, fadeOut: 1, offset: 0 };
+  const graph = (c: object) => { const a = musicTrackArgs([{ ...cue, ...c }], lib, '/m', 15, -14, '/w/music.wav'); return a[a.indexOf('-filter_complex') + 1]; };
+  it("silences the cue's music over each dip, with 80 ms fades ending at its start and starting at its end, on the cue's own clock", () => {
+    const g = graph({ dips: [{ start: 5, end: 5.5 }, { start: 8, end: 9 }] });
+    const gain = '(clip((3-t)/0.08,0,1)+clip((t-3.5)/0.08,0,1))*(clip((6-t)/0.08,0,1)+clip((t-7)/0.08,0,1))';
+    expect(g).toContain(`afade=t=out:st=9:d=1,asetpts=N/SR/TB,aeval='val(0)*${gain}|val(1)*${gain}':c=same,adelay=delays=2000:all=1[m0]`);
+  });
+  it('leaves out a dip entirely outside the cue, and adds nothing for no dips', () => {
+    expect(graph({ dips: [{ start: 1, end: 1.5 }, { start: 12, end: 13 }, { start: 11.5, end: 12.5 }] })).toContain("aeval='val(0)*(clip((9.5-t)/0.08,0,1)+clip((t-10.5)/0.08,0,1))|");
+    expect(graph({ dips: [{ start: 1, end: 1.5 }] })).toBe(graph({}));
+    expect(graph({ dips: [] })).toBe(graph({}));
+  });
+});
+
+describe('sfxTrackArgs', () => {
+  it("places each sound so its peak lands on its time, at its level, cutting the start of one that would begin before 0 and everything after the end", () => {
+    const args = sfxTrackArgs([
+      { file: '/s/hit.wav', at: 2, peakSec: 0.01, durationSec: 0.8, volumeDb: -8.04 },
+      { file: '/s/riser.wav', at: 1, peakSec: 2, durationSec: 2.02, volumeDb: 0.5 },
+    ], 6, '/w/sfx.wav');
+    expect(args.slice(0, args.indexOf('-filter_complex'))).toEqual(['-t', '4.01', '-i', '/s/hit.wav', '-t', '7', '-i', '/s/riser.wav']);
+    expect(args[args.indexOf('-filter_complex') + 1]).toBe(
+      '[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,volume=-8.04dB,adelay=delays=95520S:all=1[s0];' +
+        '[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,atrim=start_sample=48000,asetpts=PTS-STARTPTS,volume=0.5dB,adelay=delays=0S:all=1[s1];' +
+        '[s0][s1]amix=inputs=2:duration=longest:normalize=0,apad,atrim=end=6[out]',
+    );
+    // Float samples: overlapping sounds can add past full scale; the final pass's limiter catches them.
+    expect(args.slice(args.indexOf('-map'))).toEqual(['-map', '[out]', '-c:a', 'pcm_f32le', '-ar', '48000', '-ac', '2', '/w/sfx.wav']);
+  });
+});
+
+describe('episodeFinalArgs with sound effects', () => {
+  const o = { chunkList: 'chunks.txt', output: '/o.mp4', encoder: enc, mode: 'final' as const, width: 1920, height: 1080, fps: 30, durationSec: 20, loudnessLufs: -14, assFile: 'overlays.ass' };
+  const graph = (a: string[]) => a[a.indexOf('-filter_complex') + 1];
+  it('adds the sound effects after the music is ducked under speech and before the limiter; they are never ducked', () => {
+    const plain = episodeFinalArgs({ ...o, musicWav: 'music.wav', voiceRaw: 'vo.f32' });
+    const a = episodeFinalArgs({ ...o, musicWav: 'music.wav', voiceRaw: 'vo.f32', sfxWav: 'sfx.wav' });
+    expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual([...plain.slice(0, plain.indexOf('-filter_complex')), '-i', 'sfx.wav']);
+    const g = graph(a);
+    expect(g).toContain('[3:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[sfx]');
+    expect(g).toContain('[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck]');
+    expect(g.endsWith('[smix][duck][sfx]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]')).toBe(true);
+    expect(g.replace(/;\[3:a\][^;]*\[sfx\]/, '').replace('[smix][duck][sfx]amix=inputs=3', '[smix][duck]amix=inputs=2')).toBe(graph(plain));
+  });
+  it('without music, mixes speech and sound effects through the limiter', () => {
+    const a = episodeFinalArgs({ ...o, sfxWav: 'sfx.wav' });
+    expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual(['-f', 'concat', '-safe', '0', '-i', 'chunks.txt', '-i', 'sfx.wav']);
+    const g = graph(a);
+    expect(g).toContain('asetpts=N/SR/TB[speech];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[sfx];[speech][sfx]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]');
+    // An episode under 3 s: the speech is measured over 3.1 s as before; the sound effects are never loudnormed.
+    const short = graph(episodeFinalArgs({ ...o, durationSec: 2, sfxWav: 'sfx.wav' }));
+    expect(short).toContain('apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,');
+    expect(short.match(/loudnorm/g)).toHaveLength(1);
   });
 });
 
@@ -712,6 +901,169 @@ describe('renderEpisode (real ffmpeg)', () => {
     await expect(renderEpisode({ project, episode: 2, mode: 'final', tools })).rejects.toMatchObject({ code: 'NO_EPISODE', message: expect.stringContaining('voiceover.transcript.json') });
     expect((await readdir(join(project, 'episodes', '2'))).filter((f) => f.startsWith('.work-') || f.includes('.partial-'))).toEqual([]);
   }, 60_000);
+
+  describe('sound effects and dips', () => {
+    const SR = 48000;
+    const small = { width: 640, height: 360, fps: 30 };
+    let savedSfxDir: string | undefined;
+    beforeAll(async () => {
+      savedSfxDir = process.env.MIRAGE_SFX_DIR;
+      process.env.MIRAGE_SFX_DIR = await mkdtemp(join(tmpdir(), 'we-sfx-render-'));
+      const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+      // Music in two high tones, the live "speech" a 300 Hz tone, the hit at 50-90 Hz: each is measured in its own band.
+      await gen(['-f', 'lavfi', '-i', "aevalsrc='0.25*sin(2*PI*2500*t)+0.25*sin(2*PI*3300*t)':s=44100:d=8", join(project, 'music', 'dip-pad.wav')]);
+      await analyzeLibrary(join(project, 'music'), tools);
+      await mkdir(join(project, 'sfx'), { recursive: true });
+      await gen(['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '1', join(project, 'sfx', 'hush.wav')]);
+      await gen(['-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000:duration=60', join(project, 'sfx', 'long.wav')]);
+      await writeFile(join(project, 'sfx', 'broken.wav'), 'RIFF but not a wave file');
+    }, 120_000);
+    afterAll(() => {
+      if (savedSfxDir === undefined) delete process.env.MIRAGE_SFX_DIR;
+      else process.env.MIRAGE_SFX_DIR = savedSfxDir;
+    });
+
+    /** The left channel of a file's audio, through `af`, as 48 kHz float samples. */
+    const left = async (file: string, af: string) => {
+      const out = join(tmpdir(), `we-left-${randomUUID()}.f32`);
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map', '0:a:0', '-af', `pan=mono|c0=c0,aresample=48000,${af}`, '-f', 'f32le', out]);
+      const buf = await readFile(out);
+      await rm(out, { force: true });
+      return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    };
+    // Zero-phase filters (forward, then backward), so a filtered peak stays where it was.
+    const twice = (f: string) => `${f},areverse,${f},areverse`;
+    const LOW = twice('lowpass=f=120,lowpass=f=120');
+    const HIGH = twice('highpass=f=1500,highpass=f=1500');
+    const MID = twice('highpass=f=600,highpass=f=600,lowpass=f=1500,lowpass=f=1500');
+    const MUSIC = 'bandpass=f=3300:width_type=q:w=8';
+    const db = (v: number) => 20 * Math.log10(v);
+    const peak = (x: Float32Array, from: number, to: number) => {
+      let at = Math.round(from * SR);
+      for (let i = at; i < Math.min(x.length, Math.round(to * SR)); i++) if (Math.abs(x[i]!) > Math.abs(x[at]!)) at = i;
+      return { t: at / SR, db: db(Math.abs(x[at]!)) };
+    };
+    const rms = (x: Float32Array, from: number, to: number) => {
+      let sum = 0;
+      const [a, b] = [Math.round(from * SR), Math.min(x.length, Math.round(to * SR))];
+      for (let i = a; i < b; i++) sum += x[i]! * x[i]!;
+      return 10 * Math.log10(sum / (b - a) + 1e-30);
+    };
+    /** Where the energy of `x` is centred between `from` and `to`, in seconds. */
+    const centre = (x: Float32Array, from: number, to: number) => {
+      let [m, e] = [0, 0];
+      for (let i = Math.round(from * SR); i < Math.round(to * SR); i++) [m, e] = [m + i * x[i]! * x[i]!, e + x[i]! * x[i]!];
+      return m / e / SR;
+    };
+
+    it('lands a hit within 15 ms of its time at the same level with or without speech, centres a whoosh on its time, and dips the music', async () => {
+      const extra = {
+        output: small,
+        music: [{ track: 'dip-pad.wav', start: 0, end: 5.9, fadeIn: 0, fadeOut: 0, dips: [{ start: 3, end: 3.5 }] }],
+        sfx: [{ sound: 'hit', at: 2 }, { sound: 'whoosh', at: 4 }],
+      };
+      await saveEpisode(project, ep([{ id: 'talk', beat: 'problem', clip: 'c001', src: { in: 0, out: 5.9 }, audio: 'keep' }], { number: 20, ...extra }));
+      await saveEpisode(project, ep([{ id: 'quiet', beat: 'problem', clip: 'c003', src: { in: 0, out: 5.9 } }], { number: 21, ...extra }));
+      const speech = await renderEpisode({ project, episode: 20, mode: 'final', tools });
+      const quiet = await renderEpisode({ project, episode: 21, mode: 'final', tools });
+      const lines: string[] = [];
+      for (const r of [speech, quiet]) expect(Math.abs((await tools.probe(r.outputPath)).durationSec - 5.9)).toBeLessThanOrEqual(0.1);
+      const got = [];
+      for (const r of [speech, quiet]) {
+        const hit = peak(await left(r.outputPath, LOW), 1.5, 2.5);
+        const whoosh = centre(await left(r.outputPath, MID), 3.65, 4.35);
+        const m = await left(r.outputPath, MUSIC);
+        const [ref, dip, back] = [rms(m, 1, 1.8), rms(m, 3.1, 3.4), rms(m, 3.6, 3.7)];
+        lines.push(`${r === speech ? 'speech' : 'quiet '}: hit peak ${hit.db.toFixed(2)} dBFS at ${hit.t.toFixed(4)} s, whoosh centred at ${whoosh.toFixed(4)} s, music ${ref.toFixed(1)} dB, in the dip ${dip.toFixed(1)} dB, back ${back.toFixed(1)} dB`);
+        got.push({ hit, whoosh, ref, dip, back });
+      }
+      // The filtered hit's peak sits a little after the file's loudest sample (the filter takes out the noise thump): where
+      // it sits in the file itself shows how exactly the hit was placed. The final pass's limiter looks 5 ms ahead.
+      const own = peak(await left(join(process.env.MIRAGE_SFX_DIR!, 'v1', 'hit.wav'), `apad=pad_dur=0.2,${LOW}`), 0, 0.5).t - 0.01;
+      lines.push(`the filtered hit peaks ${(own * 1000).toFixed(1)} ms after its peak time in hit.wav itself`);
+      console.log(lines.join('\n'));
+      for (const { hit, whoosh, ref, back } of got) {
+        expect(Math.abs(hit.t - 2)).toBeLessThanOrEqual(0.015);
+        expect(Math.abs(hit.t - (2 + own + 0.005))).toBeLessThanOrEqual(0.001);
+        expect(Math.abs(whoosh - 4)).toBeLessThanOrEqual(0.015);
+        expect(Math.abs(back - ref)).toBeLessThanOrEqual(1);
+      }
+      expect(Math.abs(got[0]!.hit.db - got[1]!.hit.db)).toBeLessThanOrEqual(1);
+      // Under speech the music is ducked to about 10 dB over the AAC-coded tone's own noise (across the whole spectrum), so
+      // the dip is measured where the music plays on its own.
+      expect(got[1]!.ref - got[1]!.dip).toBeGreaterThanOrEqual(40);
+      expect(got[0]!.dip).toBeLessThan(got[0]!.ref - 8);
+    }, 300_000);
+
+    it('cuts the start of a riser at 0 s so its peak is on 0, in an episode under 3 s that keeps its length', async () => {
+      await saveEpisode(project, ep([{ id: 'talk', beat: 'problem', clip: 'c001', src: { in: 0, out: 2 }, audio: 'keep' }], { number: 22, output: small, sfx: [{ sound: 'riser', at: 0 }, { sound: 'hit', at: 1 }] }));
+      const r = await renderEpisode({ project, episode: 22, mode: 'rough', tools });
+      expect(Math.abs((await tools.probe(r.outputPath)).durationSec - 2)).toBeLessThanOrEqual(0.1);
+      const high = await left(r.outputPath, HIGH);
+      const riser = peak(high, 0, 0.5);
+      const hit = peak(await left(r.outputPath, LOW), 0.5, 1.5);
+      console.log(`riser peak ${riser.db.toFixed(2)} dBFS at ${riser.t.toFixed(4)} s, high band after it ${rms(high, 0.2, 0.9).toFixed(1)} dB; hit at ${hit.t.toFixed(4)} s`);
+      expect(riser.t).toBeLessThanOrEqual(0.015);
+      expect(riser.db).toBeGreaterThan(-20);
+      // Shifted instead of cut, the riser would be rising through the first second.
+      expect(rms(high, 0.2, 0.9)).toBeLessThan(riser.db - 40);
+      expect(Math.abs(hit.t - 1)).toBeLessThanOrEqual(0.015);
+    }, 120_000);
+
+    it("plays a silent sfx/ file silently and cuts a minute-long one at the end, at the sound effects' level", async () => {
+      await saveEpisode(project, ep([{ id: 'quiet', beat: 'problem', clip: 'c003', src: { in: 0, out: 3 } }], { number: 23, output: small, sfx: [{ sound: 'sfx/hush.wav', at: 0.5 }, { sound: 'long', at: 1 }] }));
+      const r = await renderEpisode({ project, episode: 23, mode: 'rough', tools });
+      expect(Math.abs((await tools.probe(r.outputPath)).durationSec - 3)).toBeLessThanOrEqual(0.1);
+      const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-ss', '1.5', '-t', '1.4', '-i', r.outputPath, '-map', '0:a:0', '-af', 'ebur128', '-f', 'null', '-']);
+      const lufs = Number(/I:\s+(-?[\d.]+)\s+LUFS/.exec(stderr.split('Summary:').at(-1)!)![1]);
+      const x = await left(r.outputPath, 'anull');
+      console.log(`a minute of tone at -14 + -6 LUFS: ${lufs} LUFS; before it ${rms(x, 0.2, 0.95).toFixed(1)} dB, at the end ${rms(x, 2.85, 2.95).toFixed(1)} dB`);
+      expect(Math.abs(lufs - -20)).toBeLessThanOrEqual(1.5);
+      expect(rms(x, 0.2, 0.95)).toBeLessThan(-80);
+      expect(rms(x, 2.85, 2.95)).toBeGreaterThan(-30);
+    }, 120_000);
+
+    it('adds overlapping sounds, and a dip under a sound effect silences only the music', async () => {
+      const music = [{ track: 'dip-pad.wav', start: 0, end: 5, fadeIn: 0, fadeOut: 0, dips: [{ start: 3, end: 3.5 }] }];
+      await saveEpisode(project, ep([{ id: 'quiet', beat: 'problem', clip: 'c003', src: { in: 0, out: 5 } }], { number: 24, output: small, music, sfx: [{ sound: 'hit', at: 2 }, { sound: 'hit', at: 2 }, { sound: 'hit', at: 3.25 }] }));
+      const r = await renderEpisode({ project, episode: 24, mode: 'rough', tools });
+      const low = await left(r.outputPath, LOW);
+      const [both, under] = [peak(low, 1.5, 2.5), peak(low, 3, 3.5)];
+      const m = await left(r.outputPath, MUSIC);
+      console.log(`two hits at once ${both.db.toFixed(2)} dBFS, one hit in the dip ${under.db.toFixed(2)} dBFS; music ${rms(m, 1, 1.8).toFixed(1)} dB, in the dip ${rms(m, 3.1, 3.4).toFixed(1)} dB`);
+      expect(Math.abs(both.db - under.db - 6.02)).toBeLessThanOrEqual(1);
+      expect(Math.abs(under.t - 3.25)).toBeLessThanOrEqual(0.015);
+      expect(rms(m, 1, 1.8) - rms(m, 3.1, 3.4)).toBeGreaterThanOrEqual(40);
+    }, 120_000);
+
+    it('measures each sound file once; the guide cut has no sound effects', async () => {
+      await saveEpisode(project, ep([{ id: 'quiet', beat: 'problem', clip: 'c003', src: { in: 0, out: 2 } }], { number: 25, output: small, sfx: [{ sound: 'hit', at: 0.5 }, { sound: 'hit', at: 1 }, { sound: 'whoosh', at: 1.5 }, { sound: 'pop', at: 30 }] }));
+      const measured = (calls: string[][]) => calls.filter((a) => a.some((x) => x.includes('ebur128'))).length;
+      const rough = counting();
+      await renderEpisode({ project, episode: 25, mode: 'rough', tools: rough.tools });
+      expect(measured(rough.calls)).toBe(2);
+      expect(rough.calls.filter((a) => a.at(-1)!.endsWith('sfx.wav'))).toHaveLength(1);
+      expect(rough.calls.at(-1)).toEqual(expect.arrayContaining(['-i', 'sfx.wav']));
+      const guide = counting();
+      await renderEpisode({ project, episode: 25, mode: 'guide', tools: guide.tools });
+      expect(measured(guide.calls)).toBe(0);
+      expect(guide.calls.flat().filter((x) => x.includes('sfx'))).toEqual([]);
+    }, 120_000);
+
+    it("stops before rendering on a sound that isn't there, and before any chunk on a file FFmpeg can't read", async () => {
+      await saveEpisode(project, ep(one, { number: 26, output: small, sfx: [{ sound: 'hit', at: 0.2 }, { sound: 'sfx/gone.wav', at: 0.5 }] }));
+      const a = counting();
+      await expect(renderEpisode({ project, episode: 26, mode: 'rough', tools: a.tools })).rejects.toMatchObject({ name: 'MirageError', message: 'sfx 2: "sfx/gone.wav" isn\'t a built-in sound or a file in sfx/' });
+      expect(a.calls).toEqual([]);
+      await saveEpisode(project, ep(one, { number: 26, output: small, sfx: [{ sound: 'broken', at: 0.5 }] }));
+      const b = counting();
+      await expect(renderEpisode({ project, episode: 26, mode: 'rough', tools: b.tools })).rejects.toMatchObject({ name: 'MirageError', message: "sfx 1: sfx/broken.wav isn't audio Mirage can read", hint: 'Use a WAV, MP3, M4A, AIFF, FLAC or OGG file.' });
+      expect(b.calls.filter((c) => c.at(-1)!.endsWith('.mov'))).toEqual([]);
+      expect((await readdir(join(project, 'episodes', '26'))).filter((f) => f.startsWith('.work-') || f.includes('.partial-'))).toEqual([]);
+      // The guide cut doesn't use sound effects, so it renders.
+      await expect(renderEpisode({ project, episode: 26, mode: 'guide', tools })).resolves.toBeDefined();
+    }, 120_000);
+  });
 });
 
 describe('loadEpisode errors', () => {

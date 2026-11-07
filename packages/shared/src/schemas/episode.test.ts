@@ -117,3 +117,32 @@ describe('CatalogSchema and MusicLibrarySchema', () => {
     expect(lib.tracks[0]).toMatchObject({ licence: '', bpm: null, beatOffset: null, durationSec: null });
   });
 });
+
+describe('EpisodeSchema sound effects and dips', () => {
+  const cue = { track: 'a.mp3', start: 0, end: 10 };
+  it('stays absent when absent: no sfx on the episode, no dips on a cue', () => {
+    const ep = EpisodeSchema.parse({ ...base, music: [cue] });
+    expect('sfx' in ep).toBe(false);
+    expect('dips' in ep.music[0]!).toBe(false);
+    expect(JSON.stringify(ep)).not.toMatch(/sfx|dips/);
+  });
+  it('takes sound effects with a default gain of -6 dB, and dips on a cue', () => {
+    const ep = EpisodeSchema.parse({ ...base, sfx: [{ sound: 'hit', at: 2 }, { sound: 'sfx/airhorn.wav', at: 0, gainDb: 0 }], music: [{ ...cue, dips: [{ start: 3, end: 3.5 }] }] });
+    expect(ep.sfx).toEqual([{ sound: 'hit', at: 2, gainDb: -6 }, { sound: 'sfx/airhorn.wav', at: 0, gainDb: 0 }]);
+    expect(ep.music[0]!.dips).toEqual([{ start: 3, end: 3.5 }]);
+    expect(EpisodeSchema.parse(JSON.parse(JSON.stringify(ep)))).toEqual(ep);
+  });
+  it('refuses a positive gain, a negative time, an empty sound, an unknown key, and a dip that ends at or before its start', () => {
+    const sfx = (s: object) => EpisodeSchema.safeParse({ ...base, sfx: [s] }).success;
+    expect(sfx({ sound: 'hit', at: 1, gainDb: 0.5 })).toBe(false);
+    expect(sfx({ sound: 'hit', at: -1 })).toBe(false);
+    expect(sfx({ sound: '', at: 1 })).toBe(false);
+    expect(sfx({ sound: 'hit' })).toBe(false);
+    expect(firstIssue(EpisodeSchema.safeParse({ ...base, sfx: [{ sound: 'hit', at: 1, volume: -3 }] }))?.message).toMatch(/^unknown key "volume"/);
+    const dip = (d: object) => EpisodeSchema.safeParse({ ...base, music: [{ ...cue, dips: [d] }] }).success;
+    expect(dip({ start: 3, end: 3 })).toBe(false);
+    expect(dip({ start: 3, end: 2 })).toBe(false);
+    expect(dip({ start: -1, end: 2 })).toBe(false);
+    expect(dip({ start: 1, end: 2, fade: 0.1 })).toBe(false);
+  });
+});

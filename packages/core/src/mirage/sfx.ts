@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, readFile, rename, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import type { MediaTools } from '../media-tools.js';
 import { MirageError } from './errors.js';
+import { decodeMono } from './tempo.js';
 
 /** The built-in sound effects, made with FFmpeg's own sources (nothing downloaded). */
 export const BUILTIN_SFX: readonly string[] = ['whoosh', 'swoosh-out', 'hit', 'riser', 'pop', 'ding', 'click'];
@@ -122,4 +123,110 @@ export async function builtinSfx(name: string, tools: MediaTools, o: { dir?: str
   } finally {
     await Promise.all([rm(raw, { force: true }), rm(part, { force: true })]);
   }
+}
+
+/** The kinds of file a person's sound effect can be, tried in this order for a bare name. */
+export const SFX_EXTENSIONS: readonly string[] = ['.wav', '.mp3', '.m4a', '.aiff', '.aif', '.flac', '.ogg'];
+/** A person's sound effect longer than this is read only this far (its peak is looked for in it; the episode cuts it anyway). */
+const MAX_PERSON_SFX_SEC = 300;
+
+const isFile = (f: string) => {
+  try {
+    return statSync(f).isFile();
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Where an sfx entry's `sound` comes from: the person's file `sfx/<sound>.<ext>` in the project when there is one (it
+ * replaces a built-in of that name), else the built-in. A `sound` with a slash is a path inside the project's sfx folder.
+ * Anything else, or a path that leaves sfx/, stops with the "isn't a built-in sound or a file in sfx/" error, named by
+ * `label` ("sfx 2").
+ */
+export function sfxSource(project: string, sound: string, label = 'sfx'): { builtin: string } | { file: string; path: string } {
+  const parts = sound.split(/[\\/]/);
+  const found = (path: string) => (isFile(join(project, ...path.split('/'))) ? { file: join(project, ...path.split('/')), path } : null);
+  let hit: { file: string; path: string } | null = null;
+  if (parts.length === 1) {
+    // A bare name: sfx/<name>.wav, .mp3, … (or sfx/<name> itself when the name has its extension), else the built-in.
+    const names = SFX_EXTENSIONS.map((e) => `${sound}${e}`);
+    if (SFX_EXTENSIONS.some((e) => sound.toLowerCase().endsWith(e))) names.unshift(sound);
+    for (const name of names) hit ??= found(`sfx/${name}`);
+    if (!hit && BUILTIN_SFX.includes(sound)) return { builtin: sound };
+  } else if (parts[0] === 'sfx' && parts.length > 1 && parts.slice(1).every((p) => p !== '' && p !== '.' && p !== '..')) {
+    hit = found(parts.join('/'));
+  }
+  if (hit) return hit;
+  throw new MirageError('BAD_INPUT', `${label}: "${sound}" isn't a built-in sound or a file in sfx/`, `Built-in sounds: ${BUILTIN_SFX.join(', ')}. Or put the file in the project's sfx folder.`);
+}
+
+/** The "isn't audio Mirage can read" error for the person's file at project path `path`. */
+export const unreadableSfx = (label: string, path: string) => new MirageError('BAD_INPUT', `${label}: ${path} isn't audio Mirage can read`, 'Use a WAV, MP3, M4A, AIFF, FLAC or OGG file.');
+
+/** Whether FFmpeg (or ffprobe) failing on a file says the file can't be read, rather than that the tool is missing, slow or stopped. */
+export const fileUnreadable = (e: unknown) => !['NOT_FOUND', 'TIMEOUT', 'CANCELLED'].includes((e as { code?: string } | null)?.code ?? '');
+
+/**
+ * An sfx entry's sound as a file with its peak time (the moment `at` refers to) and length. A built-in is made in the
+ * data folder (`dir`, as builtinSfx) the first time; a person's file is decoded (mono, 48 kHz) and its loudest sample is
+ * its peak — a silent one peaks at 0. Stops with the sfxSource error, or "isn't audio Mirage can read" when FFmpeg can't
+ * decode the person's file. `tmpDir` is where the decoded samples are written for a moment (default the system's).
+ */
+export async function resolveSfx(
+  project: string, sound: string, tools: MediaTools, o: { label?: string; dir?: string; tmpDir?: string; signal?: AbortSignal } = {},
+): Promise<{ file: string; peakSec: number; durationSec: number }> {
+  const label = o.label ?? 'sfx';
+  const src = sfxSource(project, sound, label);
+  if ('builtin' in src) return builtinSfx(src.builtin, tools, { dir: o.dir, signal: o.signal });
+  let x: Float32Array;
+  try {
+    x = await decodeMono(src.file, join(o.tmpDir ?? tmpdir(), `.sfx-${randomUUID()}.f32`), tools, { sampleRate: SR, maxSec: MAX_PERSON_SFX_SEC, signal: o.signal });
+  } catch (e) {
+    o.signal?.throwIfAborted();
+    throw fileUnreadable(e) ? unreadableSfx(label, src.path) : e;
+  }
+  let at = 0;
+  for (let i = 1; i < x.length; i++) if (Math.abs(x[i]!) > Math.abs(x[at] ?? 0)) at = i;
+  return { file: src.file, peakSec: at / SR, durationSec: x.length / SR };
+}
+
+export interface SfxLevel {
+  /** The loudest 400 ms (EBU R128 momentary loudness, measured every 100 ms), in LUFS. */
+  momentaryMaxLufs: number;
+  /** The loudest sample, in dBFS (-Infinity for silence). */
+  peakDb: number;
+}
+
+/**
+ * A sound file's level as the episode plays it (48 kHz stereo): FFmpeg's ebur128 writes each 100 ms's momentary loudness
+ * and the running sample peak to `metaFile` (removed after), read here. 400 ms of silence after the sound give a short
+ * one a full window.
+ */
+export async function measureSfxLevel(file: string, tools: MediaTools, o: { metaFile: string; signal?: AbortSignal }): Promise<SfxLevel> {
+  // The metadata file is named relative to its folder (FFmpeg runs there), so its path needs no escaping in the graph.
+  const af = `aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo,apad=pad_dur=0.4,ebur128=metadata=1:peak=sample,ametadata=mode=print:file=${basename(o.metaFile)}`;
+  try {
+    await tools.runFfmpeg(['-i', file, '-vn', '-af', af, '-f', 'null', '-'], { cwd: dirname(o.metaFile), signal: o.signal });
+    const text = await readFile(o.metaFile, 'utf8');
+    const values = (key: string) => [...text.matchAll(new RegExp(`^lavfi\\.r128\\.${key}=(\\S+)$`, 'gm'))].map((m) => Number(m[1])).filter(Number.isFinite);
+    const peak = Math.max(0, ...values('sample_peak'));
+    return { momentaryMaxLufs: Math.max(-Infinity, ...values('M')), peakDb: peak > 0 ? 20 * Math.log10(peak) : -Infinity };
+  } finally {
+    await rm(o.metaFile, { force: true });
+  }
+}
+
+/** Below this momentary loudness (R128's absolute gate) a sound counts as silent and is played as it is. */
+const SILENT_LUFS = -70;
+/** No sound is raised past this peak. */
+const SFX_PEAK_CEILING_DB = -1;
+
+/**
+ * The gain, in dB, that puts a sound's loudest 400 ms on `targetLufs`, lowered if it would raise its peak past -1 dBFS.
+ * A silent sound gets 0 (nothing to level, and no division by zero).
+ */
+export function sfxVolumeDb(level: SfxLevel, targetLufs: number): number {
+  if (!(level.momentaryMaxLufs > SILENT_LUFS) || !Number.isFinite(level.peakDb)) return 0;
+  return Math.min(targetLufs - level.momentaryMaxLufs, SFX_PEAK_CEILING_DB - level.peakDb);
 }

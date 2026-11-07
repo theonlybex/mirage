@@ -84,10 +84,27 @@ export const MusicCueSchema = range(
     fadeOut: z.number().min(0).default(1),
     /** Where in the track this cue starts playing. */
     offset: z.number().min(0).default(0),
+    /**
+     * Moments the cue's music goes silent (before a punchline or a reveal), in output seconds inside the cue: it fades out
+     * over the 80 ms before `start` and back in over the 80 ms after `end`. Only this cue's music; absent = none.
+     */
+    dips: z.array(range({}, 'dip')).optional(),
   },
   'music cue',
 );
 export type MusicCue = z.infer<typeof MusicCueSchema>;
+
+/**
+ * A sound effect: `sound` is a built-in name (whoosh, swoosh-out, hit, riser, pop, ding, click; a file of that name in the
+ * project's sfx/ folder replaces it) or a path inside the project starting `sfx/`. `at` is the output time its peak lands
+ * on (a hit's attack, a riser's end). `gainDb` sets it relative to the speech level.
+ */
+export const SfxCueSchema = strictObject({
+  sound: z.string().min(1),
+  at: z.number().min(0),
+  gainDb: z.number().max(0).default(-6),
+});
+export type SfxCue = z.infer<typeof SfxCueSchema>;
 
 export const SlotSchema = range({ id: z.string().min(1), maxWords: z.number().int().min(0), line: z.string().default('') }, 'slot');
 export type Slot = z.infer<typeof SlotSchema>;
@@ -128,6 +145,8 @@ export const EpisodeSchema = strictObject({
   items: z.array(TimelineItemSchema).min(1),
   overlays: z.array(OverlaySchema).default([]),
   music: z.array(MusicCueSchema).default([]),
+  /** Sound effects, in output seconds like music cues; absent = none. */
+  sfx: z.array(SfxCueSchema).optional(),
   slots: z.array(SlotSchema).default([]),
   /** The cut the slots were computed for (written by `slots`, kept in step by `vo`): its fingerprint and where each item sat. */
   slotsCut: strictObject({

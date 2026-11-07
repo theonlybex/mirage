@@ -27395,10 +27395,20 @@ var MusicCueSchema = range(
     fadeIn: external_exports.number().min(0).default(0.5),
     fadeOut: external_exports.number().min(0).default(1),
     /** Where in the track this cue starts playing. */
-    offset: external_exports.number().min(0).default(0)
+    offset: external_exports.number().min(0).default(0),
+    /**
+     * Moments the cue's music goes silent (before a punchline or a reveal), in output seconds inside the cue: it fades out
+     * over the 80 ms before `start` and back in over the 80 ms after `end`. Only this cue's music; absent = none.
+     */
+    dips: external_exports.array(range({}, "dip")).optional()
   },
   "music cue"
 );
+var SfxCueSchema = strictObject2({
+  sound: external_exports.string().min(1),
+  at: external_exports.number().min(0),
+  gainDb: external_exports.number().max(0).default(-6)
+});
 var SlotSchema = range({ id: external_exports.string().min(1), maxWords: external_exports.number().int().min(0), line: external_exports.string().default("") }, "slot");
 var VoiceLineSchema = strictObject2({
   slot: external_exports.string().min(1),
@@ -27430,6 +27440,8 @@ var EpisodeSchema = strictObject2({
   items: external_exports.array(TimelineItemSchema).min(1),
   overlays: external_exports.array(OverlaySchema).default([]),
   music: external_exports.array(MusicCueSchema).default([]),
+  /** Sound effects, in output seconds like music cues; absent = none. */
+  sfx: external_exports.array(SfxCueSchema).optional(),
   slots: external_exports.array(SlotSchema).default([]),
   /** The cut the slots were computed for (written by `slots`, kept in step by `vo`): its fingerprint and where each item sat. */
   slotsCut: strictObject2({
@@ -28325,6 +28337,40 @@ var EMOJI = new RegExp(`${PICTO}|[\\u{FE0F}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E007
 // packages/core/src/mirage/render-episode.ts
 import { existsSync as existsSync2 } from "node:fs";
 import { join as join6, resolve } from "node:path";
+
+// packages/core/src/mirage/sfx.ts
+var SR = 48e3;
+var noise = (color, seed, d) => `anoisesrc=c=${color}:seed=${seed}:r=${SR}:a=0.5:d=${d}`;
+var curve = (expr, d) => `aevalsrc='${expr}':s=${SR}:c=mono:d=${d}`;
+var band = (lo, hi, times = 2) => [...Array(times).fill(`highpass=f=${lo}`), ...Array(times).fill(`lowpass=f=${hi}`)].join(",");
+var RECIPES = {
+  // Pink noise in a 300 Hz–2.4 kHz band, swelling to a point at 0.3 s and falling away (a cubed triangle).
+  whoosh: { durationSec: 0.6, peakSec: 0.3, fadeOutSec: 0.03, graph: `${noise("pink", 11, 0.6)},${band(300, 2400)}[n];${curve("pow(max(0,1-abs(t-0.3)/0.3),3)", 0.6)}[e];[n][e]amultiply[s]` },
+  // Pink noise in a 500 Hz–4.5 kHz band: a 60 ms rise (t⁴), then a 90 ms exponential tail.
+  "swoosh-out": { durationSec: 0.5, peakSec: 0.06, fadeOutSec: 0.05, graph: `${noise("pink", 23, 0.5)},${band(500, 4500)}[n];${curve("if(lt(t,0.06),pow(t/0.06,4),exp(-(t-0.06)/0.09))", 0.5)}[e];[n][e]amultiply[s]` },
+  // A sine falling from 90 to 50 Hz (2 ms rise, 160 ms decay) plus a thump of brown noise in 60–250 Hz decaying in 20 ms.
+  hit: {
+    durationSec: 0.8,
+    peakSec: 0.01,
+    fadeOutSec: 0.05,
+    graph: `${curve("sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))", 0.8)}[b];${noise("brown", 31, 0.8)},${band(60, 250)}[n];${curve("0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))", 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0[s]`
+  },
+  // Pink noise (400 Hz–6 kHz) and a sine at about the same level sweeping from 300 Hz to 1.5 kHz, both growing as t³ to 2 s.
+  riser: {
+    durationSec: 2.02,
+    peakSec: 2,
+    fadeOutSec: 0.019,
+    graph: `${noise("pink", 47, 2.02)},${band(400, 6e3)}[n];${curve("min(1,pow(t/2,3))", 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0[s]`
+  },
+  // A sine dropping from 700 to 250 Hz in about 15 ms, a 5 ms rise and a 22 ms decay.
+  pop: { durationSec: 0.12, peakSec: 5e-3, fadeOutSec: 0.02, graph: `${curve("sin(2*PI*(250*t+450*0.015*(1-exp(-t/0.015))))*if(lt(t,0.005),pow(sin(PI/2*t/0.005),2),exp(-(t-0.005)/0.022))", 0.12)}[s]` },
+  // A bell: 1046.5, 2093 and 3136 Hz at 1, 1/2 and 1/4, decaying in 450, 300 and 180 ms, after a 3 ms strike.
+  ding: { durationSec: 1.5, peakSec: 5e-3, fadeOutSec: 0.3, graph: `${curve("pow(sin(PI/2*min(1,t/0.003)),2)*(sin(2*PI*1046.5*t)*exp(-t/0.45)+0.5*sin(2*PI*2093*t)*exp(-t/0.3)+0.25*sin(2*PI*3136*t)*exp(-t/0.18))", 1.5)}[s]` },
+  // White noise in a 1.5–5 kHz band, a 6 ms burst: up from 1 ms to 2 ms, then a 1.2 ms exponential decay.
+  click: { durationSec: 0.03, peakSec: 2e-3, fadeOutSec: 5e-3, graph: `${noise("white", 59, 0.03)},${band(1500, 5e3)}[n];${curve("if(lt(t,0.001),0,if(lt(t,0.002),(t-0.001)/0.001,exp(-(t-0.002)/0.0012)))", 0.03)}[e];[n][e]amultiply[s]` }
+};
+
+// packages/core/src/mirage/render-episode.ts
 var episodeDir = (project2, n2) => join6(resolve(project2), "episodes", String(n2));
 var noEpisode = (n2) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json does not exist`, "Ask Claude to write the episode timeline first.");
 async function lockEpisode(project2, n2, command) {
@@ -28694,38 +28740,6 @@ function oneLine(text, max = 1e3) {
   const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
-
-// packages/core/src/mirage/sfx.ts
-var SR = 48e3;
-var noise = (color, seed, d) => `anoisesrc=c=${color}:seed=${seed}:r=${SR}:a=0.5:d=${d}`;
-var curve = (expr, d) => `aevalsrc='${expr}':s=${SR}:c=mono:d=${d}`;
-var band = (lo, hi, times = 2) => [...Array(times).fill(`highpass=f=${lo}`), ...Array(times).fill(`lowpass=f=${hi}`)].join(",");
-var RECIPES = {
-  // Pink noise in a 300 Hz–2.4 kHz band, swelling to a point at 0.3 s and falling away (a cubed triangle).
-  whoosh: { durationSec: 0.6, peakSec: 0.3, fadeOutSec: 0.03, graph: `${noise("pink", 11, 0.6)},${band(300, 2400)}[n];${curve("pow(max(0,1-abs(t-0.3)/0.3),3)", 0.6)}[e];[n][e]amultiply[s]` },
-  // Pink noise in a 500 Hz–4.5 kHz band: a 60 ms rise (t⁴), then a 90 ms exponential tail.
-  "swoosh-out": { durationSec: 0.5, peakSec: 0.06, fadeOutSec: 0.05, graph: `${noise("pink", 23, 0.5)},${band(500, 4500)}[n];${curve("if(lt(t,0.06),pow(t/0.06,4),exp(-(t-0.06)/0.09))", 0.5)}[e];[n][e]amultiply[s]` },
-  // A sine falling from 90 to 50 Hz (2 ms rise, 160 ms decay) plus a thump of brown noise in 60–250 Hz decaying in 20 ms.
-  hit: {
-    durationSec: 0.8,
-    peakSec: 0.01,
-    fadeOutSec: 0.05,
-    graph: `${curve("sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))", 0.8)}[b];${noise("brown", 31, 0.8)},${band(60, 250)}[n];${curve("0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))", 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0[s]`
-  },
-  // Pink noise (400 Hz–6 kHz) and a sine at about the same level sweeping from 300 Hz to 1.5 kHz, both growing as t³ to 2 s.
-  riser: {
-    durationSec: 2.02,
-    peakSec: 2,
-    fadeOutSec: 0.019,
-    graph: `${noise("pink", 47, 2.02)},${band(400, 6e3)}[n];${curve("min(1,pow(t/2,3))", 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0[s]`
-  },
-  // A sine dropping from 700 to 250 Hz in about 15 ms, a 5 ms rise and a 22 ms decay.
-  pop: { durationSec: 0.12, peakSec: 5e-3, fadeOutSec: 0.02, graph: `${curve("sin(2*PI*(250*t+450*0.015*(1-exp(-t/0.015))))*if(lt(t,0.005),pow(sin(PI/2*t/0.005),2),exp(-(t-0.005)/0.022))", 0.12)}[s]` },
-  // A bell: 1046.5, 2093 and 3136 Hz at 1, 1/2 and 1/4, decaying in 450, 300 and 180 ms, after a 3 ms strike.
-  ding: { durationSec: 1.5, peakSec: 5e-3, fadeOutSec: 0.3, graph: `${curve("pow(sin(PI/2*min(1,t/0.003)),2)*(sin(2*PI*1046.5*t)*exp(-t/0.45)+0.5*sin(2*PI*2093*t)*exp(-t/0.3)+0.25*sin(2*PI*3136*t)*exp(-t/0.18))", 1.5)}[s]` },
-  // White noise in a 1.5–5 kHz band, a 6 ms burst: up from 1 ms to 2 ms, then a 1.2 ms exponential decay.
-  click: { durationSec: 0.03, peakSec: 2e-3, fadeOutSec: 5e-3, graph: `${noise("white", 59, 0.03)},${band(1500, 5e3)}[n];${curve("if(lt(t,0.001),0,if(lt(t,0.002),(t-0.001)/0.001,exp(-(t-0.002)/0.0012)))", 0.03)}[e];[n][e]amultiply[s]` }
-};
 
 // packages/viewer/src/fallback.ts
 import { readFileSync as readFileSync4 } from "node:fs";

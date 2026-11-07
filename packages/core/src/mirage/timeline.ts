@@ -68,23 +68,28 @@ const shiftRange = <T extends { start: number; end: number }>(r: T, at: number, 
 
 /**
  * Opens `delta` seconds at output time `at`: everything after moves, anything spanning it stretches. A negative `delta`
- * removes the time just before `at`; ranges inside it collapse to its start (never end before they start; see dropCollapsed).
- * Items are untouched.
+ * removes the time just before `at`; ranges inside it collapse to its start (never end before they start; see dropCollapsed),
+ * and so do sound effects. Items are untouched.
  */
 export function shiftAfter(ep: Episode, at: number, delta: number): Episode {
-  return {
+  const shifted: Episode = {
     ...ep,
     overlays: ep.overlays.map((o) => shiftRange(o, at, delta)),
-    music: ep.music.map((m) => shiftRange(m, at, delta)),
+    music: ep.music.map((m) => {
+      const cue = shiftRange(m, at, delta);
+      return m.dips ? { ...cue, dips: m.dips.map((d) => shiftRange(d, at, delta)) } : cue;
+    }),
     slots: ep.slots.map((s) => shiftRange(s, at, delta)),
     voiceover: ep.voiceover
       ? { ...ep.voiceover, lines: ep.voiceover.lines.map((l) => (l.at >= at - EPS ? { ...l, at: l.at + delta } : l)) }
       : null,
   };
+  if (ep.sfx) shifted.sfx = ep.sfx.map((x) => ({ ...x, at: shiftEdge(x.at, x.at >= at - EPS, at, delta) }));
+  return shifted;
 }
 
 /**
- * Removes overlays, music cues and slots that closing a gap (shiftAfter) left shorter than one frame, naming each one
+ * Removes overlays, music cues (and dips of a cue) and slots that closing a gap (shiftAfter) left shorter than one frame, naming each one
  * removed. `before` is the episode before the shifts (same lists, same order): a range already that short there was
  * written so and is kept.
  */
@@ -98,7 +103,12 @@ export function dropCollapsed(ep: Episode, before: Episode): { episode: Episode;
       return false;
     });
   const overlays = keep(ep.overlays, before.overlays, (o, i) => `overlay ${i + 1} ("${o.text}")`);
-  const music = keep(ep.music, before.music, (c, i) => `music cue ${i + 1} (${c.track})`);
+  const music = keep(ep.music, before.music, (c, i) => `music cue ${i + 1} (${c.track})`).map((c) => {
+    const i = ep.music.indexOf(c);
+    if (!c.dips) return c;
+    const dips = keep(c.dips, before.music[i]?.dips ?? [], (d) => `music cue ${i + 1} (${c.track})'s dip at ${d.start.toFixed(2)} s`);
+    return dips.length === c.dips.length ? c : { ...c, dips };
+  });
   const slots = keep(ep.slots, before.slots, (s) => `slot ${s.id}${s.line.trim() ? ` (line "${s.line}")` : ''}`);
   return dropped.length ? { episode: { ...ep, overlays, music, slots }, dropped } : { episode: ep, dropped };
 }

@@ -42,7 +42,7 @@ const progress = (f: number) => {
 const print = (lines: string[]) => lines.forEach((l) => console.log(l));
 
 async function check(project: string, n: number) {
-  const r = await checkEpisode(project, n);
+  const r = await checkEpisode(project, n, await realMediaTools());
   print(checkReport(r));
   return r.episode;
 }

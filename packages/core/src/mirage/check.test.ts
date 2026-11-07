@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
+import { realMediaTools } from '../media-tools.js';
 import { checkEpisode } from './check.js';
 import { saveCatalog } from './ingest.js';
 import { saveEpisode } from './render-episode.js';
@@ -234,5 +235,79 @@ describe('checkEpisode', () => {
       'item a keeps its live audio, which plays only at normal speed, and c001 has no footage left to reach a beat — left unsnapped',
       'item b could not reach a beat: c001 has too little footage left — left unsnapped',
     ]);
+  });
+
+  describe('sound effects and dips', () => {
+    const plain = [{ id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 10 } }];
+    const BUILTINS = 'Built-in sounds: whoosh, swoosh-out, hit, riser, pop, ding, click. Or put the file in the project\'s sfx folder.';
+
+    it("stops on a sound that isn't a built-in or a file in sfx/", async () => {
+      const { dir } = await project({ words: [], segments: [], speech: [] });
+      for (const sound of ['airhorn', 'sfx/gone.wav', '../talk.mov']) {
+        await saveEpisode(dir, base({ items: plain, music: [], sfx: [{ sound: 'hit', at: 1 }, { sound, at: 2 }] }));
+        await expect(checkEpisode(dir, 1)).rejects.toMatchObject({ name: 'MirageError', message: `sfx 2: "${sound}" isn't a built-in sound or a file in sfx/`, hint: BUILTINS });
+      }
+    });
+
+    it("stops on a file in sfx/ that FFmpeg can't read, and takes a silent one", async () => {
+      const { dir } = await project({ words: [], segments: [], speech: [] });
+      await mkdir(join(dir, 'sfx'));
+      await writeFile(join(dir, 'sfx', 'boom.wav'), 'not a wave file');
+      await saveEpisode(dir, base({ items: plain, music: [], sfx: [{ sound: 'boom', at: 1 }] }));
+      const tools = await realMediaTools();
+      await expect(checkEpisode(dir, 1, tools)).rejects.toMatchObject({ name: 'MirageError', message: "sfx 1: sfx/boom.wav isn't audio Mirage can read", hint: 'Use a WAV, MP3, M4A, AIFF, FLAC or OGG file.' });
+      // Without FFmpeg at hand the file is only looked for (the render reads it).
+      expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+      const { run } = await import('@wordedits/sidecars');
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono', '-t', '0.5', join(dir, 'sfx', 'boom.wav')]);
+      expect((await checkEpisode(dir, 1, tools)).warnings).toEqual([]);
+    });
+
+    it('warns about a sound effect after the end, too many in a minute, and a dip outside its cue', async () => {
+      const { dir } = await project({ words: [], segments: [], speech: [] });
+      const busy = [0.5, 8, 15, 22, 30, 38, 45, 59].map((at) => ({ sound: 'pop', at }));
+      await saveEpisode(dir, base({
+        items: [{ id: 'b', beat: 'problem', clip: 'c001', src: { in: 0, out: 30 } }, { id: 'c', beat: 'problem', clip: 'c001', src: { in: 0, out: 30 } }, { id: 'd', beat: 'problem', clip: 'c001', src: { in: 0, out: 10 } }],
+        music: [{ track: 'pad.wav', start: 0, end: 6, dips: [{ start: 2, end: 2.5 }, { start: 7, end: 7.5 }, { start: 5.8, end: 6.4 }] }],
+        sfx: [...busy, { sound: 'whoosh', at: 99 }],
+      }));
+      // The whoosh never plays, so it isn't counted; the dip at 5.8–6.4 s is partly inside its cue.
+      expect((await checkEpisode(dir, 1)).warnings).toEqual([
+        'sfx 9 (whoosh) is at 99.00 s, after the episode ends (70.00 s) — it will never play',
+        '8 sound effects within one minute (from 0.5 s) — sound effects on almost every cut cheapen the video; keep the ones that land a joke or a reveal',
+        'music cue 1 has a dip at 7.00–7.50 s outside the cue (0.00–6.00 s) — it does nothing',
+      ]);
+    });
+
+    it('counts sound effects in the busiest minute, and over the whole video when it is shorter', async () => {
+      const { dir } = await project({ words: [], segments: [], speech: [] });
+      const at = (ts: number[]) => ts.map((t) => ({ sound: 'click', at: t }));
+      const items = [{ id: 'b', beat: 'problem', clip: 'c001', src: { in: 0, out: 30 } }, { id: 'c', beat: 'problem', clip: 'c001', src: { in: 0, out: 30 } }, { id: 'd', beat: 'problem', clip: 'c001', src: { in: 0, out: 30 } }];
+      // Six a minute is fine; seven spread over 61 s never sit in one minute.
+      await saveEpisode(dir, base({ items, music: [], sfx: at([1, 2, 3, 4, 5, 6]) }));
+      expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+      await saveEpisode(dir, base({ items, music: [], sfx: at([0, 10, 20, 30, 40, 50, 61]) }));
+      expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+      // From 0 s a minute holds 7; the busiest, from 25 s, holds 8 (in any order in the file).
+      await saveEpisode(dir, base({ items, music: [], sfx: at([0, 25, 81, 30, 41, 42, 43, 50, 70]) }));
+      expect((await checkEpisode(dir, 1)).warnings).toEqual(['8 sound effects within one minute (from 25.0 s) — sound effects on almost every cut cheapen the video; keep the ones that land a joke or a reveal']);
+      await saveEpisode(dir, base({ items: plain, music: [], sfx: at([0, 0.5, 1, 1.5, 2, 2.5, 3]) }));
+      expect((await checkEpisode(dir, 1)).warnings).toEqual(['7 sound effects within one minute (from 0.0 s) — sound effects on almost every cut cheapen the video; keep the ones that land a joke or a reveal']);
+    });
+
+    it('moves sound effects and dips with the picture when it snaps a montage to the beat', async () => {
+      const { dir } = await project({ words: [], segments: [], speech: [] });
+      await saveEpisode(dir, base({ sfx: [{ sound: 'hit', at: 0.5 }, { sound: 'hit', at: 3 }], music: [{ track: 'beat.wav', start: 0, end: 6, dips: [{ start: 3, end: 3.5 }] }] }));
+      const r = await checkEpisode(dir, 1);
+      const delta = r.episode.items[0].src.out - 1.3;
+      expect(Math.abs(delta)).toBeGreaterThan(0.01);
+      const [hit1, hit2] = r.episode.sfx!;
+      expect(hit1!.at).toBe(0.5);
+      expect(hit2!.at).toBeCloseTo(3 + delta, 6);
+      const [dip] = r.episode.music[0].dips!;
+      expect(dip!.start).toBeCloseTo(3 + delta, 6);
+      expect(dip!.end).toBeCloseTo(3.5 + delta, 6);
+      expect(r.warnings).toEqual([]);
+    });
   });
 });

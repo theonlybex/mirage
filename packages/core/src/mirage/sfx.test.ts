@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
-import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { run } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
-import { BUILTIN_SFX, builtinSfx, sfxDir, SFX_RECIPE_VERSION } from './sfx.js';
+import { BUILTIN_SFX, builtinSfx, measureSfxLevel, resolveSfx, sfxDir, sfxSource, SFX_RECIPE_VERSION, sfxVolumeDb } from './sfx.js';
 
 const SR = 48000;
 /** The plan's names, lengths and peak times, copied here so the test checks the module against the spec, not itself. */
@@ -173,5 +173,109 @@ describe('builtinSfx (real ffmpeg)', () => {
 
   it('refuses a name that is not a built-in', async () => {
     await expect(builtinSfx('airhorn', tools, { dir })).rejects.toThrow(/airhorn/);
+  });
+});
+
+describe('sfxSource', () => {
+  let project: string;
+  beforeAll(async () => {
+    project = await mkdtemp(join(tmpdir(), 'we-sfx-src-'));
+    await mkdir(join(project, 'sfx', 'more'), { recursive: true });
+    for (const f of ['pop.mp3', 'airhorn.wav', 'more/boing.flac', 'notes.txt']) await writeFile(join(project, 'sfx', f), '');
+    await mkdir(join(project, 'music'));
+    await writeFile(join(project, 'music', 'x.wav'), '');
+  });
+  const notFound = (sound: string, k = 1) => ({
+    name: 'MirageError', code: 'BAD_INPUT',
+    message: `sfx ${k}: "${sound}" isn't a built-in sound or a file in sfx/`,
+    hint: 'Built-in sounds: whoosh, swoosh-out, hit, riser, pop, ding, click. Or put the file in the project\'s sfx folder.',
+  });
+  it("takes the person's sfx/<name> file over the built-in of that name, else the built-in", () => {
+    expect(sfxSource(project, 'pop', 'sfx 1')).toEqual({ file: join(project, 'sfx', 'pop.mp3'), path: 'sfx/pop.mp3' });
+    expect(sfxSource(project, 'hit', 'sfx 1')).toEqual({ builtin: 'hit' });
+    expect(sfxSource(project, 'airhorn', 'sfx 1')).toEqual({ file: join(project, 'sfx', 'airhorn.wav'), path: 'sfx/airhorn.wav' });
+  });
+  it('takes a path inside sfx/ as that file', () => {
+    expect(sfxSource(project, 'sfx/airhorn.wav', 'sfx 1')).toEqual({ file: join(project, 'sfx', 'airhorn.wav'), path: 'sfx/airhorn.wav' });
+    expect(sfxSource(project, 'sfx/more/boing.flac', 'sfx 1')).toEqual({ file: join(project, 'sfx', 'more', 'boing.flac'), path: 'sfx/more/boing.flac' });
+    // A file in sfx/ of another kind is found here; whether FFmpeg can read it is checked when it is used.
+    expect(sfxSource(project, 'sfx/notes.txt', 'sfx 1')).toEqual({ file: join(project, 'sfx', 'notes.txt'), path: 'sfx/notes.txt' });
+  });
+  it('refuses an unknown name, a missing file, and any path outside sfx/', () => {
+    for (const sound of ['airhorn2', 'sfx/gone.wav', 'sfx/../music/x.wav', '../sfx/pop.mp3', 'music/x.wav', join(project, 'sfx', 'airhorn.wav'), 'sfx/more', 'sfx/', 'Hit']) {
+      expect(() => sfxSource(project, sound, 'sfx 3')).toThrow(expect.objectContaining(notFound(sound, 3)));
+    }
+  });
+});
+
+describe('sfxVolumeDb', () => {
+  it("sets the loudest 400 ms on the target, never raising the peak past -1 dBFS; a silent sound isn't changed", () => {
+    expect(sfxVolumeDb({ momentaryMaxLufs: -12, peakDb: -1.5 }, -20)).toBeCloseTo(-8, 6);
+    expect(sfxVolumeDb({ momentaryMaxLufs: -30, peakDb: -6 }, -20)).toBeCloseTo(5, 6);
+    expect(sfxVolumeDb({ momentaryMaxLufs: -40, peakDb: -10 }, -20)).toBeCloseTo(9, 6);
+    expect(sfxVolumeDb({ momentaryMaxLufs: -Infinity, peakDb: -Infinity }, -20)).toBe(0);
+    expect(sfxVolumeDb({ momentaryMaxLufs: -120.7, peakDb: -Infinity }, -20)).toBe(0);
+    expect(sfxVolumeDb({ momentaryMaxLufs: -80, peakDb: -70 }, -20)).toBe(0);
+  });
+});
+
+describe('resolveSfx and measureSfxLevel (real ffmpeg)', () => {
+  let tools: MediaTools;
+  let project: string;
+  let cache: string;
+  const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+  beforeAll(async () => {
+    tools = await realMediaTools();
+    project = await mkdtemp(join(tmpdir(), "we sfx 'q' "));
+    cache = await mkdtemp(join(tmpdir(), 'we-sfx-res-'));
+    await mkdir(join(project, 'sfx'));
+    // A click at 0.25 s in a 1 s mono file; a silent second; a minute of tone; bytes that aren't audio.
+    await gen(['-f', 'lavfi', '-i', "aevalsrc='0.5*between(t,0.25,0.2502)':s=44100:d=1", join(project, 'sfx', 'tick.wav')]);
+    await gen(['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '1', join(project, 'sfx', 'hush.wav')]);
+    await gen(['-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000:duration=60', '-c:a', 'libmp3lame', join(project, 'sfx', 'long.mp3')]);
+    await writeFile(join(project, 'sfx', 'broken.wav'), 'RIFF but not really a wave file');
+  });
+  it('makes a built-in in the data folder and gives its peak and length', async () => {
+    const r = await resolveSfx(project, 'riser', tools, { dir: cache });
+    expect(r).toEqual({ file: join(cache, 'v1', 'riser.wav'), peakSec: 2, durationSec: 2.02 });
+  });
+  it("gives a person's file its loudest sample as the peak, and its length", async () => {
+    const r = await resolveSfx(project, 'tick', tools, { dir: cache });
+    expect(r.file).toBe(join(project, 'sfx', 'tick.wav'));
+    expect(Math.abs(r.peakSec - 0.25)).toBeLessThan(0.002);
+    expect(r.durationSec).toBeCloseTo(1, 2);
+    const hush = await resolveSfx(project, 'sfx/hush.wav', tools, { dir: cache });
+    expect(hush).toMatchObject({ peakSec: 0 });
+    expect(hush.durationSec).toBeCloseTo(1, 2);
+  });
+  it("says FFmpeg is missing, not that the file can't be read, when FFmpeg isn't there", async () => {
+    const missing = Object.assign(new Error('ffmpeg was not found'), { code: 'NOT_FOUND' });
+    const noFfmpeg = { ...tools, runFfmpeg: async () => { throw missing; } };
+    await expect(resolveSfx(project, 'tick', noFfmpeg, { dir: cache })).rejects.toBe(missing);
+  });
+  it("refuses a file FFmpeg can't read", async () => {
+    await expect(resolveSfx(project, 'broken', tools, { dir: cache, label: 'sfx 2' })).rejects.toMatchObject({
+      name: 'MirageError', code: 'BAD_INPUT', message: "sfx 2: sfx/broken.wav isn't audio Mirage can read", hint: 'Use a WAV, MP3, M4A, AIFF, FLAC or OGG file.',
+    });
+  });
+  it('measures the loudest 400 ms and the peak of the stereo sound as the episode plays it', async () => {
+    const work = await mkdtemp(join(tmpdir(), "we sfx work 'q' "));
+    const hit = await measureSfxLevel((await builtinSfx('hit', tools, { dir: cache })).file, tools, { metaFile: join(work, 'level-0.txt') });
+    expect(hit.peakDb).toBeCloseTo(-1.5, 1);
+    expect(hit.momentaryMaxLufs).toBeGreaterThan(-16);
+    expect(hit.momentaryMaxLufs).toBeLessThan(-8);
+    // A 30 ms click is measured over 400 ms of silence after it, not skipped.
+    const click = await measureSfxLevel((await builtinSfx('click', tools, { dir: cache })).file, tools, { metaFile: join(work, 'level-1.txt') });
+    expect(click.momentaryMaxLufs).toBeGreaterThan(-45);
+    expect(click.momentaryMaxLufs).toBeLessThan(-20);
+    const hush = await measureSfxLevel(join(project, 'sfx', 'hush.wav'), tools, { metaFile: join(work, 'level-2.txt') });
+    expect(hush.peakDb).toBe(-Infinity);
+    expect(sfxVolumeDb(hush, -20)).toBe(0);
+    // A steady mono tone at -18 dBFS, played in stereo (-3 dB a side): its momentary loudness is its loudness.
+    const long = await measureSfxLevel(join(project, 'sfx', 'long.mp3'), tools, { metaFile: join(work, 'level-3.txt') });
+    expect(long.peakDb).toBeGreaterThan(-22);
+    expect(long.peakDb).toBeLessThan(-20);
+    expect(long.momentaryMaxLufs).toBeGreaterThan(long.peakDb - 6);
+    expect(await readdir(work)).toEqual([]);
   });
 });
