@@ -144,13 +144,18 @@ export interface GroupedWord {
   index: number;
 }
 
-/** Groups words into caption phrases: a group ends at a sentence end, a gap over `maxGap`, or when `maxChars`/`maxWords` would pass. */
-export function groupWords(words: Word[], o: { maxChars: number; maxWords?: number; maxGap: number }): GroupedWord[][] {
+const HAS_WORD = /[\p{L}\p{N}]/u;
+
+/**
+ * Groups words into caption phrases: a group ends at a sentence end, a gap over `maxGap`, or when `maxChars`/`maxWords`
+ * would pass. `wordsOnly` leaves out words with no letter or digit ("—", "..."), which would be a caption of their own.
+ */
+export function groupWords(words: Word[], o: { maxChars: number; maxWords?: number; maxGap: number; wordsOnly?: boolean }): GroupedWord[][] {
   const groups: GroupedWord[][] = [];
   let cur: GroupedWord[] = [];
   for (const [index, word] of words.entries()) {
     const text = tidy(word.w);
-    if (!text) continue;
+    if (!text || (o.wordsOnly && !HAS_WORD.test(text))) continue;
     const last = cur[cur.length - 1];
     const joined = [...cur.map((x) => x.text), text].join(' ');
     if (last && (joined.length > o.maxChars || (o.maxWords !== undefined && cur.length >= o.maxWords) || word.start - last.end > o.maxGap || SENTENCE_END.test(last.text))) {

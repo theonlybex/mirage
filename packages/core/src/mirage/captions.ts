@@ -73,7 +73,7 @@ function wordLines(span: { start: number; end: number }, group: GroupedWord[], p
  */
 export function popLines(words: Word[], o: { durationSec: number; highlight: Captions['highlight'] }): CaptionLine[] {
   const keys = keyWords(words, o.highlight);
-  const groups = groupWords(words, { maxChars: 16, maxWords: 3, maxGap: 0.6 });
+  const groups = groupWords(words, { maxChars: 16, maxWords: 3, maxGap: 0.6, wordsOnly: true });
   return groupSpans(groups, { durationSec: o.durationSec, lead: 0.1, minDur: 0.5 }).flatMap((span) => {
     const firstKey = span.group.find((x) => keys.has(x.index));
     return wordLines(span, span.group, (k) =>
@@ -91,7 +91,7 @@ export function popLines(words: Word[], o: { durationSec: number; highlight: Cap
  * the next word's start (the first from the phrase's start, the last until its end).
  */
 export function karaokeLines(words: Word[], o: { durationSec: number }): CaptionLine[] {
-  const groups = groupWords(words, { maxChars: 38, maxGap: 0.6 });
+  const groups = groupWords(words, { maxChars: 38, maxGap: 0.6, wordsOnly: true });
   return groupSpans(groups, { durationSec: o.durationSec, lead: 0.15, minDur: 0.8 }).flatMap((span) =>
     wordLines(span, span.group, (k) => span.group.map((x, j) => ({ text: x.text, ...(j === k ? { lit: true } : {}) }))),
   );

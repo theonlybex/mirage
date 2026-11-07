@@ -38027,12 +38027,13 @@ var EMOJI = new RegExp(`${PICTO}|[\\u{FE0F}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E007
 var undrawable = (text) => new RegExp(PICTO, "u").test(text);
 var CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]+/gu;
 var tidy = (t) => t.replace(EMOJI, "").replace(/\s+([.,!?;:])/g, "$1").trim();
+var HAS_WORD = /[\p{L}\p{N}]/u;
 function groupWords(words, o2) {
   const groups = [];
   let cur = [];
   for (const [index, word] of words.entries()) {
     const text = tidy(word.w);
-    if (!text) continue;
+    if (!text || o2.wordsOnly && !HAS_WORD.test(text)) continue;
     const last = cur[cur.length - 1];
     const joined = [...cur.map((x) => x.text), text].join(" ");
     if (last && (joined.length > o2.maxChars || o2.maxWords !== void 0 && cur.length >= o2.maxWords || word.start - last.end > o2.maxGap || SENTENCE_END3.test(last.text))) {

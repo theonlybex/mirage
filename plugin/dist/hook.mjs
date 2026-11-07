@@ -31190,7 +31190,7 @@ function groupWords(words, o2) {
   let cur = [];
   for (const [index, word] of words.entries()) {
     const text = tidy(word.w);
-    if (!text) continue;
+    if (!text || o2.wordsOnly && !HAS_WORD.test(text)) continue;
     const last = cur[cur.length - 1];
     const joined = [...cur.map((x) => x.text), text].join(" ");
     if (last && (joined.length > o2.maxChars || o2.maxWords !== void 0 && cur.length >= o2.maxWords || word.start - last.end > o2.maxGap || SENTENCE_END3.test(last.text))) {
@@ -31324,7 +31324,7 @@ function buildAss(o2) {
     ""
   ].join("\n");
 }
-var r34, EPS2, SENTENCE_END3, PICTO, EMOJI, undrawable, CJK, tidy, assText, WHITE, BLACK, BOX;
+var r34, EPS2, SENTENCE_END3, PICTO, EMOJI, undrawable, CJK, tidy, HAS_WORD, assText, WHITE, BLACK, BOX;
 var init_overlays = __esm({
   "packages/core/src/mirage/overlays.ts"() {
     "use strict";
@@ -31338,6 +31338,7 @@ var init_overlays = __esm({
     undrawable = (text) => new RegExp(PICTO, "u").test(text);
     CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]+/gu;
     tidy = (t) => t.replace(EMOJI, "").replace(/\s+([.,!?;:])/g, "$1").trim();
+    HAS_WORD = /[\p{L}\p{N}]/u;
     assText = (t) => t.replace(/\\/g, "/").replace(/\{/g, "(").replace(/\}/g, ")").replace(/\r?\n/g, "\\N");
     WHITE = "&H00FFFFFF";
     BLACK = "&H00000000";

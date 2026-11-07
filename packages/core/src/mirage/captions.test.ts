@@ -100,6 +100,26 @@ describe('robustness', () => {
   });
 });
 
+describe('words with no letters', () => {
+  it('are no caption of their own: a lone "—" after a gap or a sentence end gets no line and moves no neighbour', () => {
+    const base = [w('first.', 0, 0.4), w('second', 3, 3.4)];
+    const withDash = [w('first.', 0, 0.4), w('—', 1.5, 1.6), w('second', 3, 3.4)];
+    expect(popLines(withDash, { durationSec: 9, highlight: [] })).toEqual(popLines(base, { durationSec: 9, highlight: [] }));
+    expect(karaokeLines(withDash, { durationSec: 9 })).toEqual(karaokeLines(base, { durationSec: 9 }));
+    const lone = popLines([w('...', 0, 1), w('hi', 2, 2.2)], { durationSec: 9, highlight: [] });
+    expect(lone.flatMap((l) => l.parts.map((p) => p.text))).toEqual(['HI']);
+  });
+  it('are no part when they sit inside a group', () => {
+    const words = [w('wait', 0, 0.3), w('—', 0.3, 0.4), w('what', 0.4, 0.7)];
+    expect(shown(popLines(words, { durationSec: 9, highlight: [] })).map((l) => l[2])).toEqual(['WAIT', 'WAIT WHAT']);
+    const karaoke = karaokeLines(words, { durationSec: 9 });
+    expect(karaoke.map((l) => l.parts.map((p) => p.text))).toEqual([['wait', 'what'], ['wait', 'what']]);
+  });
+  it('still show in phrase captions, as before', () => {
+    expect(groupCaptions([w('wait', 0, 0.3), w('—', 0.3, 0.4)], { durationSec: 9 }).map((c) => c.text)).toEqual(['wait —']);
+  });
+});
+
 describe('captionWarnings', () => {
   const words = [w('gulp', 0, 0.3), w('glug.', 0.3, 0.6)];
   it('warns about highlight words never said, and highlight outside pop', () => {
