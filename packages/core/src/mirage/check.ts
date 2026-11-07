@@ -25,6 +25,9 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
     if (o.start >= D - 1e-6) out.push(`overlay ${i + 1} ("${o.text}") starts at ${s2(o.start)} s, after the episode ends (${s2(D)} s) — it will never show`);
     if (undrawable(o.text)) out.push(`overlay ${i + 1} ("${o.text}") has emoji, which can't be drawn — they are left out`);
     if (o.sub && undrawable(o.sub)) out.push(`overlay ${i + 1} ("${o.sub}") has emoji, which can't be drawn — they are left out`);
+    // A subtitle sits where automatic captions do, on another layer, so libass doesn't move either out of the way.
+    const auto = (ep.captions?.style ?? 'phrase') !== 'chosen' && ep.captions?.style !== 'off';
+    if (o.kind === 'subtitle' && auto) out.push(`subtitle overlay ${i + 1} ("${o.text}") shows over the automatic captions — use captions style chosen, or remove it`);
   });
   // A move's times are seconds of the shot's output length, held frames included. It never plays when it starts on the
   // frame after the shot's last (moveFrames' timing).

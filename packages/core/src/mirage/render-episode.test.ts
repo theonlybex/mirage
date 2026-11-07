@@ -8,7 +8,7 @@ import { locate, run, runPath, SidecarError, wordsFromWhisperJson } from '@worde
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog, sha256File } from './ingest.js';
-import { cardImagesFor } from './cards.js';
+import { cardImagesFor, type CardImage } from './cards.js';
 import { bundledFontsDir, CAPTION_FONT_FILE, MONO_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
@@ -140,8 +140,10 @@ describe('itemChunkArgs with picture cards', () => {
     // FFmpeg's own rotation is off: Mirage turns the photo upright itself (EXIF 6: a quarter turn clockwise), the same
     // with every FFmpeg.
     expect(args.slice(0, 7)).toEqual(['-noautorotate', '-f', 'jpeg_pipe', '-framerate', '30', '-i', '/proj/pics/a b.jpg']);
-    expect(graph).toContain('[0:v]sidedata=mode=delete:type=DISPLAYMATRIX,transpose=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,');
+    expect(graph).toContain('[0:v]sidedata=mode=delete:type=DISPLAYMATRIX,transpose=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,scale=out_range=tv:out_color_matrix=bt709,format=yuv420p,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,');
     expect(args.slice(11, 18)).toEqual(['-noautorotate', '-f', 'png_pipe', '-framerate', '30', '-i', '/proj/logo.png']);
+    // A JPEG (full range, BT.601) is brought to the clips' limited range and BT.709; a PNG is not.
+    expect(graph.match(/out_range=tv/g)).toHaveLength(1);
     // A PNG is laid on black first (its transparent parts black); hold included.
     expect(graph).toContain('[2:v]sidedata=mode=delete:type=DISPLAYMATRIX,format=rgba,premultiply=inplace=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=30,setpts=PTS-STARTPTS[v2]');
   });
@@ -230,12 +232,22 @@ describe('chunkSize', () => {
     const src = (width: number, height: number) => ({ path: '/x', hasAudio: false, durationSec: 1, width, height });
     expect(chunkSize(new Map([['a', src(1920, 1080)], ['b', src(1080, 1920)]]))).toBe(30);
     expect(chunkSize(new Map([['a', src(1920, 1080)], ['b', src(3840, 2160)]]))).toBe(12);
+    // A card's picture counts like a clip (FFmpeg 7 and newer decode each input's frame ahead); unknown size is small.
+    const pic = (width: number, height: number): CardImage => ({ path: '/p.jpg', format: 'jpeg', width, height });
+    expect(chunkSize(new Map([['a', src(1920, 1080)]]), new Map<string, CardImage>([['p', pic(1920, 1080)], ['q', pic(1080, 1920)], ['r', { path: '/r.png', format: 'png' }]]))).toBe(30);
+    expect(chunkSize(new Map(), new Map([['p', pic(1920, 1080)], ['q', pic(6000, 4000)]]))).toBe(12);
     expect(chunkItems(layoutTimeline(ep(Array.from({ length: 25 }, (_, i) => ({ id: `i${i}`, beat: 'montage', clip: 'c001', src: { in: 0, out: 1 } })))), 12).map((c) => c.length)).toEqual([12, 12, 1]);
   });
 });
 
 describe('episodeChunks', () => {
   const o = { width: 1080, height: 1920, fps: 30 };
+  it('puts 12 picture cards in a chunk when their pictures are larger than 1080p, 30 when not', () => {
+    const e = ep(Array.from({ length: 25 }, (_, i) => ({ id: `p${i}`, beat: 'montage', card: { style: 'image', image: `pics/${i}.jpg`, sec: 0.5 } })));
+    const shape = (width: number, height: number) => ({ ...o, cardImages: new Map(e.items.map((it) => [it.id, { path: `/proj/${it.id}.jpg`, format: 'jpeg' as const, width, height }])) });
+    expect(episodeChunks(layoutTimeline(e), shape(6000, 4000), new Map(), '/w/chunk-000.mov').map((c) => c.length)).toEqual([12, 12, 1]);
+    expect(episodeChunks(layoutTimeline(e), shape(1920, 1080), new Map(), '/w/chunk-000.mov').map((c) => c.length)).toEqual([25]);
+  });
   const items = (n: number, move: boolean) =>
     Array.from({ length: n }, (_, i) => ({ id: `i${i}`, beat: 'montage', clip: 'c002', src: { in: i, out: i + 2 }, audio: 'keep', frame: 'fill', focus: { x: 0.3, y: 0.5 }, ...(move ? { move: { zoom: 1.25, focus: { x: 0.6 }, start: 0.5 } } : {}) }));
   const chunks = (n: number, move: boolean) => {
@@ -1488,6 +1500,8 @@ describe('cards (real ffmpeg)', () => {
     const pic = (id: string, image: string) => ({ id, beat: 'title', card: { style: 'image', image, sec: 0.5 } });
     const e = ep([pic('portrait', 'pics/portrait.png'), pic('tiny', 'pics/tiny.jpg'), pic('huge', 'pics/huge.png')]);
     const cardImages = cardImagesFor(project, e);
+    // Their sizes, from the files FFmpeg wrote: the huge one makes its chunk smaller.
+    expect([...cardImages.values()].map((p) => [p.width, p.height])).toEqual([[600, 1200], [100, 100], [6000, 4000]]);
     for (const [w, h] of [[640, 360], [360, 640]] as const) {
       const out = join(project, `cover-${w}x${h}.mov`);
       await tools.runFfmpeg(['-y', ...itemChunkArgs(layoutTimeline(e), { width: w, height: h, fps: 30, cardImages }, new Map(), out)], { expectedDurationSec: 1.5 });
@@ -1592,6 +1606,55 @@ describe('cards (real ffmpeg)', () => {
     const p = await tools.probe(r.outputPath);
     expect([p.width, p.height]).toEqual([1920, 1080]);
     expect((await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-of', 'json', r.outputPath])).stdout).not.toMatch(/Display Matrix|rotation/i);
+  }, 180_000);
+
+  it('keeps a chunk with a JPEG card (and an episode that opens with one) limited range, the clip beside it unshifted', async () => {
+    // A JPEG decodes full range on the BT.601 matrix (yuvj420p). Left so, the chunk was encoded full range with the clip
+    // in it converted to match, and as the first chunk it made the whole episode full range (the concat demuxer takes
+    // the first file's settings; -pix_fmt yuv420p doesn't bring limited range back on FFmpeg 7 and newer).
+    // Run with the FFmpeg Mirage finds and with Homebrew's, which is newer.
+    const dir = await mkdtemp(join(tmpdir(), 'we-jpeg-range-'));
+    const clip = join(dir, 'clip.mp4');
+    await gen(['-f', 'lavfi', '-i', 'color=c=0x3080C0:s=640x360:r=30:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv', clip]);
+    await gen(['-f', 'lavfi', '-i', 'color=c=0xF0C040:s=800x600', '-frames:v', '1', '-q:v', '2', join(project, 'pics', 'range.jpg')]);
+    const e = (number = 1) => ep([
+      { id: 'p', beat: 'title', card: { style: 'image', image: 'pics/range.jpg', sec: 0.5 } },
+      { id: 'c', beat: 'cold-open', clip: 'cc', src: { in: 0, out: 1 } },
+    ], { number });
+    const sources = new Map([['cc', { path: clip, hasAudio: false, durationSec: 1, width: 640, height: 360 }]]);
+    const ffmpegs = [await locate('ffmpeg'), ...(existsSync('/opt/homebrew/bin/ffmpeg') ? ['/opt/homebrew/bin/ffmpeg'] : [])];
+    const [W, H] = [640, 360];
+    for (const ffmpeg of ffmpegs) {
+      const ffprobe = join(dirname(ffmpeg), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+      const stream = async (file: string) => JSON.parse((await runPath('ffprobe', ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_range', '-of', 'json', file])).stdout).streams[0];
+      /** The stored Y, U, V of the pixel in the middle of the frame at `t` s, as written (no range conversion). */
+      const yuv = async (file: string, t: number) => {
+        await runPath('ffmpeg', ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `crop=2:2:${W / 2}:${H / 2},format=yuv444p`, '-f', 'rawvideo', join(dir, 'px.yuv')]);
+        const b = await readFile(join(dir, 'px.yuv'));
+        return [b[0]!, b[4]!, b[8]!];
+      };
+      const chunk = join(dir, 'chunk-000.mov');
+      await runPath('ffmpeg', ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', ...itemChunkArgs(layoutTimeline(e()), { width: W, height: H, fps: 30, cardImages: cardImagesFor(project, e()) }, sources, chunk)]);
+      expect(await stream(chunk), `${ffmpeg}: chunk`).toMatchObject({ pix_fmt: 'yuv420p', color_range: 'tv' });
+      // The clip's stored values are its own (not stretched to full range); the picture is still its colour.
+      const [src, inChunk] = [await yuv(clip, 0.5), await yuv(chunk, 1)];
+      for (const i of [0, 1, 2]) expect(Math.abs(inChunk[i]! - src[i]!), `${ffmpeg}: clip ${'YUV'[i]} ${inChunk} vs ${src}`).toBeLessThanOrEqual(2);
+      const rgb = await frameAt(chunk, 0.25);
+      const mid = ((H / 2) * W + W / 2) * 3;
+      expect([rgb[mid]!, rgb[mid + 1]!, rgb[mid + 2]!].map((v, i) => Math.abs(v - [0xf0, 0xc0, 0x40][i]!)).every((d) => d < 20), `${ffmpeg}: picture colour`).toBe(true);
+      // Read back the way the final pass reads chunks.
+      await writeFile(join(dir, 'chunks.txt'), "file 'chunk-000.mov'\n");
+      await runPath('ffmpeg', ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', 'chunks.txt', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'out.mp4'], { cwd: dir });
+      expect(await stream(join(dir, 'out.mp4')), `${ffmpeg}: read back`).toMatchObject({ pix_fmt: 'yuv420p', color_range: 'tv' });
+    }
+    // And the whole render of an episode that opens with a JPEG card, with the FFmpeg Mirage uses.
+    await saveEpisode(project, ep([
+      { id: 'p', beat: 'title', card: { style: 'image', image: 'pics/range.jpg', sec: 0.5 } },
+      { id: 'talk', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1 } },
+    ], { number: 5 }));
+    const r = await renderEpisode({ project, episode: 5, mode: 'final', tools });
+    const final = JSON.parse((await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_range', '-of', 'json', r.outputPath])).stdout).streams[0];
+    expect(final).toMatchObject({ pix_fmt: 'yuv420p', color_range: 'tv' });
   }, 180_000);
 
   it('lays a transparent picture on black: clear parts black, half-clear parts half as bright', async () => {

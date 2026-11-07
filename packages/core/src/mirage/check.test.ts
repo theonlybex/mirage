@@ -178,6 +178,20 @@ describe('checkEpisode', () => {
     ]);
   });
 
+  it('warns of a subtitle overlay over automatic captions (phrase, pop, karaoke, or none set), not with chosen or off', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    const overlays = [{ kind: 'subtitle', text: 'So I went back.', start: 1, end: 2 }, { kind: 'name', text: 'Sam', start: 1, end: 2 }];
+    const warning = 'subtitle overlay 1 ("So I went back.") shows over the automatic captions — use captions style chosen, or remove it';
+    for (const captions of [undefined, { style: 'phrase' }, { style: 'pop' }, { style: 'karaoke', position: 'middle' }]) {
+      await saveEpisode(dir, base({ overlays, ...(captions ? { captions } : {}) }));
+      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([warning]);
+    }
+    for (const style of ['chosen', 'off']) {
+      await saveEpisode(dir, base({ overlays, captions: { style } }));
+      expect((await checkEpisode(dir, 1)).warnings, style).toEqual([]);
+    }
+  });
+
   it("names a name label's sub line that has emoji, as it does the text", async () => {
     const { dir } = await project({ words: [], segments: [], speech: [] });
     await saveEpisode(dir, base({ overlays: [{ kind: 'name', text: 'Sam', sub: 'Founder 🚀', start: 1, end: 2 }, { kind: 'name', text: 'Ana', sub: 'Founder', start: 1, end: 2 }] }));

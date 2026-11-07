@@ -38861,25 +38861,69 @@ function jpegOrientation(b) {
     return 1;
   }
 }
+function jpegSize(read) {
+  try {
+    const start = read(0, 2);
+    if (start[0] !== 255 || start[1] !== 216) return null;
+    let pos = 2;
+    for (let steps = 0; steps < 1e4; steps++) {
+      const b = read(pos, 9);
+      if (b.length < 2 || b[0] !== 255) return null;
+      const marker = b[1];
+      if (marker === 255) {
+        pos += 1;
+        continue;
+      }
+      if (marker === 218 || marker === 217) return null;
+      if (marker >= 208 && marker <= 215 || marker === 1) {
+        pos += 2;
+        continue;
+      }
+      if (b.length < 4) return null;
+      if (marker >= 192 && marker <= 207 && marker !== 196 && marker !== 200 && marker !== 204) {
+        if (b.length < 9) return null;
+        const [h2, w] = [b.readUInt16BE(5), b.readUInt16BE(7)];
+        return w && h2 ? [w, h2] : null;
+      }
+      pos += 2 + b.readUInt16BE(2);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 function imageFormat(file2) {
   const head = Buffer.alloc(HEAD_BYTES);
   let n2 = 0;
+  let size = null;
+  let format2 = null;
   try {
     const fd = openSync(file2, "r");
     try {
       n2 = readSync(fd, head, 0, head.length, 0);
+      const starts = (sig) => n2 >= sig.length && sig.every((b, i2) => head[i2] === b);
+      if (starts(PNG)) {
+        format2 = "png";
+        if (n2 >= 24 && head.toString("latin1", 12, 16) === "IHDR") size = [head.readUInt32BE(16), head.readUInt32BE(20)];
+      } else if (starts(JPEG)) {
+        format2 = "jpeg";
+        size = jpegSize((at2, len) => {
+          if (at2 + len <= n2) return head.subarray(at2, at2 + len);
+          const b = Buffer.alloc(len);
+          return b.subarray(0, readSync(fd, b, 0, len, at2));
+        });
+      }
     } finally {
       closeSync(fd);
     }
   } catch {
     return null;
   }
-  const starts = (sig) => n2 >= sig.length && sig.every((b, i2) => head[i2] === b);
-  if (starts(PNG)) return { format: "png", orientation: 1 };
-  if (starts(JPEG)) return { format: "jpeg", orientation: jpegOrientation(head.subarray(0, n2)) };
-  return null;
+  if (!format2) return null;
+  const [width, height] = size ?? [0, 0];
+  return { format: format2, orientation: format2 === "jpeg" ? jpegOrientation(head.subarray(0, n2)) : 1, width, height };
 }
-var cardImageFile = (project2, item) => resolve4(project2, item.card.image);
+var cardImageFile = (project2, item) => resolve4(project2, item.card.image.replace(/\\/g, "/"));
 function cardImagesFor(project2, ep) {
   const out = /* @__PURE__ */ new Map();
   for (const item of ep.items) {
@@ -39479,14 +39523,15 @@ function chunkItems(laid, size = CHUNK_ITEMS) {
   for (let i2 = 0; i2 < laid.length; i2 += size) out.push(laid.slice(i2, i2 + size));
   return out;
 }
-function chunkSize(sources) {
-  return [...sources.values()].some((s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
+function chunkSize(sources, cardImages) {
+  const large = (s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080;
+  return [...sources.values()].some(large) || [...cardImages?.values() ?? []].some(large) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
 }
 var MAX_COMMAND = 24e3;
 var commandLength = (args) => args.reduce((n2, a2) => n2 + a2.length + 3, 0);
 function episodeChunks(laid, o2, sources, output2) {
   const out = [];
-  for (const group of chunkItems(laid, chunkSize(sources))) {
+  for (const group of chunkItems(laid, chunkSize(sources, o2.cardImages))) {
     let chunk = [];
     for (const l of group) {
       if (chunk.length && commandLength(itemChunkArgs([...chunk, l], o2, sources, output2)) > MAX_COMMAND) {
@@ -39544,7 +39589,8 @@ function itemChunkArgs(laid, o2, sources, output2) {
         if (!pic) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} was not checked before rendering`, "Run check, then render again.");
         inputs.push("-noautorotate", "-f", `${pic.format}_pipe`, "-framerate", ffNum(o2.fps), "-i", pic.path);
         const flat = pic.format === "png" ? "format=rgba,premultiply=inplace=1," : "";
-        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", "", o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        const range3 = pic.format === "jpeg" ? ",scale=out_range=tv:out_color_matrix=bt709,format=yuv420p" : "";
+        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", "", o2, k)}${range3},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         inputs.push("-f", "lavfi", "-i", `color=c=black:s=${o2.width}x${o2.height}:r=${ffNum(o2.fps)}:d=${ffNum((l.frames + 1) / o2.fps)}`);
         chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
@@ -40357,6 +40403,8 @@ function timelineWarnings(ep, lib, snapped) {
     if (o2.start >= D - 1e-6) out.push(`overlay ${i2 + 1} ("${o2.text}") starts at ${s2(o2.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never show`);
     if (undrawable(o2.text)) out.push(`overlay ${i2 + 1} ("${o2.text}") has emoji, which can't be drawn \u2014 they are left out`);
     if (o2.sub && undrawable(o2.sub)) out.push(`overlay ${i2 + 1} ("${o2.sub}") has emoji, which can't be drawn \u2014 they are left out`);
+    const auto = (ep.captions?.style ?? "phrase") !== "chosen" && ep.captions?.style !== "off";
+    if (o2.kind === "subtitle" && auto) out.push(`subtitle overlay ${i2 + 1} ("${o2.text}") shows over the automatic captions \u2014 use captions style chosen, or remove it`);
   });
   const fps = ep.output.fps;
   const moveWarning = (id, m, frames) => {

@@ -131,6 +131,12 @@ describe('the plugin skills', () => {
     expect(edit).toContain("isn't a PNG or JPEG");
     expect(edit).toContain("doesn't match what's said at");
     expect(edit).toContain('"9:41"');
+    expect(edit).toContain('With `chosen` captions, place a few yourself; the person can add more.');
+    expect(edit).toContain('Use `subtitle` only with captions style `chosen` (or `off`): automatic captions draw in the same place, over it.');
+    expect(edit).toContain('`subtitle overlay <k> ("<text>") shows over the automatic captions — use captions style chosen, or remove it`');
+    expect(edit).toContain("- Mark text cards `quiet` unless narration over the card is wanted (with narration over a text card, the captions can cover the card's text).");
+    expect(edit).toContain("Follow the guardrails: only people who agreed to be on camera, what the person said must not show (`hide`) stays out, and the edit shouldn't make anyone look worse than they were.");
+    expect(edit).not.toContain("the playbook's guardrails");
   });
 
   it('edit teaches sound effects and music dips: the field, the seven built-ins, the sfx folder and the rules', () => {

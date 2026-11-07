@@ -69,9 +69,13 @@ export function chunkItems(laid: LaidItem[], size = CHUNK_ITEMS): LaidItem[][] {
   return out;
 }
 
-/** Chunk size for these sources: smaller when any is larger than 1080p. */
-export function chunkSize(sources: Map<string, ClipSource>): number {
-  return [...sources.values()].some((s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
+/**
+ * Chunk size for these sources and card pictures: smaller when any is larger than 1080p. A picture counts like a clip:
+ * FFmpeg 7 and newer decode each input's frame ahead, about 96 MB for a 24-megapixel photo.
+ */
+export function chunkSize(sources: Map<string, ClipSource>, cardImages?: Map<string, CardImage>): number {
+  const large = (s: { width?: number; height?: number }) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080;
+  return [...sources.values()].some(large) || [...(cardImages?.values() ?? [])].some(large) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
 }
 
 /**
@@ -89,7 +93,7 @@ export const commandLength = (args: string[]) => args.reduce((n, a) => n + a.len
  */
 export function episodeChunks(laid: LaidItem[], o: ChunkShape, sources: Map<string, ClipSource>, output: string): LaidItem[][] {
   const out: LaidItem[][] = [];
-  for (const group of chunkItems(laid, chunkSize(sources))) {
+  for (const group of chunkItems(laid, chunkSize(sources, o.cardImages))) {
     let chunk: LaidItem[] = [];
     for (const l of group) {
       if (chunk.length && commandLength(itemChunkArgs([...chunk, l], o, sources, output)) > MAX_COMMAND) {
@@ -199,9 +203,13 @@ export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<stri
         inputs.push('-noautorotate', '-f', `${pic.format}_pipe`, '-framerate', ffNum(o.fps), '-i', pic.path);
         // A PNG's colour times its alpha is the picture over black: clear parts black, not whatever colour they hold.
         const flat = pic.format === 'png' ? 'format=rgba,premultiply=inplace=1,' : '';
+        // A JPEG decodes full range on the BT.601 matrix (yuvj420p): left so, the chunk would be encoded full range, the
+        // clips beside it converted to match, and as the first chunk the whole episode would come out full range
+        // (-pix_fmt yuv420p doesn't bring it back on FFmpeg 7 and newer). Brought to the clips' limited range and BT.709.
+        const range = pic.format === 'jpeg' ? ',scale=out_range=tv:out_color_matrix=bt709,format=yuv420p' : '';
         // FFmpeg 7.1 and newer still pass the JPEG's rotation on to the chunk with -noautorotate; as the first frame of
         // the first chunk, the concat demuxer would carry it into the final pass, which would turn the whole episode.
-        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ''}${flat}${framed('fill', '', o, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ''}${flat}${framed('fill', '', o, k)}${range},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         // A text card is black for its length, at the chunk's size (its text comes in the final pass); all cards are silent.
         inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${o.width}x${o.height}:r=${ffNum(o.fps)}:d=${ffNum((l.frames + 1) / o.fps)}`);

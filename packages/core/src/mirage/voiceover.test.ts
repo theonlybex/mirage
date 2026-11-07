@@ -774,4 +774,35 @@ describe('a narration line over a card', () => {
     // The label on the card after where the time opened is back where it was (closed there, not at the card's end).
     expect(refit.overlays).toEqual([{ ...ep0.overlays[0], start: expect.closeTo(7, 6), end: expect.closeTo(8, 6) }]);
   });
+
+  it('a full re-fit with no re-cut keeps the text, style, picture, beat and quiet the person gave the card since', () => {
+    const first = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: tx(said(LONG, 0, 0.55)) }).episode;
+    const looks = { text: 'Tokyo', style: 'image' as const, image: 'pics/tokyo.jpg' };
+    const edited = {
+      ...first,
+      items: first.items.map((i) => (isCard(i) ? { ...i, beat: 'twist' as const, quiet: true, card: { ...i.card, ...looks } } : i)),
+      slots: first.slots.map((s) => ({ ...s, line: 'This one.' })),
+    };
+    // Text, style and picture aren't part of the cut: no re-cut, and the fit's hold on the card is undone.
+    expect(cutChanged(edited)).toBe(false);
+    const again = fitVoiceover({ episode: edited, catalog: catalog(20), recording: 'short.m4a', transcript: tx(said('This one.', 0)) }).episode;
+    expect(again.items.find((i) => i.id === 'k')).toStrictEqual({ ...ep0.items[1], beat: 'twist', quiet: true, card: { ...looks, sec: 6 } });
+    expect(again.items.filter((i) => i.id !== 'k')).toStrictEqual(ep0.items.filter((i) => i.id !== 'k'));
+    // The card's length stays the one it had before the fit (a changed sec is a re-cut, which slots and vo handle).
+    const longer = revertHolds({ ...edited, items: edited.items.map((i) => (isCard(i) ? { ...i, card: { ...i.card, sec: 9 } } : i)) }).episode;
+    expect(longer.items.find((i) => i.id === 'k')).toMatchObject({ card: { ...looks, sec: 6 }, hold: 0 });
+  });
+
+  it('a re-fit keeps the item from before the fit when its kind changed since (a card became a clip, a clip a card)', () => {
+    const first = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: tx(said(LONG, 0, 0.55)) }).episode;
+    const swapped = {
+      ...first,
+      items: first.items.map((i) => {
+        if (i.id === 'k') return EpisodeSchema.parse({ ...ep0, items: [{ id: 'k', beat: 'problem', clip: 'c001', src: { in: 8, out: 10 }, zoom: 1.2 }] }).items[0]!;
+        if (i.id === 'b') return EpisodeSchema.parse({ ...ep0, items: [{ id: 'b', beat: 'title', card: { style: 'mono', text: 'Later', sec: 2 } }] }).items[0]!;
+        return i;
+      }),
+    };
+    expect(revertHolds(swapped).episode.items).toStrictEqual(ep0.items);
+  });
 });
