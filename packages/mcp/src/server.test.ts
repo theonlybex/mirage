@@ -690,6 +690,17 @@ describe('thumbnail', () => {
     expect(existsSync(join(sessionDir(dir, 1, 's1'), 'progress.json'))).toBe(false);
   });
 
+  it('warns, and logs the warning, when the timeline changed after the cut', async () => {
+    const dir = await withCut('rough.mp4'); // the cut is 14 s
+    await saveEpisode(dir, EpisodeSchema.parse({ ...(await loadEpisode(dir, 1)), items: twoItems.map((i) => (i.id === 'b' ? { ...i, src: { in: 10, out: 12 } } : i)) }));
+    const { call } = await connect(dir, { tools: await realMediaTools() });
+    const r = await call('thumbnail', { video: 1 });
+    expect(r.isError).toBe(false);
+    const warning = 'the timeline changed after rough.mp4 was made — run cut again for frames that match';
+    expect(r.text.split('\n').at(-1)).toBe(`⚠ ${warning}`);
+    expect(await readLog(sessionDir(dir, 1, 's1'))).toMatchObject([{ kind: 'warning', text: warning }]);
+  });
+
   it('says there is no cut yet, with what to run', async () => {
     const { call } = await connect(await withCut(null), { tools: await realMediaTools() });
     expect(await call('thumbnail', { video: 1 })).toEqual({ isError: true, text: '✖ video 1 has no cut yet\n  Run cut (or render) first.' });

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -114,27 +114,38 @@ export async function cutLoudness(file: string, tools: MediaTools, o: { signal?:
 
 export interface CandidateFrames {
   source: 'final.mp4' | 'rough.mp4';
+  /**
+   * The cut is not the length of the timeline any more (more than a frame off): the timeline changed after the cut was made.
+   * (Renders don't record which cut they were made from, so the cut's own duration is compared with the layout's.)
+   */
+  timelineChanged: boolean;
   frames: (ThumbCandidate & { file: string })[];
 }
 
 const CAND_FILE = /^cand-\d+\.jpg$/;
 
 /**
- * Writes the candidate frames of video `n`'s last cut (final.mp4, else rough.mp4) as episodes/<n>/thumbs/cand-01.jpg …, each at
+ * Writes the candidate frames of video `n`'s last cut (the newer of final.mp4 and rough.mp4 by modification time, final on a tie) as episodes/<n>/thumbs/cand-01.jpg …, each at
  * the cut's size, after removing the earlier cand-*.jpg files (nothing else in thumbs/). Throws when there is no cut.
  */
 export async function writeCandidates(project: string, n: number, tools: MediaTools, o: { signal?: AbortSignal } = {}): Promise<CandidateFrames> {
   const dir = episodeDir(project, n);
-  const source = (['final.mp4', 'rough.mp4'] as const).find((f) => existsSync(join(dir, f)));
+  const made = (['final.mp4', 'rough.mp4'] as const).flatMap((f) => (existsSync(join(dir, f)) ? [{ f, at: statSync(join(dir, f)).mtimeMs }] : []));
+  const source = made.length ? made.reduce((a, b) => (b.at > a.at ? b : a)).f : undefined;
   if (!source) throw new MirageError('NO_EPISODE', `video ${n} has no cut yet`, 'Run cut (or render) first.');
   const cut = join(dir, source);
   const ep = await loadEpisode(project, n);
   const catalog = await loadCatalog(project);
 
   // The audio is only read when an item's own sound could be the loudest moment.
+  const probe = await tools.probe(cut);
   const ownSound = ep.items.some((i) => !isCard(i) && i.audio === 'keep' && i.speed === 1);
-  const loudness = ownSound && (await tools.probe(cut)).hasAudio ? await cutLoudness(cut, tools, o) : [];
-  const picks = thumbCandidates(ep, catalog, loudness);
+  const loudness = ownSound && probe.hasAudio ? await cutLoudness(cut, tools, o) : [];
+  const laid = layoutTimeline(ep);
+  const cutSec = probe.videoDurationSec ?? probe.durationSec;
+  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1]!.end) > 1 / ep.output.fps + EPS;
+  // A timeline that grew after the cut has times the cut doesn't reach.
+  const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
 
   const thumbs = join(dir, 'thumbs');
   await mkdir(thumbs, { recursive: true });
@@ -148,7 +159,7 @@ export async function writeCandidates(project: string, n: number, tools: MediaTo
     if (!existsSync(join(thumbs, file))) throw new MirageError('BAD_INPUT', `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n} again (cut or render), then pick frames.`);
     frames.push({ ...p, file });
   }
-  return { source, frames };
+  return { source, timelineChanged, frames };
 }
 
 /** A time as m:ss.s (tenths rounded as a whole, so 59.96 is 1:00.0). */
@@ -162,5 +173,6 @@ export function candidatesReport(n: number, r: CandidateFrames): string[] {
   return [
     `wrote ${r.frames.length} candidate frames to episodes/${n}/thumbs/ (from ${r.source})`,
     ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`),
+    ...(r.timelineChanged ? [`⚠ the timeline changed after ${r.source} was made — run cut again for frames that match`] : []),
   ];
 }

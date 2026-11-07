@@ -35102,7 +35102,7 @@ var init_one_line = __esm({
 });
 
 // packages/core/src/mirage/thumbnail.ts
-import { existsSync as existsSync11 } from "node:fs";
+import { existsSync as existsSync11, statSync as statSync6 } from "node:fs";
 import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir9, readFile as readFile9, rm as rm12 } from "node:fs/promises";
 import { tmpdir as tmpdir3 } from "node:os";
 import { join as join21 } from "node:path";
@@ -35168,14 +35168,19 @@ async function cutLoudness(file2, tools, o2 = {}) {
 }
 async function writeCandidates(project, n2, tools, o2 = {}) {
   const dir = episodeDir(project, n2);
-  const source = ["final.mp4", "rough.mp4"].find((f) => existsSync11(join21(dir, f)));
+  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync6(join21(dir, f)).mtimeMs }] : []);
+  const source = made.length ? made.reduce((a2, b) => b.at > a2.at ? b : a2).f : void 0;
   if (!source) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
   const cut = join21(dir, source);
   const ep = await loadEpisode(project, n2);
   const catalog = await loadCatalog(project);
+  const probe2 = await tools.probe(cut);
   const ownSound2 = ep.items.some((i2) => !isCard(i2) && i2.audio === "keep" && i2.speed === 1);
-  const loudness = ownSound2 && (await tools.probe(cut)).hasAudio ? await cutLoudness(cut, tools, o2) : [];
-  const picks = thumbCandidates(ep, catalog, loudness);
+  const loudness = ownSound2 && probe2.hasAudio ? await cutLoudness(cut, tools, o2) : [];
+  const laid = layoutTimeline(ep);
+  const cutSec = probe2.videoDurationSec ?? probe2.durationSec;
+  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > 1 / ep.output.fps + EPS5;
+  const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
   const thumbs = join21(dir, "thumbs");
   await mkdir10(thumbs, { recursive: true });
   for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
@@ -35186,7 +35191,7 @@ async function writeCandidates(project, n2, tools, o2 = {}) {
     if (!existsSync11(join21(thumbs, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
     frames.push({ ...p, file: file2 });
   }
-  return { source, frames };
+  return { source, timelineChanged, frames };
 }
 function formatThumbTime(t) {
   const tenths = Math.round(t * 10);
@@ -35195,7 +35200,8 @@ function formatThumbTime(t) {
 function candidatesReport(n2, r) {
   return [
     `wrote ${r.frames.length} candidate frames to episodes/${n2}/thumbs/ (from ${r.source})`,
-    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`)
+    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`),
+    ...r.timelineChanged ? [`\u26A0 the timeline changed after ${r.source} was made \u2014 run cut again for frames that match`] : []
   ];
 }
 var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, CAND_FILE;

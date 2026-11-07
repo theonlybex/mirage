@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog } from '@wordedits/shared';
@@ -174,10 +174,17 @@ describe('formatThumbTime', () => {
 
 describe('candidatesReport', () => {
   it('names the cut and lists a line per frame', () => {
-    expect(candidatesReport(2, { source: 'rough.mp4', frames: [{ t: 1.74, reason: 'moment: x', file: 'cand-01.jpg' }, { t: 65, reason: 'even spacing', file: 'cand-02.jpg' }] })).toEqual([
+    const frames = [{ t: 1.74, reason: 'moment: x', file: 'cand-01.jpg' }, { t: 65, reason: 'even spacing', file: 'cand-02.jpg' }];
+    expect(candidatesReport(2, { source: 'rough.mp4', timelineChanged: false, frames })).toEqual([
       'wrote 2 candidate frames to episodes/2/thumbs/ (from rough.mp4)',
       'cand-01.jpg  0:01.7  moment: x',
       'cand-02.jpg  1:05.0  even spacing',
+    ]);
+  });
+  it('ends with a warning when the timeline changed after the cut', () => {
+    expect(candidatesReport(2, { source: 'final.mp4', timelineChanged: true, frames: [{ t: 1, reason: 'even spacing', file: 'cand-01.jpg' }] }).slice(1)).toEqual([
+      'cand-01.jpg  0:01.0  even spacing',
+      '⚠ the timeline changed after final.mp4 was made — run cut again for frames that match',
     ]);
   });
 });
@@ -245,6 +252,7 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
     const dir = await project('frames', { moments: [{ t: 0.95, label: 'one' }, { t: 2.05, label: 'two' }, { t: 4.5, label: 'three' }] });
     const r = await writeCandidates(dir, 1, tools);
     expect(r.source).toBe('rough.mp4');
+    expect(r.timelineChanged).toBe(false);
     expect(r.frames.slice(0, 3)).toEqual([
       { t: 0.95, reason: 'moment: one', file: 'cand-01.jpg' },
       { t: 2.05, reason: 'moment: two', file: 'cand-02.jpg' },
@@ -271,11 +279,39 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
     expect(await size(join(dir, 'episodes', '1', 'thumbs', r.frames[0]!.file))).toEqual([180, 320]);
   });
 
-  it('prefers final.mp4 to rough.mp4', async () => {
+  it('uses the newer of final.mp4 and rough.mp4, final on a tie, and the one there is', async () => {
     const dir = await project('both', { cut: 'both' });
+    const ep1 = join(dir, 'episodes', '1');
+    const at = (f: string, ago: number) => utimes(join(ep1, f), new Date(Date.now() - ago), new Date(Date.now() - ago));
+    await at('final.mp4', 60_000);
+    await at('rough.mp4', 1000);
+    expect((await writeCandidates(dir, 1, tools)).source).toBe('rough.mp4');
+    await at('final.mp4', 1000);
+    await at('rough.mp4', 60_000);
+    expect((await writeCandidates(dir, 1, tools)).source).toBe('final.mp4');
+    const t = new Date(Date.now() - 5000);
+    await utimes(join(ep1, 'final.mp4'), t, t);
+    await utimes(join(ep1, 'rough.mp4'), t, t);
     expect((await writeCandidates(dir, 1, tools)).source).toBe('final.mp4');
     const only = await project('finalonly', { cut: 'final' });
     expect((await writeCandidates(only, 1, tools)).source).toBe('final.mp4');
+  });
+
+  it('says the timeline changed when the cut is more than a frame off the timeline, and not otherwise', async () => {
+    const dir = await project('moved');
+    expect((await writeCandidates(dir, 1, tools)).timelineChanged).toBe(false);
+    const edited = (patch: object) => EpisodeSchema.parse({ ...episode(), items: [item('a', [0, 4], { audio: 'keep' }), item('b', [4, 8], { beat: 'truth', ...patch })] });
+    // One frame more (a hold of 1/30 s) is within the cut's own rounding; a second more is a different cut.
+    await saveEpisode(dir, edited({ hold: 0.034 }));
+    expect((await writeCandidates(dir, 1, tools)).timelineChanged).toBe(false);
+    // A timeline longer than the cut: frames only from what the cut has.
+    await saveEpisode(dir, edited({ src: { in: 4, out: 9 } }));
+    const longer = await writeCandidates(dir, 1, tools);
+    expect(longer.timelineChanged).toBe(true);
+    expect(longer.frames.length).toBeGreaterThan(0);
+    expect(longer.frames.every((f) => f.t < 8)).toBe(true);
+    await saveEpisode(dir, edited({ src: { in: 4, out: 7 } }));
+    expect((await writeCandidates(dir, 1, tools)).timelineChanged).toBe(true);
   });
 
   it('removes the earlier candidates first, and nothing else', async () => {

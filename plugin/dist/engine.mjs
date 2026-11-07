@@ -41484,7 +41484,7 @@ function speakReport(r, n2, voice) {
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
 // packages/core/src/mirage/thumbnail.ts
-import { existsSync as existsSync11 } from "node:fs";
+import { existsSync as existsSync11, statSync as statSync5 } from "node:fs";
 import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir8, readFile as readFile9, rm as rm12 } from "node:fs/promises";
 import { tmpdir as tmpdir3 } from "node:os";
 import { join as join21 } from "node:path";
@@ -41559,14 +41559,19 @@ async function cutLoudness(file2, tools, o2 = {}) {
 var CAND_FILE = /^cand-\d+\.jpg$/;
 async function writeCandidates(project2, n2, tools, o2 = {}) {
   const dir = episodeDir(project2, n2);
-  const source = ["final.mp4", "rough.mp4"].find((f) => existsSync11(join21(dir, f)));
+  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync5(join21(dir, f)).mtimeMs }] : []);
+  const source = made.length ? made.reduce((a2, b) => b.at > a2.at ? b : a2).f : void 0;
   if (!source) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
   const cut = join21(dir, source);
   const ep = await loadEpisode(project2, n2);
   const catalog = await loadCatalog(project2);
+  const probe2 = await tools.probe(cut);
   const ownSound2 = ep.items.some((i2) => !isCard(i2) && i2.audio === "keep" && i2.speed === 1);
-  const loudness = ownSound2 && (await tools.probe(cut)).hasAudio ? await cutLoudness(cut, tools, o2) : [];
-  const picks = thumbCandidates(ep, catalog, loudness);
+  const loudness = ownSound2 && probe2.hasAudio ? await cutLoudness(cut, tools, o2) : [];
+  const laid = layoutTimeline(ep);
+  const cutSec = probe2.videoDurationSec ?? probe2.durationSec;
+  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > 1 / ep.output.fps + EPS5;
+  const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
   const thumbs = join21(dir, "thumbs");
   await mkdir10(thumbs, { recursive: true });
   for (const f of await readdir8(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
@@ -41577,7 +41582,7 @@ async function writeCandidates(project2, n2, tools, o2 = {}) {
     if (!existsSync11(join21(thumbs, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
     frames.push({ ...p, file: file2 });
   }
-  return { source, frames };
+  return { source, timelineChanged, frames };
 }
 function formatThumbTime(t) {
   const tenths = Math.round(t * 10);
@@ -41586,7 +41591,8 @@ function formatThumbTime(t) {
 function candidatesReport(n2, r) {
   return [
     `wrote ${r.frames.length} candidate frames to episodes/${n2}/thumbs/ (from ${r.source})`,
-    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`)
+    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`),
+    ...r.timelineChanged ? [`\u26A0 the timeline changed after ${r.source} was made \u2014 run cut again for frames that match`] : []
   ];
 }
 
@@ -41614,7 +41620,7 @@ function startFallbackViewer(project2) {
 }
 
 // packages/mcp/src/server.ts
-import { existsSync as existsSync13, readdirSync as readdirSync3, readFileSync as readFileSync6, realpathSync, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync13, readdirSync as readdirSync3, readFileSync as readFileSync6, realpathSync, statSync as statSync6 } from "node:fs";
 import { readdir as readdir10 } from "node:fs/promises";
 import { isAbsolute as isAbsolute2, join as join24, relative as relative2, resolve as resolve13, sep } from "node:path";
 
@@ -49800,7 +49806,7 @@ function newestSessionId(project2) {
     if (!id || id === "unknown" || id.includes("..")) continue;
     let mtime;
     try {
-      mtime = statSync5(join24(dir, name)).mtimeMs;
+      mtime = statSync6(join24(dir, name)).mtimeMs;
     } catch {
       continue;
     }
@@ -49810,7 +49816,7 @@ function newestSessionId(project2) {
 }
 function footageProblem(folder, project2) {
   if (!existsSync13(folder)) return `\u2716 ${folder} does not exist`;
-  if (!statSync5(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
+  if (!statSync6(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
   const rel = relative2(realpathSync(folder), realpathSync(project2));
   if (rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute2(rel)) {
     return `\u2716 ${folder} holds this project. Make a new folder for the series, open Claude Code there, and add the clips folder from there.`;
@@ -50003,7 +50009,7 @@ function createEngineServer(ctx) {
     { video },
     async ({ video: n2 }, { signal }) => {
       const r = await long("thumbnail", n2, signal, (h2) => writeCandidates(project2, n2, tools, { signal: h2.signal }));
-      return ok(candidatesReport(n2, r));
+      return report(n2, candidatesReport(n2, r));
     }
   );
   tool("versions", "List the saved versions of a video: deliveries as V1, V2 \u2026 and the other saves, each with its id.", { video }, async ({ video: n2 }) => {

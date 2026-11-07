@@ -299,7 +299,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     { video },
     async ({ video: n }, { signal }) => {
       const r = await long('thumbnail', n, signal, (h) => writeCandidates(project, n, tools, { signal: h.signal }));
-      return ok(candidatesReport(n, r));
+      return report(n, candidatesReport(n, r));
     },
   );
 
