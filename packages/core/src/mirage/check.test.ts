@@ -263,6 +263,15 @@ describe('checkEpisode', () => {
       expect((await checkEpisode(dir, 1, tools)).warnings).toEqual([]);
     });
 
+    it('does not warn about a sound effect exactly at the episode end (a riser into the last frame), only past it', async () => {
+      const { dir } = await project({ words: [], segments: [], speech: [] });
+      const items = [{ id: 'b', beat: 'problem', clip: 'c001', src: { in: 0, out: 30 } }, { id: 'c', beat: 'problem', clip: 'c001', src: { in: 0, out: 30 } }, { id: 'd', beat: 'problem', clip: 'c001', src: { in: 0, out: 10 } }];
+      await saveEpisode(dir, base({ items, sfx: [{ sound: 'riser', at: 70 }] }));
+      expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+      await saveEpisode(dir, base({ items, sfx: [{ sound: 'riser', at: 70.01 }] }));
+      expect((await checkEpisode(dir, 1)).warnings).toEqual(['sfx 1 (riser) is at 70.01 s, after the episode ends (70.00 s) — it will never play']);
+    });
+
     it('warns about a sound effect after the end, too many in a minute, and a dip outside its cue', async () => {
       const { dir } = await project({ words: [], segments: [], speech: [] });
       const busy = [0.5, 8, 15, 22, 30, 38, 45, 59].map((at) => ({ sound: 'pop', at }));

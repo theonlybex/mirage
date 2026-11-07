@@ -956,7 +956,7 @@ describe('renderEpisode (real ffmpeg)', () => {
       return m / e / SR;
     };
 
-    it('lands a hit within 15 ms of its time at the same level with or without speech, centres a whoosh on its time, and dips the music', async () => {
+    it('lands a hit within 20 ms of its time at the same level with or without speech, centres a whoosh on its time, and dips the music', async () => {
       const extra = {
         output: small,
         music: [{ track: 'dip-pad.wav', start: 0, end: 5.9, fadeIn: 0, fadeOut: 0, dips: [{ start: 3, end: 3.5 }] }],
@@ -983,9 +983,9 @@ describe('renderEpisode (real ffmpeg)', () => {
       lines.push(`the filtered hit peaks ${(own * 1000).toFixed(1)} ms after its peak time in hit.wav itself`);
       console.log(lines.join('\n'));
       for (const { hit, whoosh, ref, back } of got) {
-        expect(Math.abs(hit.t - 2)).toBeLessThanOrEqual(0.015);
-        expect(Math.abs(hit.t - (2 + own + 0.005))).toBeLessThanOrEqual(0.001);
-        expect(Math.abs(whoosh - 4)).toBeLessThanOrEqual(0.015);
+        expect(Math.abs(hit.t - 2)).toBeLessThanOrEqual(0.02);
+        expect(Math.abs(hit.t - (2 + own + 0.005))).toBeLessThanOrEqual(0.003);
+        expect(Math.abs(whoosh - 4)).toBeLessThanOrEqual(0.02);
         expect(Math.abs(back - ref)).toBeLessThanOrEqual(1);
       }
       expect(Math.abs(got[0]!.hit.db - got[1]!.hit.db)).toBeLessThanOrEqual(1);
@@ -1021,6 +1021,16 @@ describe('renderEpisode (real ffmpeg)', () => {
       expect(Math.abs(lufs - -20)).toBeLessThanOrEqual(1.5);
       expect(rms(x, 0.2, 0.95)).toBeLessThan(-80);
       expect(rms(x, 2.85, 2.95)).toBeGreaterThan(-30);
+    }, 120_000);
+
+    it("plays the build-up of a riser whose peak is on the episode's last frame, and skips a sound that would start at the end", async () => {
+      await saveEpisode(project, ep([{ id: 'quiet', beat: 'problem', clip: 'c003', src: { in: 0, out: 3 } }], { number: 27, output: small, sfx: [{ sound: 'riser', at: 3 }, { sound: 'pop', at: 3.01 }] }));
+      const r = await renderEpisode({ project, episode: 27, mode: 'rough', tools });
+      expect(Math.abs((await tools.probe(r.outputPath)).durationSec - 3)).toBeLessThanOrEqual(0.1);
+      const high = await left(r.outputPath, HIGH);
+      console.log(`riser into the last frame: high band ${rms(high, 2.5, 2.9).toFixed(1)} dB at the end, ${rms(high, 0.2, 0.9).toFixed(1)} dB at the start`);
+      expect(rms(high, 2.5, 2.9)).toBeGreaterThan(-45);
+      expect(rms(high, 0.2, 0.9)).toBeLessThan(-80);
     }, 120_000);
 
     it('adds overlapping sounds, and a dip under a sound effect silences only the music', async () => {

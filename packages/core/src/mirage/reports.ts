@@ -21,7 +21,7 @@ export function checkReport({ episode: ep, warnings, notes }: { episode: Episode
     const it = l.item;
     lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${it.clip}  ${it.src.in.toFixed(2)}–${it.src.out.toFixed(2)}  ×${it.speed}  ${l.start.toFixed(2)}–${l.end.toFixed(2)}${it.quiet ? '  quiet' : ''}`);
   }
-  lines.push(`total ${formatTime(timelineDuration(ep))} · ${ep.items.length} items · ${ep.overlays.length} overlays · ${ep.music.length} music cues`);
+  lines.push(`total ${formatTime(timelineDuration(ep))} · ${ep.items.length} items · ${ep.overlays.length} overlays · ${ep.music.length} music cues${ep.sfx ? ` · ${ep.sfx.length} sound effects` : ''}`);
   for (const m of notes) lines.push(`• ${m}`);
   for (const w of warnings) lines.push(`⚠ ${w}`);
   return lines;

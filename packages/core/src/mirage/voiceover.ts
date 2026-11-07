@@ -246,7 +246,11 @@ export function revertHolds(ep: Episode): { episode: Episode; dropped: string[] 
   const r6s = <T extends { start: number; end: number }>(x: T): T => ({ ...x, start: r6(x.start), end: r6(x.end) });
   const now = new Map(ep.items.map((x) => [x.id, x]));
   const items = vo.baseItems.map((x) => (now.has(x.id) ? withLook(x, now.get(x.id)!) : x));
-  out = { ...out, items, overlays: out.overlays.map(r6s), music: out.music.map(r6s), slots: out.slots.map(r6s), voiceover: null };
+  const music = out.music.map((c) => {
+    const m = r6s(c);
+    return c.dips ? { ...m, dips: c.dips.map(r6s) } : m;
+  });
+  out = { ...out, items, overlays: out.overlays.map(r6s), music, slots: out.slots.map(r6s), ...(out.sfx ? { sfx: out.sfx.map((x) => ({ ...x, at: r6(x.at) })) } : {}), voiceover: null };
   return dropCollapsed(out, ep);
 }
 

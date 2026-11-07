@@ -31775,7 +31775,7 @@ async function builtinSfx(name, tools, o2 = {}) {
     const pad2 = Math.round(PAD_SEC * SR);
     const len = Math.round(recipe.durationSec * SR);
     const total = len + 2 * pad2;
-    const graph = `${recipe.graph};[s]apad=pad_len=${pad2},${band(40, 12e3)},adelay=delays=${pad2}S:all=1,apad=whole_len=${total},atrim=end_sample=${total}[out]`;
+    const graph = `${recipe.graph};[s]apad=pad_len=${pad2},${band(PASS.highpassHz, PASS.lowpassHz)},adelay=delays=${pad2}S:all=1,apad=whole_len=${total},atrim=end_sample=${total}[out]`;
     await tools.runFfmpeg(["-filter_complex", graph, "-map", "[out]", "-ac", "1", "-ar", String(SR), "-c:a", "pcm_f32le", "-f", "f32le", raw], { signal: o2.signal });
     const buf = await readFile6(raw);
     const x = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
@@ -31789,15 +31789,15 @@ async function builtinSfx(name, tools, o2 = {}) {
     const peakAt = Math.round(recipe.peakSec * SR);
     const ms = SR / 1e3;
     let onset = 0;
-    while (Math.abs(x[onset]) < loudest / 200) onset++;
-    const start = Math.min(Math.max(Math.min(at2 - peakAt, onset - ms), 0), total - len);
+    while (Math.abs(x[onset]) < loudest / PASS.onsetDivisor) onset++;
+    const start = Math.min(Math.max(Math.min(at2 - peakAt, onset - PASS.leadMs * ms), 0), total - len);
     const fadeOut = Math.round(recipe.fadeOutSec * SR);
     const gain = 10 ** (PEAK_DB / 20) / loudest;
     const af = [
       `atrim=start_sample=${start}:end_sample=${start + len}`,
       "asetpts=PTS-STARTPTS",
       `volume=${gain}:precision=double`,
-      `afade=t=out:ss=${len - ms - fadeOut}:ns=${fadeOut}`,
+      `afade=t=out:ss=${len - PASS.tailMs * ms - fadeOut}:ns=${fadeOut}`,
       "pan=stereo|c0=c0|c1=c0"
     ].join(",");
     await tools.runFfmpeg(["-f", "f32le", "-ar", String(SR), "-ac", "1", "-i", raw, "-af", af, "-c:a", "pcm_s16le", "-f", "wav", part], { signal: o2.signal });
@@ -31844,7 +31844,7 @@ async function resolveSfx(project, sound, tools, o2 = {}) {
 async function measureSfxLevel(file2, tools, o2) {
   const af = `aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo,apad=pad_dur=0.4,ebur128=metadata=1:peak=sample,ametadata=mode=print:file=${basename2(o2.metaFile)}`;
   try {
-    await tools.runFfmpeg(["-i", file2, "-vn", "-af", af, "-f", "null", "-"], { cwd: dirname5(o2.metaFile), signal: o2.signal });
+    await tools.runFfmpeg(["-t", String(MAX_PERSON_SFX_SEC), "-i", file2, "-vn", "-af", af, "-f", "null", "-"], { cwd: dirname5(o2.metaFile), signal: o2.signal });
     const text = await readFile6(o2.metaFile, "utf8");
     const values = (key) => [...text.matchAll(new RegExp(`^lavfi\\.r128\\.${key}=(\\S+)$`, "gm"))].map((m) => Number(m[1])).filter(Number.isFinite);
     const peak = Math.max(0, ...values("sample_peak"));
@@ -31857,7 +31857,7 @@ function sfxVolumeDb(level, targetLufs) {
   if (!(level.momentaryMaxLufs > SILENT_LUFS) || !Number.isFinite(level.peakDb)) return 0;
   return Math.min(targetLufs - level.momentaryMaxLufs, SFX_PEAK_CEILING_DB - level.peakDb);
 }
-var BUILTIN_SFX, SFX_RECIPE_VERSION, SR, PEAK_DB, PAD_SEC, noise, curve, band, RECIPES, SFX_EXTENSIONS, MAX_PERSON_SFX_SEC, isFile2, unreadableSfx, fileUnreadable, SILENT_LUFS, SFX_PEAK_CEILING_DB;
+var BUILTIN_SFX, SFX_RECIPE_VERSION, SR, PEAK_DB, PAD_SEC, PASS, noise, curve, band, RECIPES, SFX_EXTENSIONS, MAX_PERSON_SFX_SEC, isFile2, unreadableSfx, fileUnreadable, SILENT_LUFS, SFX_PEAK_CEILING_DB;
 var init_sfx = __esm({
   "packages/core/src/mirage/sfx.ts"() {
     "use strict";
@@ -31868,6 +31868,16 @@ var init_sfx = __esm({
     SR = 48e3;
     PEAK_DB = -1.5;
     PAD_SEC = 0.1;
+    PASS = {
+      highpassHz: 40,
+      lowpassHz: 12e3,
+      /** The window starts before the sound first comes within this factor of its peak (200 = 46 dB)... */
+      onsetDivisor: 200,
+      /** ...by at least this many milliseconds... */
+      leadMs: 1,
+      /** ...and ends in this many milliseconds of silence after the fade out. */
+      tailMs: 1
+    };
     noise = (color, seed, d) => `anoisesrc=c=${color}:seed=${seed}:r=${SR}:a=0.5:d=${d}`;
     curve = (expr, d) => `aevalsrc='${expr}':s=${SR}:c=mono:d=${d}`;
     band = (lo, hi, times = 2) => [...Array(times).fill(`highpass=f=${lo}`), ...Array(times).fill(`lowpass=f=${hi}`)].join(",");
@@ -32185,7 +32195,11 @@ function revertHolds(ep) {
   const r6s = (x) => ({ ...x, start: r62(x.start), end: r62(x.end) });
   const now = new Map(ep.items.map((x) => [x.id, x]));
   const items = vo.baseItems.map((x) => now.has(x.id) ? withLook(x, now.get(x.id)) : x);
-  out = { ...out, items, overlays: out.overlays.map(r6s), music: out.music.map(r6s), slots: out.slots.map(r6s), voiceover: null };
+  const music = out.music.map((c3) => {
+    const m = r6s(c3);
+    return c3.dips ? { ...m, dips: c3.dips.map(r6s) } : m;
+  });
+  out = { ...out, items, overlays: out.overlays.map(r6s), music, slots: out.slots.map(r6s), ...out.sfx ? { sfx: out.sfx.map((x) => ({ ...x, at: r62(x.at) })) } : {}, voiceover: null };
   return dropCollapsed(out, ep);
 }
 function lcsLength(a2, b) {
@@ -32672,9 +32686,9 @@ async function placeSfx(project, cues, durationSec, loudnessLufs, tools, work, s
   const levels = /* @__PURE__ */ new Map();
   const placed = [];
   for (const [k, c3] of cues.entries()) {
-    if (c3.at >= durationSec - 1e-6) continue;
     if (!sounds.has(c3.sound)) sounds.set(c3.sound, await resolveSfx(project, c3.sound, tools, { label: `sfx ${k + 1}`, tmpDir: work, signal }));
     const s = sounds.get(c3.sound);
+    if (c3.at - s.peakSec >= durationSec - 1e-6) continue;
     if (!(s.durationSec > 0)) continue;
     if (!levels.has(s.file)) levels.set(s.file, await measureSfxLevel(s.file, tools, { metaFile: join11(work, `level-${levels.size}.txt`), signal }));
     placed.push({ ...s, at: c3.at, volumeDb: sfxVolumeDb(levels.get(s.file), loudnessLufs + c3.gainDb) });
@@ -33438,9 +33452,9 @@ function timelineWarnings(ep, lib, snapped) {
   });
   const sfx = ep.sfx ?? [];
   sfx.forEach((x, k) => {
-    if (x.at >= D - 1e-6) out.push(`sfx ${k + 1} (${x.sound}) is at ${s2(x.at)} s, after the episode ends (${s2(D)} s) \u2014 it will never play`);
+    if (x.at > D + 1e-6) out.push(`sfx ${k + 1} (${x.sound}) is at ${s2(x.at)} s, after the episode ends (${s2(D)} s) \u2014 it will never play`);
   });
-  const times = sfx.map((x) => x.at).filter((t) => t < D - 1e-6).sort((a2, b) => a2 - b);
+  const times = sfx.map((x) => x.at).filter((t) => t <= D + 1e-6).sort((a2, b) => a2 - b);
   let busiest = { n: 0, from: 0 };
   times.forEach((t, i2) => {
     const n2 = times.filter((u2, j) => j >= i2 && u2 < t + SFX_WINDOW_SEC).length;
@@ -34081,7 +34095,7 @@ function checkReport({ episode: ep, warnings, notes }) {
     const it = l.item;
     lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${it.clip}  ${it.src.in.toFixed(2)}\u2013${it.src.out.toFixed(2)}  \xD7${it.speed}  ${l.start.toFixed(2)}\u2013${l.end.toFixed(2)}${it.quiet ? "  quiet" : ""}`);
   }
-  lines.push(`total ${formatTime(timelineDuration(ep))} \xB7 ${ep.items.length} items \xB7 ${ep.overlays.length} overlays \xB7 ${ep.music.length} music cues`);
+  lines.push(`total ${formatTime(timelineDuration(ep))} \xB7 ${ep.items.length} items \xB7 ${ep.overlays.length} overlays \xB7 ${ep.music.length} music cues${ep.sfx ? ` \xB7 ${ep.sfx.length} sound effects` : ""}`);
   for (const m of notes) lines.push(`\u2022 ${m}`);
   for (const w of warnings) lines.push(`\u26A0 ${w}`);
   return lines;
@@ -34268,11 +34282,17 @@ __export(src_exports2, {
   MAX_BACKUPS: () => MAX_BACKUPS,
   MAX_CHECKPOINTS: () => MAX_CHECKPOINTS,
   MAX_COMMAND: () => MAX_COMMAND,
+  MAX_PERSON_SFX_SEC: () => MAX_PERSON_SFX_SEC,
   MAX_SPEEDUP: () => MAX_SPEEDUP,
   MirageError: () => MirageError,
   NARRATION_GAPS: () => NARRATION_GAPS,
+  PAD_SEC: () => PAD_SEC,
+  PASS: () => PASS,
+  PEAK_DB: () => PEAK_DB,
+  RECIPES: () => RECIPES,
   SFX_EXTENSIONS: () => SFX_EXTENSIONS,
   SFX_RECIPE_VERSION: () => SFX_RECIPE_VERSION,
+  SR: () => SR,
   VIDEO_EXTENSIONS: () => VIDEO_EXTENSIONS,
   addNote: () => addNote,
   alignWritten: () => alignWritten,

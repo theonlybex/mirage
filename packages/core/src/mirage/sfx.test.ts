@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { run } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
-import { BUILTIN_SFX, builtinSfx, measureSfxLevel, resolveSfx, sfxDir, sfxSource, SFX_RECIPE_VERSION, sfxVolumeDb } from './sfx.js';
+import { createHash } from 'node:crypto';
+import { BUILTIN_SFX, builtinSfx, MAX_PERSON_SFX_SEC, measureSfxLevel, PAD_SEC, PASS, PEAK_DB, RECIPES, resolveSfx, SR as SFX_SR, sfxDir, sfxSource, SFX_RECIPE_VERSION, sfxVolumeDb } from './sfx.js';
 
 const SR = 48000;
 /** The plan's names, lengths and peak times, copied here so the test checks the module against the spec, not itself. */
@@ -277,5 +278,30 @@ describe('resolveSfx and measureSfxLevel (real ffmpeg)', () => {
     expect(long.peakDb).toBeLessThan(-20);
     expect(long.momentaryMaxLufs).toBeGreaterThan(long.peakDb - 6);
     expect(await readdir(work)).toEqual([]);
+  });
+  it("reads a person's file only as far as resolveSfx does (300 s), so a long file isn't decoded whole", async () => {
+    const work = await mkdtemp(join(tmpdir(), 'we-sfx-cap-'));
+    const calls: string[][] = [];
+    const spy = { ...tools, runFfmpeg: (args: string[], o?: Parameters<MediaTools['runFfmpeg']>[1]) => (calls.push(args), tools.runFfmpeg(args, o)) } as MediaTools;
+    await measureSfxLevel(join(project, 'sfx', 'long.mp3'), spy, { metaFile: join(work, 'level-0.txt') });
+    const args = calls[0]!;
+    // An input option: before -i, so FFmpeg stops reading the file there.
+    expect(args.slice(0, 4)).toEqual(['-t', String(MAX_PERSON_SFX_SEC), '-i', join(project, 'sfx', 'long.mp3')]);
+    expect(MAX_PERSON_SFX_SEC).toBe(300);
+  });
+});
+
+/** The version and the recipes' hash the built-ins were last made with. */
+const RECORDED = { version: 1, hash: '6f28647be4b7b23906095933e5233274f0183ee540cf70e50808ce5d955587e2' };
+
+describe('the built-in recipes and SFX_RECIPE_VERSION', () => {
+  it('changes the recipes only together with a bump of SFX_RECIPE_VERSION: older cached files are never used', () => {
+    // Sorted by name, so only a change to a recipe's own graph, length, peak or fade, or to the constants, moves the hash.
+    const text = JSON.stringify({ recipes: Object.entries(RECIPES).sort(([a], [b]) => a.localeCompare(b)), SR: SFX_SR, PEAK_DB, PAD_SEC, PASS });
+    const hash = createHash('sha256').update(text).digest('hex');
+    expect(
+      { version: SFX_RECIPE_VERSION, hash },
+      `A built-in sound's recipe (or PEAK_DB, PAD_SEC, SR or the PASS constants) changed. Cached sounds are keyed by SFX_RECIPE_VERSION, so bump it in sfx.ts, then update RECORDED to { version: <new version>, hash: '${hash}' } in this test.`,
+    ).toEqual(RECORDED);
   });
 });

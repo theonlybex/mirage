@@ -344,7 +344,7 @@ export function buildVoiceTrack(o: { recording: Float32Array | Map<string, Float
 }
 
 /**
- * The sound effects that play (those at or after the end never do), each resolved to its file and peak, measured once
+ * The sound effects that play (one whose start, `at` minus its peak, is at or after the end never does), each resolved to its file and peak, measured once
  * per distinct file and set so its loudest 400 ms sits at `loudnessLufs + gainDb` (sfxVolumeDb). Files are made or read
  * in `work`.
  */
@@ -353,9 +353,10 @@ async function placeSfx(project: string, cues: SfxCue[], durationSec: number, lo
   const levels = new Map<string, SfxLevel>();
   const placed: PlacedSfx[] = [];
   for (const [k, c] of cues.entries()) {
-    if (c.at >= durationSec - 1e-6) continue;
     if (!sounds.has(c.sound)) sounds.set(c.sound, await resolveSfx(project, c.sound, tools, { label: `sfx ${k + 1}`, tmpDir: work, signal }));
     const s = sounds.get(c.sound)!;
+    // A sound starts at `at − peak`: when that is at the end or later, none of it plays.
+    if (c.at - s.peakSec >= durationSec - 1e-6) continue;
     // An empty file has nothing to play.
     if (!(s.durationSec > 0)) continue;
     if (!levels.has(s.file)) levels.set(s.file, await measureSfxLevel(s.file, tools, { metaFile: join(work, `level-${levels.size}.txt`), signal }));

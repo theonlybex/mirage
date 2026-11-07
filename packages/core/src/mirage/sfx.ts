@@ -13,11 +13,22 @@ export const BUILTIN_SFX: readonly string[] = ['whoosh', 'swoosh-out', 'hit', 'r
 /** Bumped whenever a recipe changes, so older cached files are never used: they live in `v<version>/`. */
 export const SFX_RECIPE_VERSION = 1;
 
-const SR = 48000;
-/** Every sound's loudest sample sits here, under the -1 dBFS ceiling. */
-const PEAK_DB = -1.5;
+export const SR = 48000;
+/** Every sound's loudest sample sits here, under the -1 dBFS ceiling. (Exported for the test that ties recipe changes to SFX_RECIPE_VERSION.) */
+export const PEAK_DB = -1.5;
 /** Silence generated before and after each recipe, so the loudest sample can be moved onto the peak time. */
-const PAD_SEC = 0.1;
+export const PAD_SEC = 0.1;
+/** The other numbers the finished files depend on: the band every sound is held to, and pass 2's window (see builtinSfx). */
+export const PASS = {
+  highpassHz: 40,
+  lowpassHz: 12000,
+  /** The window starts before the sound first comes within this factor of its peak (200 = 46 dB)... */
+  onsetDivisor: 200,
+  /** ...by at least this many milliseconds... */
+  leadMs: 1,
+  /** ...and ends in this many milliseconds of silence after the fade out. */
+  tailMs: 1,
+};
 
 interface Recipe {
   durationSec: number;
@@ -33,7 +44,7 @@ const curve = (expr: string, d: number) => `aevalsrc='${expr}':s=${SR}:c=mono:d=
 /** A band: `times` 2-pole highpasses at `lo` Hz, then `times` 2-pole lowpasses at `hi` Hz. */
 const band = (lo: number, hi: number, times = 2) => [...Array(times).fill(`highpass=f=${lo}`), ...Array(times).fill(`lowpass=f=${hi}`)].join(',');
 
-const RECIPES: Record<string, Recipe> = {
+export const RECIPES: Record<string, Recipe> = {
   // Pink noise in a 300 Hz–2.4 kHz band, swelling to a point at 0.3 s and falling away (a cubed triangle).
   whoosh: { durationSec: 0.6, peakSec: 0.3, fadeOutSec: 0.03, graph: `${noise('pink', 11, 0.6)},${band(300, 2400)}[n];${curve('pow(max(0,1-abs(t-0.3)/0.3),3)', 0.6)}[e];[n][e]amultiply[s]` },
   // Pink noise in a 500 Hz–4.5 kHz band: a 60 ms rise (t⁴), then a 90 ms exponential tail.
@@ -86,7 +97,7 @@ export async function builtinSfx(name: string, tools: MediaTools, o: { dir?: str
     const len = Math.round(recipe.durationSec * SR);
     const total = len + 2 * pad;
     // Pass 1: the recipe, highpassed at 40 Hz and lowpassed at 12 kHz, with silence either side, as raw mono floats.
-    const graph = `${recipe.graph};[s]apad=pad_len=${pad},${band(40, 12000)},adelay=delays=${pad}S:all=1,apad=whole_len=${total},atrim=end_sample=${total}[out]`;
+    const graph = `${recipe.graph};[s]apad=pad_len=${pad},${band(PASS.highpassHz, PASS.lowpassHz)},adelay=delays=${pad}S:all=1,apad=whole_len=${total},atrim=end_sample=${total}[out]`;
     await tools.runFfmpeg(['-filter_complex', graph, '-map', '[out]', '-ac', '1', '-ar', String(SR), '-c:a', 'pcm_f32le', '-f', 'f32le', raw], { signal: o.signal });
     const buf = await readFile(raw);
     const x = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
@@ -104,13 +115,13 @@ export async function builtinSfx(name: string, tools: MediaTools, o: { dir?: str
     const peakAt = Math.round(recipe.peakSec * SR);
     const ms = SR / 1000;
     let onset = 0;
-    while (Math.abs(x[onset]!) < loudest / 200) onset++;
-    const start = Math.min(Math.max(Math.min(at - peakAt, onset - ms), 0), total - len);
+    while (Math.abs(x[onset]!) < loudest / PASS.onsetDivisor) onset++;
+    const start = Math.min(Math.max(Math.min(at - peakAt, onset - PASS.leadMs * ms), 0), total - len);
     const fadeOut = Math.round(recipe.fadeOutSec * SR);
     const gain = 10 ** (PEAK_DB / 20) / loudest;
     const af = [
       `atrim=start_sample=${start}:end_sample=${start + len}`, 'asetpts=PTS-STARTPTS', `volume=${gain}:precision=double`,
-      `afade=t=out:ss=${len - ms - fadeOut}:ns=${fadeOut}`, 'pan=stereo|c0=c0|c1=c0',
+      `afade=t=out:ss=${len - PASS.tailMs * ms - fadeOut}:ns=${fadeOut}`, 'pan=stereo|c0=c0|c1=c0',
     ].join(',');
     await tools.runFfmpeg(['-f', 'f32le', '-ar', String(SR), '-ac', '1', '-i', raw, '-af', af, '-c:a', 'pcm_s16le', '-f', 'wav', part], { signal: o.signal });
     try {
@@ -128,7 +139,7 @@ export async function builtinSfx(name: string, tools: MediaTools, o: { dir?: str
 /** The kinds of file a person's sound effect can be, tried in this order for a bare name. */
 export const SFX_EXTENSIONS: readonly string[] = ['.wav', '.mp3', '.m4a', '.aiff', '.aif', '.flac', '.ogg'];
 /** A person's sound effect longer than this is read only this far (its peak is looked for in it; the episode cuts it anyway). */
-const MAX_PERSON_SFX_SEC = 300;
+export const MAX_PERSON_SFX_SEC = 300;
 
 const isFile = (f: string) => {
   try {
@@ -200,14 +211,14 @@ export interface SfxLevel {
 
 /**
  * A sound file's level as the episode plays it (48 kHz stereo): FFmpeg's ebur128 writes each 100 ms's momentary loudness
- * and the running sample peak to `metaFile` (removed after), read here. 400 ms of silence after the sound give a short
+ * and the running sample peak to `metaFile` (removed after), read here. A file is read only as far as MAX_PERSON_SFX_SEC, as resolveSfx reads it. 400 ms of silence after the sound give a short
  * one a full window.
  */
 export async function measureSfxLevel(file: string, tools: MediaTools, o: { metaFile: string; signal?: AbortSignal }): Promise<SfxLevel> {
   // The metadata file is named relative to its folder (FFmpeg runs there), so its path needs no escaping in the graph.
   const af = `aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo,apad=pad_dur=0.4,ebur128=metadata=1:peak=sample,ametadata=mode=print:file=${basename(o.metaFile)}`;
   try {
-    await tools.runFfmpeg(['-i', file, '-vn', '-af', af, '-f', 'null', '-'], { cwd: dirname(o.metaFile), signal: o.signal });
+    await tools.runFfmpeg(['-t', String(MAX_PERSON_SFX_SEC), '-i', file, '-vn', '-af', af, '-f', 'null', '-'], { cwd: dirname(o.metaFile), signal: o.signal });
     const text = await readFile(o.metaFile, 'utf8');
     const values = (key: string) => [...text.matchAll(new RegExp(`^lavfi\\.r128\\.${key}=(\\S+)$`, 'gm'))].map((m) => Number(m[1])).filter(Number.isFinite);
     const peak = Math.max(0, ...values('sample_peak'));

@@ -26,6 +26,12 @@ describe('checkReport', () => {
     expect(lines[2]).toMatch(/^total .* · 2 items · 1 overlays · 1 music cues$/);
     expect(lines.slice(3)).toEqual(['• snapped a to 1.0 s', '⚠ overlay 1 is long']);
   });
+  it('counts sound effects in the total only when the episode has the list', () => {
+    const total = (ep: typeof episode) => checkReport({ episode: ep, notes: [], warnings: [] }).find((l) => l.startsWith('total'))!;
+    expect(total(episode)).not.toContain('sound effects');
+    expect(total({ ...episode, sfx: [{ sound: 'hit', at: 1, gainDb: -6 }, { sound: 'pop', at: 2, gainDb: -6 }] })).toMatch(/ · 1 overlays · 1 music cues · 2 sound effects$/);
+    expect(total({ ...episode, sfx: [] })).toMatch(/ · 0 sound effects$/);
+  });
 });
 
 describe('ingestReport', () => {

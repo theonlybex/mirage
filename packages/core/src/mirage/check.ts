@@ -80,10 +80,10 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
   });
   const sfx = ep.sfx ?? [];
   sfx.forEach((x, k) => {
-    if (x.at >= D - 1e-6) out.push(`sfx ${k + 1} (${x.sound}) is at ${s2(x.at)} s, after the episode ends (${s2(D)} s) — it will never play`);
+    if (x.at > D + 1e-6) out.push(`sfx ${k + 1} (${x.sound}) is at ${s2(x.at)} s, after the episode ends (${s2(D)} s) — it will never play`);
   });
   // The busiest minute (from one sound effect's time to just under a minute after it); a shorter video is one window.
-  const times = sfx.map((x) => x.at).filter((t) => t < D - 1e-6).sort((a, b) => a - b);
+  const times = sfx.map((x) => x.at).filter((t) => t <= D + 1e-6).sort((a, b) => a - b);
   let busiest = { n: 0, from: 0 };
   times.forEach((t, i) => {
     const n = times.filter((u, j) => j >= i && u < t + SFX_WINDOW_SEC).length;

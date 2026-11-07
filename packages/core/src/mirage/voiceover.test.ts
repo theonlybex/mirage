@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { moveFrames } from './move.js';
 import { keptSegments } from './overlays.js';
 import { cutOf } from './slots.js';
-import { cutChanged, fitVoiceover, hasWords, holdAt, lineChanges, lineChangeWarnings, missingSlots, notEnglish } from './voiceover.js';
+import { cutChanged, fitVoiceover, hasWords, holdAt, lineChanges, lineChangeWarnings, missingSlots, notEnglish, revertHolds } from './voiceover.js';
 import { itemsFingerprint, layoutTimeline, timelineDuration } from './timeline.js';
 
 function said(text: string, t0: number, per = 0.3): Word[] {
@@ -118,6 +118,28 @@ describe('fitVoiceover fixes', () => {
     expect(second.episode.items).toEqual(first.episode.items);
     expect(timelineDuration(second.episode)).toBeCloseTo(timelineDuration(first.episode), 6);
     expect(second.episode.voiceover!.lines).toEqual(first.episode.voiceover!.lines);
+  });
+
+  it('rounds dips and sound effect times to 6 places when it closes the holds, as it does cues and ranges', () => {
+    const fitted = fitVoiceover({ episode: episode(SLOTS), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    const hold = fitted.voiceover!.holds![0]!;
+    const noisy = (x: number) => Math.round(x * 1e6) / 1e6 !== x;
+    // A time after the hold whose shift back by the hold leaves float noise (sums like 0.1 + 0.2).
+    const at = [...Array(100).keys()].map((k) => hold.at + hold.sec + 1 + k * 0.1).find((t) => noisy(t - hold.sec) && noisy(t + 0.7 - hold.sec))!;
+    const withSound = {
+      ...fitted,
+      music: [{ track: 'm.wav', start: 0, end: at + 4, offset: 0, gainDb: -5, fadeIn: 0, fadeOut: 0, dips: [{ start: at, end: at + 0.7 }] }],
+      sfx: [{ sound: 'hit', at, gainDb: -6 }],
+    } as Episode;
+    const back = revertHolds(withSound).episode;
+    const [dip] = back.music[0]!.dips!;
+    for (const x of [dip!.start, dip!.end, back.sfx![0]!.at]) expect(noisy(x)).toBe(false);
+    expect(back.sfx![0]!.at).toBeCloseTo(at - hold.sec, 6);
+    expect(dip!.end - dip!.start).toBeCloseTo(0.7, 6);
+    // An episode without sound effects or dips gets none.
+    const plain = revertHolds({ ...fitted, music: [{ track: 'm.wav', start: 0, end: at + 4, offset: 0, gainDb: -5, fadeIn: 0, fadeOut: 0 }] } as Episode).episode;
+    expect('sfx' in plain).toBe(false);
+    expect('dips' in plain.music[0]!).toBe(false);
   });
 
   it('reports the growth holdAt actually applied', () => {
