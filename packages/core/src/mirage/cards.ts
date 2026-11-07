@@ -16,9 +16,72 @@ const CARD_IMAGE_HINT = "Put the picture in the project folder, or change the ca
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const JPEG = [0xff, 0xd8, 0xff];
 
-/** What the file is by its first bytes, whatever its name ends in: a PNG, a JPEG, or neither (also when it can't be read). */
-function imageFormat(file: string): 'png' | 'jpeg' | null {
-  const head = Buffer.alloc(PNG.length);
+/** How much of a JPEG is read for its EXIF: the APP1 segment is at most 64 KB and comes near the start. */
+const HEAD_BYTES = 128 * 1024;
+
+/**
+ * A JPEG's EXIF orientation (TIFF tag 0x0112 in IFD0 of its APP1 "Exif" segment), 1–8: how the stored picture is turned
+ * or mirrored from upright (phones store photos as the sensor saw them and set this). 1 (as stored) when there is no
+ * such tag, or anything about it doesn't add up.
+ */
+export function jpegOrientation(b: Buffer): number {
+  try {
+    if (b[0] !== 0xff || b[1] !== 0xd8) return 1;
+    let pos = 2;
+    while (pos + 4 <= b.length) {
+      if (b[pos] !== 0xff) return 1;
+      const marker = b[pos + 1]!;
+      if (marker === 0xff) {
+        pos += 1; // fill byte
+        continue;
+      }
+      // Start of scan or end of image: the headers are over. Restart and TEM markers have no length.
+      if (marker === 0xda || marker === 0xd9) return 1;
+      if ((marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+        pos += 2;
+        continue;
+      }
+      const len = b.readUInt16BE(pos + 2);
+      const end = pos + 2 + len;
+      if (marker === 0xe1 && len >= 8 && b.toString('latin1', pos + 4, pos + 10) === 'Exif\0\0') {
+        const t = pos + 10;
+        const order = b.toString('latin1', t, t + 2);
+        if (order !== 'II' && order !== 'MM') return 1;
+        const le = order === 'II';
+        const u16 = (at: number) => {
+          if (at + 2 > end) throw new RangeError('past the segment');
+          return le ? b.readUInt16LE(at) : b.readUInt16BE(at);
+        };
+        const u32 = (at: number) => {
+          if (at + 4 > end) throw new RangeError('past the segment');
+          return le ? b.readUInt32LE(at) : b.readUInt32BE(at);
+        };
+        if (u16(t + 2) !== 42) return 1;
+        const ifd = t + u32(t + 4);
+        const count = u16(ifd);
+        for (let i = 0; i < count; i++) {
+          const entry = ifd + 2 + i * 12;
+          if (u16(entry) !== 0x0112) continue;
+          // A SHORT, held in the first two bytes of the value field.
+          const v = u16(entry + 2) === 3 ? u16(entry + 8) : 0;
+          return v >= 1 && v <= 8 ? v : 1;
+        }
+        return 1;
+      }
+      pos = end;
+    }
+    return 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * What the file is by its first bytes, whatever its name ends in: a PNG, a JPEG (with its EXIF orientation), or neither
+ * (also when it can't be read).
+ */
+function imageFormat(file: string): { format: 'png' | 'jpeg'; orientation: number } | null {
+  const head = Buffer.alloc(HEAD_BYTES);
   let n = 0;
   try {
     const fd = openSync(file, 'r');
@@ -32,16 +95,20 @@ function imageFormat(file: string): 'png' | 'jpeg' | null {
     return null;
   }
   const starts = (sig: number[]) => n >= sig.length && sig.every((b, i) => head[i] === b);
-  return starts(PNG) ? 'png' : starts(JPEG) ? 'jpeg' : null;
+  if (starts(PNG)) return { format: 'png', orientation: 1 };
+  if (starts(JPEG)) return { format: 'jpeg', orientation: jpegOrientation(head.subarray(0, n)) };
+  return null;
 }
 
 /** Where an image card's picture is on disk (the schema keeps `image` a plain path inside the project). */
 export const cardImageFile = (project: string, item: CardItem): string => resolve(project, item.card.image!);
 
-/** An image card's picture: its file, and what it is (FFmpeg reads it as that, whatever its name says). */
+/** An image card's picture: its file, what it is (FFmpeg reads it as that, whatever its name says) and how it is turned. */
 export interface CardImage {
   path: string;
   format: 'png' | 'jpeg';
+  /** EXIF orientation 1–8 (default 1, as stored): the render turns the picture upright from it. */
+  orientation?: number;
 }
 
 /**
@@ -61,9 +128,9 @@ export function cardImagesFor(project: string, ep: Episode): Map<string, CardIma
       }
     })();
     if (!isFile) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} is missing`, CARD_IMAGE_HINT);
-    const format = imageFormat(file);
-    if (!format) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
-    out.set(item.id, { path: file, format });
+    const image = imageFormat(file);
+    if (!image) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
+    out.set(item.id, { path: file, ...image });
   }
   return out;
 }

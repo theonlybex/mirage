@@ -28414,6 +28414,7 @@ function cardLabel(item) {
   const text = item.card.text.trim().split("\n")[0].trim();
   return text || (item.card.image ?? "").split(/[\\/]/).pop();
 }
+var HEAD_BYTES = 128 * 1024;
 
 // packages/core/src/mirage/render-episode.ts
 var episodeDir = (project2, n2) => join6(resolve(project2), "episodes", String(n2));

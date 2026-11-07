@@ -38774,8 +38774,58 @@ function cardLabel(item) {
 var CARD_IMAGE_HINT = "Put the picture in the project folder, or change the card's image.";
 var PNG = [137, 80, 78, 71, 13, 10, 26, 10];
 var JPEG = [255, 216, 255];
+var HEAD_BYTES = 128 * 1024;
+function jpegOrientation(b) {
+  try {
+    if (b[0] !== 255 || b[1] !== 216) return 1;
+    let pos = 2;
+    while (pos + 4 <= b.length) {
+      if (b[pos] !== 255) return 1;
+      const marker = b[pos + 1];
+      if (marker === 255) {
+        pos += 1;
+        continue;
+      }
+      if (marker === 218 || marker === 217) return 1;
+      if (marker >= 208 && marker <= 215 || marker === 1) {
+        pos += 2;
+        continue;
+      }
+      const len = b.readUInt16BE(pos + 2);
+      const end = pos + 2 + len;
+      if (marker === 225 && len >= 8 && b.toString("latin1", pos + 4, pos + 10) === "Exif\0\0") {
+        const t = pos + 10;
+        const order = b.toString("latin1", t, t + 2);
+        if (order !== "II" && order !== "MM") return 1;
+        const le = order === "II";
+        const u16 = (at2) => {
+          if (at2 + 2 > end) throw new RangeError("past the segment");
+          return le ? b.readUInt16LE(at2) : b.readUInt16BE(at2);
+        };
+        const u32 = (at2) => {
+          if (at2 + 4 > end) throw new RangeError("past the segment");
+          return le ? b.readUInt32LE(at2) : b.readUInt32BE(at2);
+        };
+        if (u16(t + 2) !== 42) return 1;
+        const ifd = t + u32(t + 4);
+        const count2 = u16(ifd);
+        for (let i2 = 0; i2 < count2; i2++) {
+          const entry = ifd + 2 + i2 * 12;
+          if (u16(entry) !== 274) continue;
+          const v = u16(entry + 2) === 3 ? u16(entry + 8) : 0;
+          return v >= 1 && v <= 8 ? v : 1;
+        }
+        return 1;
+      }
+      pos = end;
+    }
+    return 1;
+  } catch {
+    return 1;
+  }
+}
 function imageFormat(file2) {
-  const head = Buffer.alloc(PNG.length);
+  const head = Buffer.alloc(HEAD_BYTES);
   let n2 = 0;
   try {
     const fd = openSync(file2, "r");
@@ -38788,7 +38838,9 @@ function imageFormat(file2) {
     return null;
   }
   const starts = (sig) => n2 >= sig.length && sig.every((b, i2) => head[i2] === b);
-  return starts(PNG) ? "png" : starts(JPEG) ? "jpeg" : null;
+  if (starts(PNG)) return { format: "png", orientation: 1 };
+  if (starts(JPEG)) return { format: "jpeg", orientation: jpegOrientation(head.subarray(0, n2)) };
+  return null;
 }
 var cardImageFile = (project2, item) => resolve4(project2, item.card.image);
 function cardImagesFor(project2, ep) {
@@ -38804,9 +38856,9 @@ function cardImagesFor(project2, ep) {
       }
     })();
     if (!isFile2) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} is missing`, CARD_IMAGE_HINT);
-    const format2 = imageFormat(file2);
-    if (!format2) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
-    out.set(item.id, { path: file2, format: format2 });
+    const image = imageFormat(file2);
+    if (!image) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
+    out.set(item.id, { path: file2, ...image });
   }
   return out;
 }
@@ -39440,6 +39492,7 @@ function moveFilters(l, item, k, o2, src) {
   const top = `${e};st(1,${h2}/(${zoom}));(H-ld(1))*(${y})`;
   return `${pre}perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=cubic:eval=frame,${fill ? `scale=${W}:${H}` : framed(item.frame, cropAt(item.focus), o2, k)}`;
 }
+var UPRIGHT = ["", "", "hflip,", "hflip,vflip,", "vflip,", "transpose=0,", "transpose=1,", "transpose=3,", "transpose=2,"];
 function itemChunkArgs(laid, o2, sources, output2) {
   const inputs = [];
   const chains = [];
@@ -39452,8 +39505,9 @@ function itemChunkArgs(laid, o2, sources, output2) {
       if (item.card.style === "image") {
         const pic = o2.cardImages?.get(item.id);
         if (!pic) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} was not checked before rendering`, "Run check, then render again.");
-        inputs.push("-f", `${pic.format}_pipe`, "-framerate", ffNum(o2.fps), "-i", pic.path);
-        chains.push(`[${k}:v]${framed("fill", "", o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        inputs.push("-noautorotate", "-f", `${pic.format}_pipe`, "-framerate", ffNum(o2.fps), "-i", pic.path);
+        const flat = pic.format === "png" ? "format=rgba,premultiply=inplace=1," : "";
+        chains.push(`[${k}:v]${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", "", o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         inputs.push("-f", "lavfi", "-i", `color=c=black:s=${o2.width}x${o2.height}:r=${ffNum(o2.fps)}:d=${ffNum((l.frames + 1) / o2.fps)}`);
         chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);

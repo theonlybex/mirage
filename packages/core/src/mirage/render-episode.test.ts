@@ -131,20 +131,30 @@ describe('itemChunkArgs with picture cards', () => {
     { id: 'q', beat: 'title', card: { style: 'image', image: 'logo.png', text: 'Hi', sec: 0.5 }, hold: 0.5 },
   ]);
   const cardImages = new Map([
-    ['p', { path: '/proj/pics/a b.jpg', format: 'jpeg' as const }],
+    ['p', { path: '/proj/pics/a b.jpg', format: 'jpeg' as const, orientation: 6 }],
     ['q', { path: '/proj/logo.png', format: 'png' as const }],
   ]);
   const args = itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30, cardImages }, new Map(), '/w/chunk-000.mov');
   const graph = args[args.indexOf('-filter_complex') + 1];
   it('reads the picture once (by what it is, not its name) and holds it, scaled to cover the frame and cropped centred', () => {
-    expect(args.slice(0, 6)).toEqual(['-f', 'jpeg_pipe', '-framerate', '30', '-i', '/proj/pics/a b.jpg']);
-    expect(graph).toContain('[0:v]scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,');
-    expect(args.slice(10, 16)).toEqual(['-f', 'png_pipe', '-framerate', '30', '-i', '/proj/logo.png']);
-    // Hold included.
-    expect(graph).toContain('[2:v]scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=30,setpts=PTS-STARTPTS[v2]');
+    // FFmpeg's own rotation is off: Mirage turns the photo upright itself (EXIF 6: a quarter turn clockwise), the same
+    // with every FFmpeg.
+    expect(args.slice(0, 7)).toEqual(['-noautorotate', '-f', 'jpeg_pipe', '-framerate', '30', '-i', '/proj/pics/a b.jpg']);
+    expect(graph).toContain('[0:v]transpose=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,');
+    expect(args.slice(11, 18)).toEqual(['-noautorotate', '-f', 'png_pipe', '-framerate', '30', '-i', '/proj/logo.png']);
+    // A PNG is laid on black first (its transparent parts black); hold included.
+    expect(graph).toContain('[2:v]format=rgba,premultiply=inplace=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=30,setpts=PTS-STARTPTS[v2]');
   });
   it('keeps a text card black', () => {
-    expect(args.slice(6, 10)).toEqual(['-f', 'lavfi', '-i', 'color=c=black:s=960x540:r=30:d=1.033333']);
+    expect(args.slice(7, 11)).toEqual(['-f', 'lavfi', '-i', 'color=c=black:s=960x540:r=30:d=1.033333']);
+  });
+  it('turns a photo upright for each EXIF orientation before covering the frame', () => {
+    const turn = (orientation: number) => {
+      const one = ep([{ id: 'p', beat: 'title', card: { style: 'image', image: 'a.jpg', sec: 1 } }]);
+      const a = itemChunkArgs(layoutTimeline(one), { width: 960, height: 540, fps: 30, cardImages: new Map([['p', { path: '/a.jpg', format: 'jpeg' as const, orientation }]]) }, new Map(), '/w/c.mov');
+      return a[a.indexOf('-filter_complex') + 1].split('scale=')[0];
+    };
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map(turn)).toEqual(['[0:v]', '[0:v]hflip,', '[0:v]hflip,vflip,', '[0:v]vflip,', '[0:v]transpose=0,', '[0:v]transpose=1,', '[0:v]transpose=3,', '[0:v]transpose=2,']);
   });
   it('refuses a picture card whose picture was not looked at first', () => {
     expect(() => itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30 }, new Map(), '/w/c.mov')).toThrow(/item p: card image pics\/a b\.jpg/);
@@ -1452,6 +1462,63 @@ describe('cards (real ffmpeg)', () => {
       }
     }
   }, 300_000);
+
+  it('turns phone photos upright for every EXIF orientation (red corner top left, green top right)', async () => {
+    // The upright photo is 80 × 45: blue, red in its top-left corner, green in its top-right. Each file stores it as the
+    // EXIF orientation says (TIFF/EXIF 2.3, tag 0x0112: where the stored 0th row and 0th column are when upright), so
+    // the corners are drawn where that orientation puts them: [red, green] as [x, y] of the stored picture's corners.
+    const L = 0;
+    const R = 1;
+    const corners: Record<number, [[number, number], [number, number]]> = {
+      1: [[L, L], [R, L]], 2: [[R, L], [L, L]], 3: [[R, R], [L, R]], 4: [[L, R], [R, R]],
+      5: [[L, L], [L, R]], 6: [[L, R], [L, L]], 7: [[R, R], [R, L]], 8: [[R, L], [R, R]],
+    };
+    const exif = (o: number) => {
+      const tiff = Buffer.from([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0]);
+      const payload = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff]);
+      const len = Buffer.alloc(2);
+      len.writeUInt16BE(payload.length + 2);
+      return Buffer.concat([Buffer.from([0xff, 0xe1]), len, payload]);
+    };
+    const items = [];
+    for (const o of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const [w, h] = o >= 5 ? [45, 80] : [80, 45];
+      const box = ([x, y]: [number, number], c: string) => `drawbox=x=${x ? w - 20 : 0}:y=${y ? h - 20 : 0}:w=20:h=20:color=${c}:t=fill`;
+      const plain = join(project, 'pics', `plain-${o}.jpg`);
+      await gen(['-f', 'lavfi', '-i', `color=c=blue:s=${w}x${h},${box(corners[o]![0], 'red')},${box(corners[o]![1], 'green')}`, '-frames:v', '1', '-q:v', '2', plain]);
+      const jpg = await readFile(plain);
+      await writeFile(join(project, 'pics', `turned-${o}.jpg`), Buffer.concat([jpg.subarray(0, 2), exif(o), jpg.subarray(2)]));
+      items.push({ id: `o${o}`, beat: 'title', card: { style: 'image', image: `pics/turned-${o}.jpg`, sec: 0.5 } });
+    }
+    const e = ep(items);
+    const out = join(project, 'turned.mov');
+    const [W, H] = [320, 180];
+    await tools.runFfmpeg(['-y', ...itemChunkArgs(layoutTimeline(e), { width: W, height: H, fps: 30, cardImages: cardImagesFor(project, e) }, new Map(), out)], { expectedDurationSec: 4 });
+    for (const [k, o] of [1, 2, 3, 4, 5, 6, 7, 8].entries()) {
+      const f = await frameAt(out, k * 0.5 + 0.25);
+      const px = (x: number, y: number) => [f[(y * W + x) * 3]!, f[(y * W + x) * 3 + 1]!, f[(y * W + x) * 3 + 2]!];
+      const isRed = ([r, g, b]: number[]) => r! > 150 && g! < 90 && b! < 90;
+      const isGreen = ([r, g, b]: number[]) => g! > 90 && r! < 90 && b! < 90;
+      const isBlue = ([r, g, b]: number[]) => b! > 150 && r! < 90 && g! < 90;
+      expect(isRed(px(20, 20)), `orientation ${o}: red top left`).toBe(true);
+      expect(isGreen(px(W - 20, 20)), `orientation ${o}: green top right`).toBe(true);
+      expect(isBlue(px(20, H - 20)) && isBlue(px(W - 20, H - 20)), `orientation ${o}: blue at the bottom`).toBe(true);
+    }
+  }, 120_000);
+
+  it('lays a transparent picture on black: clear parts black, half-clear parts half as bright', async () => {
+    // White everywhere, opaque on the left third, half transparent in the middle, fully transparent on the right.
+    await gen(['-f', 'lavfi', '-i', "color=c=white:s=90x30,format=rgba,geq=r='255':g='255':b='255':a='if(lt(X,30),255,if(lt(X,60),128,0))'", '-frames:v', '1', join(project, 'pics', 'clear.png')]);
+    const e = ep([{ id: 'c', beat: 'title', card: { style: 'image', image: 'pics/clear.png', sec: 0.5 } }]);
+    const out = join(project, 'clear.mov');
+    const [W, H] = [360, 120];
+    await tools.runFfmpeg(['-y', ...itemChunkArgs(layoutTimeline(e), { width: W, height: H, fps: 30, cardImages: cardImagesFor(project, e) }, new Map(), out)], { expectedDurationSec: 0.5 });
+    const f = await frameAt(out, 0.25);
+    const column = (x: number) => Array.from({ length: H }, (_, y) => f[(y * W + x) * 3 + 1]!);
+    expect(Math.min(...column(60))).toBeGreaterThan(240);
+    for (const v of column(180)) expect(Math.abs(v - 128)).toBeLessThan(12);
+    expect(Math.max(...column(300))).toBeLessThan(12);
+  }, 60_000);
 
   it('renders an episode of only cards, in a project with no clips', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we only cards '));

@@ -164,6 +164,13 @@ function moveFilters(l: LaidItem, item: ClipItem, k: number, o: { width: number;
   );
 }
 
+/**
+ * The filters that turn a picture of each EXIF orientation (1–8) upright: 2 is mirrored, 3 upside down, 4 mirrored
+ * upside down, 5 mirrored on its diagonal, 6 needs a quarter turn clockwise, 7 mirrored on the other diagonal, 8 a
+ * quarter turn anticlockwise.
+ */
+const UPRIGHT = ['', '', 'hflip,', 'hflip,vflip,', 'vflip,', 'transpose=0,', 'transpose=1,', 'transpose=3,', 'transpose=2,'];
+
 /** A chunk's output size and frame rate, and the pictures of its image cards (cardImagesFor), by item id. */
 export interface ChunkShape {
   width: number;
@@ -183,12 +190,16 @@ export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<stri
     if (isCard(item)) {
       if (item.card.style === 'image') {
         // A picture card is its picture, read once (by the demuxer for what it is, so neither its name nor a % or * in
-        // its path matters), scaled to cover the frame, cropped centred, then held for the card's length (equivalent to
-        // -loop 1, which decodes a 24-megapixel picture again for every frame). Its text comes in the final pass.
+        // its path matters), turned upright, laid on black, scaled to cover the frame, cropped centred, then held for the
+        // card's length (equivalent to -loop 1, which decodes a 24-megapixel picture again for every frame). Its text
+        // comes in the final pass. FFmpeg's own rotation is off: some versions turn a JPEG by its EXIF and some don't,
+        // so Mirage turns it from the orientation it read itself.
         const pic = o.cardImages?.get(item.id);
         if (!pic) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} was not checked before rendering`, 'Run check, then render again.');
-        inputs.push('-f', `${pic.format}_pipe`, '-framerate', ffNum(o.fps), '-i', pic.path);
-        chains.push(`[${k}:v]${framed('fill', '', o, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        inputs.push('-noautorotate', '-f', `${pic.format}_pipe`, '-framerate', ffNum(o.fps), '-i', pic.path);
+        // A PNG's colour times its alpha is the picture over black: clear parts black, not whatever colour they hold.
+        const flat = pic.format === 'png' ? 'format=rgba,premultiply=inplace=1,' : '';
+        chains.push(`[${k}:v]${UPRIGHT[pic.orientation ?? 1] ?? ''}${flat}${framed('fill', '', o, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         // A text card is black for its length, at the chunk's size (its text comes in the final pass); all cards are silent.
         inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${o.width}x${o.height}:r=${ffNum(o.fps)}:d=${ffNum((l.frames + 1) / o.fps)}`);
