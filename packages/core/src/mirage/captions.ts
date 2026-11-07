@@ -20,6 +20,8 @@ export interface CaptionPart {
   pop?: boolean;
   /** The word being said (karaoke style). */
   lit?: boolean;
+  /** A word of the group not said yet (pop style): laid out but not drawn, so the words before it never move. */
+  hidden?: boolean;
 }
 
 /** What is on screen from `start` to `end` (output seconds). */
@@ -69,7 +71,8 @@ function wordLines(span: { start: number; end: number }, group: GroupedWord[], p
 /**
  * Pop captions: groups of 1–3 words (16 characters at most), in capitals. Each word appears at its own start (the first of
  * a group 0.1 s early) and the group stays at least 0.5 s, but never past the next group. The first highlighted word of a
- * group is `key`; the newest word of every line is `pop`.
+ * group is `key`; the newest word of every line is `pop`. Every line of a group carries all its words, those not said yet
+ * `hidden`, so the line is laid out the same from its first word to its last.
  */
 export function popLines(words: Word[], o: { durationSec: number; highlight: Captions['highlight'] }): CaptionLine[] {
   const keys = keyWords(words, o.highlight);
@@ -77,10 +80,11 @@ export function popLines(words: Word[], o: { durationSec: number; highlight: Cap
   return groupSpans(groups, { durationSec: o.durationSec, lead: 0.1, minDur: 0.5 }).flatMap((span) => {
     const firstKey = span.group.find((x) => keys.has(x.index));
     return wordLines(span, span.group, (k) =>
-      span.group.slice(0, k + 1).map((x, j) => ({
+      span.group.map((x, j) => ({
         text: x.text.toUpperCase(),
         ...(x === firstKey ? { key: true } : {}),
         ...(j === k ? { pop: true } : {}),
+        ...(j > k ? { hidden: true } : {}),
       })),
     );
   });

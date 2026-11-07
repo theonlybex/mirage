@@ -291,17 +291,25 @@ export function buildAss(o: {
   for (const c of o.captions) ev(2, c.start, c.end, 'Caption', draw(c.text));
   if (o.captionLines) {
     const color = assColor(o.highlightColor ?? HIGHLIGHT_COLOR);
-    // A key word is coloured and larger, a lit one coloured; \r goes back to the style for the words after it.
-    const part = (p: CaptionPart, text: string, last: boolean) => {
+    // A key word is coloured and larger, a lit one coloured; \r goes back to the style for the words after it. A hidden
+    // word keeps its size (so the words around it sit where they will) and is drawn fully transparent, outline too.
+    const part = (p: CaptionPart, text: string, mode: 'show' | 'hide' | 'pop', last: boolean) => {
       const scale = p.key ? 112 : 100;
-      const tags = `${p.key || p.lit ? `\\c${color}` : ''}${p.pop ? POP_IN(scale) : p.key ? `\\fscx${scale}\\fscy${scale}` : ''}`;
+      const size = p.key ? `\\fscx${scale}\\fscy${scale}` : '';
+      if (mode === 'hide') return `{\\alpha&HFF&${size}}${text}{\\r}`;
+      const tags = `${p.key || p.lit ? `\\c${color}` : ''}${mode === 'pop' ? POP_IN(scale) : size}`;
       if (!tags) return text;
       return `{${tags}}${text}${p.key || p.lit || !last ? '{\\r}' : ''}`;
     };
     const style = o.captionLines.style === 'pop' ? 'Pop' : 'Karaoke';
     for (const line of o.captionLines.lines) {
       const parts = line.parts.map((p) => [p, draw(p.text)] as const).filter(([, text]) => text);
-      if (parts.length) ev(2, line.start, line.end, style, parts.map(([p, text], i) => part(p, text, i === parts.length - 1)).join(' '));
+      const text = (mode: (p: CaptionPart) => 'show' | 'hide' | 'pop') => parts.map(([p, t], i) => part(p, t, mode(p), i === parts.length - 1)).join(' ');
+      if (!parts.length) continue;
+      // Growing from 115% widens the newest word, which would re-centre the line and move the words already shown. So it
+      // pops in on a layer of its own over the same line drawn invisibly, and holds its place invisibly in the line itself.
+      ev(2, line.start, line.end, style, text((p) => (p.hidden || p.pop ? 'hide' : 'show')));
+      if (parts.some(([p]) => p.pop && !p.hidden)) ev(1, line.start, line.end, style, text((p) => (p.pop && !p.hidden ? 'pop' : 'hide')));
     }
   }
   for (const ov of o.overlays) {

@@ -37969,10 +37969,11 @@ function popLines(words, o2) {
     return wordLines(
       span,
       span.group,
-      (k) => span.group.slice(0, k + 1).map((x, j) => ({
+      (k) => span.group.map((x, j) => ({
         text: x.text.toUpperCase(),
         ...x === firstKey ? { key: true } : {},
-        ...j === k ? { pop: true } : {}
+        ...j === k ? { pop: true } : {},
+        ...j > k ? { hidden: true } : {}
       }))
     );
   });
@@ -38211,16 +38212,21 @@ function buildAss(o2) {
   for (const c3 of o2.captions) ev(2, c3.start, c3.end, "Caption", draw(c3.text));
   if (o2.captionLines) {
     const color = assColor(o2.highlightColor ?? HIGHLIGHT_COLOR);
-    const part = (p, text, last) => {
+    const part = (p, text, mode, last) => {
       const scale = p.key ? 112 : 100;
-      const tags = `${p.key || p.lit ? `\\c${color}` : ""}${p.pop ? POP_IN(scale) : p.key ? `\\fscx${scale}\\fscy${scale}` : ""}`;
+      const size = p.key ? `\\fscx${scale}\\fscy${scale}` : "";
+      if (mode === "hide") return `{\\alpha&HFF&${size}}${text}{\\r}`;
+      const tags = `${p.key || p.lit ? `\\c${color}` : ""}${mode === "pop" ? POP_IN(scale) : size}`;
       if (!tags) return text;
       return `{${tags}}${text}${p.key || p.lit || !last ? "{\\r}" : ""}`;
     };
     const style = o2.captionLines.style === "pop" ? "Pop" : "Karaoke";
     for (const line of o2.captionLines.lines) {
-      const parts = line.parts.map((p) => [p, draw(p.text)]).filter(([, text]) => text);
-      if (parts.length) ev(2, line.start, line.end, style, parts.map(([p, text], i2) => part(p, text, i2 === parts.length - 1)).join(" "));
+      const parts = line.parts.map((p) => [p, draw(p.text)]).filter(([, text2]) => text2);
+      const text = (mode) => parts.map(([p, t], i2) => part(p, t, mode(p), i2 === parts.length - 1)).join(" ");
+      if (!parts.length) continue;
+      ev(2, line.start, line.end, style, text((p) => p.hidden || p.pop ? "hide" : "show"));
+      if (parts.some(([p]) => p.pop && !p.hidden)) ev(1, line.start, line.end, style, text((p) => p.pop && !p.hidden ? "pop" : "hide"));
     }
   }
   for (const ov of o2.overlays) {

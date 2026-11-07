@@ -137,13 +137,13 @@ describe('buildAss without captions settings', () => {
 describe('buildAss pop and karaoke captions', () => {
   const base = { width: 1080, height: 1920, cjkFont: null, captions: [], overlays: [], prompts: [] };
   const pop: CaptionLine[] = [
-    { start: 0.9, end: 1.3, parts: [{ text: 'SO', pop: true }] },
-    { start: 1.3, end: 1.5, parts: [{ text: 'SO' }, { text: 'HE', pop: true }] },
+    { start: 0.9, end: 1.3, parts: [{ text: 'SO', pop: true }, { text: 'HE', hidden: true }, { text: 'QUIETLY', hidden: true }] },
+    { start: 1.3, end: 1.5, parts: [{ text: 'SO' }, { text: 'HE', pop: true }, { text: 'QUIETLY', hidden: true }] },
     { start: 1.5, end: 1.9, parts: [{ text: 'SO' }, { text: 'HE' }, { text: 'QUIETLY', pop: true }] },
     { start: 1.9, end: 2.4, parts: [{ text: 'GULP', key: true }, { text: 'IT', pop: true }] },
     { start: 2.4, end: 2.9, parts: [{ text: 'GULP', key: true, pop: true }] },
   ];
-  const lines = (ass: string, style: string) => ass.split('\n').filter((l) => l.startsWith('Dialogue:') && l.split(',')[3] === style);
+  const lines = (ass: string, style: string, layer = 2) => ass.split('\n').filter((l) => l.startsWith(`Dialogue: ${layer},`) && l.split(',')[3] === style);
   const style = (ass: string, name: string) => ass.split('\n').find((l) => l.startsWith(`Style: ${name},`))!.split(',');
 
   it('declares a Pop style in Montserrat ExtraBold and pops in the newest word', () => {
@@ -151,16 +151,30 @@ describe('buildAss pop and karaoke captions', () => {
     // Name, Fontname, Fontsize, Primary, Secondary, Outline, Back, Bold, …, BorderStyle, Outline, Shadow, Alignment, L, R, MarginV
     expect(style(ass, 'Pop')).toEqual(['Style: Pop', 'Montserrat ExtraBold', '84', '&H00FFFFFF', '&H00FFFFFF', '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '7', '0', '2', '54', '54', '120', '1']);
     expect(ass).not.toMatch(/^Style: Karaoke,/m);
-    expect(ass).toContain('Dialogue: 2,0:00:01.50,0:00:01.90,Pop,,0,0,0,,SO HE {\\fscx115\\fscy115\\t(0,120,\\fscx100\\fscy100)}QUIETLY');
+    // The newest word pops in on a layer of its own (the rest of the line drawn there invisibly, for the same layout),
+    // so its growing never moves the words already shown; the line under it holds the newest word's place invisibly.
+    expect(ass).toContain('Dialogue: 1,0:00:01.50,0:00:01.90,Pop,,0,0,0,,{\\alpha&HFF&}SO{\\r} {\\alpha&HFF&}HE{\\r} {\\fscx115\\fscy115\\t(0,120,\\fscx100\\fscy100)}QUIETLY');
+    expect(ass).toContain('Dialogue: 2,0:00:01.50,0:00:01.90,Pop,,0,0,0,,SO HE {\\alpha&HFF&}QUIETLY{\\r}');
     expect(lines(ass, 'Pop')).toHaveLength(5);
+    expect(lines(ass, 'Pop', 1)).toHaveLength(5);
     expect(lines(ass, 'Caption')).toEqual([]);
+  });
+
+  it('draws the words of the group not said yet fully transparent, outline too, at their own size', () => {
+    const ass = buildAss({ ...base, captionLines: { style: 'pop', lines: pop } });
+    expect(lines(ass, 'Pop')[0]).toMatch(/,,\{\\alpha&HFF&\}SO\{\\r\} \{\\alpha&HFF&\}HE\{\\r\} \{\\alpha&HFF&\}QUIETLY\{\\r\}$/);
+    expect(lines(ass, 'Pop', 1)[0]).toMatch(/,,\{\\fscx115\\fscy115\\t\(0,120,\\fscx100\\fscy100\)\}SO\{\\r\} \{\\alpha&HFF&\}HE\{\\r\} \{\\alpha&HFF&\}QUIETLY\{\\r\}$/);
+    // A hidden key word keeps its 112% so the words around it sit where they will.
+    const hiddenKey = buildAss({ ...base, captionLines: { style: 'pop', lines: [{ start: 0, end: 1, parts: [{ text: 'A', pop: true }, { text: 'GULP', key: true, hidden: true }] }] } });
+    expect(lines(hiddenKey, 'Pop')[0]).toMatch(/\{\\alpha&HFF&\\fscx112\\fscy112\}GULP\{\\r\}$/);
   });
 
   it('draws a key word in the highlight colour at 112%, then goes back to the style', () => {
     const ass = buildAss({ ...base, captionLines: { style: 'pop', lines: pop } });
-    expect(lines(ass, 'Pop')[3]).toMatch(/,,\{\\c&H003DFFC6&\\fscx112\\fscy112\}GULP\{\\r\} \{\\fscx115\\fscy115\\t\(0,120,\\fscx100\\fscy100\)\}IT$/);
+    expect(lines(ass, 'Pop')[3]).toMatch(/,,\{\\c&H003DFFC6&\\fscx112\\fscy112\}GULP\{\\r\} \{\\alpha&HFF&\}IT\{\\r\}$/);
+    expect(lines(ass, 'Pop', 1)[3]).toMatch(/,,\{\\alpha&HFF&\\fscx112\\fscy112\}GULP\{\\r\} \{\\fscx115\\fscy115\\t\(0,120,\\fscx100\\fscy100\)\}IT$/);
     // A key word that is also the newest pops in from 115% of its 112%.
-    expect(lines(ass, 'Pop')[4]).toMatch(/,,\{\\c&H003DFFC6&\\fscx129\\fscy129\\t\(0,120,\\fscx112\\fscy112\)\}GULP\{\\r\}$/);
+    expect(lines(ass, 'Pop', 1)[4]).toMatch(/,,\{\\c&H003DFFC6&\\fscx129\\fscy129\\t\(0,120,\\fscx112\\fscy112\)\}GULP\{\\r\}$/);
     expect(buildAss({ ...base, captionLines: { style: 'pop', lines: pop }, highlightColor: '#FF0000' })).toContain('{\\c&H000000FF&\\fscx112\\fscy112}GULP{\\r}');
   });
 
@@ -173,7 +187,8 @@ describe('buildAss pop and karaoke captions', () => {
 
   it('escapes, drops emoji and switches font for CJK in caption parts, as everywhere else', () => {
     const ass = buildAss({ ...base, cjkFont: 'Hiragino Sans GB', captionLines: { style: 'pop', lines: [{ start: 0, end: 1, parts: [{ text: '{HI}' }, { text: '漢字', key: true }, { text: '🚀' }, { text: 'GO', pop: true }] }] } });
-    expect(lines(ass, 'Pop')).toEqual(['Dialogue: 2,0:00:00.00,0:00:01.00,Pop,,0,0,0,,(HI) {\\c&H003DFFC6&\\fscx112\\fscy112}{\\fnHiragino Sans GB}漢字{\\fn}{\\r} {\\fscx115\\fscy115\\t(0,120,\\fscx100\\fscy100)}GO']);
+    expect(lines(ass, 'Pop')).toEqual(['Dialogue: 2,0:00:00.00,0:00:01.00,Pop,,0,0,0,,(HI) {\\c&H003DFFC6&\\fscx112\\fscy112}{\\fnHiragino Sans GB}漢字{\\fn}{\\r} {\\alpha&HFF&}GO{\\r}']);
+    expect(lines(ass, 'Pop', 1)).toEqual(['Dialogue: 1,0:00:00.00,0:00:01.00,Pop,,0,0,0,,{\\alpha&HFF&}(HI){\\r} {\\alpha&HFF&\\fscx112\\fscy112}{\\fnHiragino Sans GB}漢字{\\fn}{\\r} {\\fscx115\\fscy115\\t(0,120,\\fscx100\\fscy100)}GO']);
   });
 
   it('puts every caption style in the middle of the frame for position middle', () => {

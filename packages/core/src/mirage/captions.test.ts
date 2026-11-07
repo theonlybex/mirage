@@ -5,7 +5,8 @@ import { captionWarnings, groupWords, karaokeLines, keyWords, popLines } from '.
 import { groupCaptions } from './overlays.js';
 
 const w = (text: string, start: number, end: number): Word => ({ w: text, start, end, conf: 1 });
-const shown = (lines: { start: number; end: number; parts: { text: string }[] }[]) => lines.map((l) => [l.start, l.end, l.parts.map((p) => p.text).join(' ')]);
+/** Each line's time and the words it shows (words laid out but not said yet are hidden). */
+const shown = (lines: { start: number; end: number; parts: { text: string; hidden?: boolean }[] }[]) => lines.map((l) => [l.start, l.end, l.parts.filter((p) => !p.hidden).map((p) => p.text).join(' ')]);
 
 describe('groupWords', () => {
   it('matches the grouping groupCaptions has always done, and stops at maxWords', () => {
@@ -25,7 +26,13 @@ describe('popLines', () => {
       [1.5, 1.9, 'SO HE QUIETLY'],
       [1.9, 2.4, 'POURS'],
     ]);
-    expect(lines.map((l) => l.parts.map((p) => !!p.pop))).toEqual([[true], [false, true], [false, false, true], [true]]);
+    expect(lines.map((l) => l.parts.map((p) => !!p.pop))).toEqual([[true, false, false], [false, true, false], [false, false, true], [true]]);
+  });
+
+  it('lays the whole group out from its first line, the words not said yet hidden, so said words never move', () => {
+    const lines = popLines([w('so', 1, 1.2), w('he', 1.3, 1.4), w('quietly', 1.5, 1.9), w('pours', 2.0, 2.3)], { durationSec: 5, highlight: [] });
+    expect(lines.map((l) => l.parts.map((p) => p.text))).toEqual([['SO', 'HE', 'QUIETLY'], ['SO', 'HE', 'QUIETLY'], ['SO', 'HE', 'QUIETLY'], ['POURS']]);
+    expect(lines.map((l) => l.parts.map((p) => !!p.hidden))).toEqual([[false, true, true], [false, false, true], [false, false, false], [false]]);
   });
 
   it('breaks pop groups at a sentence end and at a gap over 0.6 s', () => {
@@ -44,8 +51,8 @@ describe('popLines', () => {
     const words = [w('gulp', 0, 0.3), w('gulp', 0.3, 0.6), w('ok.', 0.6, 0.9), w('big', 2, 2.3), w('gulp', 2.3, 2.6)];
     const lines = popLines(words, { durationSec: 9, highlight: ['Gulp!'] });
     const keys = lines.map((l) => l.parts.map((p) => !!p.key));
-    expect(keys[0]).toEqual([true]);
-    expect(keys[1]).toEqual([true, false]); // second "gulp" of the same group is not lit
+    expect(keys[0]).toEqual([true, false, false]);
+    expect(keys[1]).toEqual([true, false, false]); // second "gulp" of the same group is not lit
     expect(keys[2]).toEqual([true, false, false]);
     expect(keys[keys.length - 1]).toEqual([false, true]); // lit again in the next group
   });
