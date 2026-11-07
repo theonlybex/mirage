@@ -7,7 +7,7 @@ A vlog is a day or a week of someone's life told as a few funny bits, ending on 
 About 4:20 (260 s), the classic length; `check` warns past 6:40. When the person asks for long vlogs (the "now" style, 10–16 min), pass `targetSec` (600–960) to `new_video`, or set it in `episodes/<n>/video.json`. Cut whole bits before thinning laughs: when the vlog runs long, drop the weakest bit rather than trimming the laughs inside the bits that stay.
 
 ## Starting a vlog
-Pass `vlog: { name, date }` to `new_video`: `name` is what the person calls their vlogs (ask once, then reuse it: an earlier vlog's `episodes/<n>/video.json` has it), and the number counts up from the project's last vlog by itself (give `number` only when the person says which it is). `date` is the day most of the footage was filmed, as `M-D-YY` (`11-6-26`): ask the person to confirm it, never guess it.
+Pass `vlog: { name, date }` to `new_video`: `name` is what the person calls their vlogs (ask once, then reuse it: an earlier vlog's `episodes/<n>/video.json` has it), and the number counts up from the project's last vlog of that name by itself (give `number` only when the person says which it is). `date` is the day most of the footage was filmed, as `M-D-YY` (`11-6-26`): ask the person to confirm it, never guess it.
 
 ## Beats, in order
 1. `cold-open`: an 8–15 s standalone gag, unrelated to the title (a prank, an odd moment from the day). Never a flash-forward to the headline. Often one slow shot: the speed comes after the title card.

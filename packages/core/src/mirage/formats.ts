@@ -6,7 +6,7 @@ import { BeatSchema, CaptionsSchema, strictObject } from '@wordedits/shared';
 import { z } from 'zod';
 import { MirageError } from './errors.js';
 import { describeZodError } from './json-file.js';
-import type { Video } from '@wordedits/shared';
+import type { Captions, Video } from '@wordedits/shared';
 
 const even = z.number().int().positive().refine((n) => n % 2 === 0, { message: 'must be even' });
 
@@ -29,11 +29,21 @@ export const FormatSchema = strictObject({
   warnPastSec: z.number().positive().optional(),
   output: strictObject({ width: even, height: even }).optional(),
   captions: CaptionsSchema.optional(),
-  /** The kind of short a video of this format is made as when it doesn't say. */
+  /**
+   * The kind of short a video of this format is made as when it doesn't say. Its presence also makes the format a short
+   * for `check` (the hook, outro and loop warnings, and the Shorts and Reels covered-area check on a vertical frame): a new
+   * vertical format should include `"short": {...}` to get the covered-area check. `new_video { from }` without a format
+   * makes a video of the format whose id is `short`, whatever other formats have this.
+   */
   short: strictObject({ kind: z.enum(['teaser', 'standalone']) }).optional(),
 });
 
 export type Format = z.infer<typeof FormatSchema> & {
+  /**
+   * The caption `style` and `position` the file itself writes (`captions` above has CaptionsSchema's defaults filled in):
+   * what `check` holds a cut to. Left out when the file sets no captions.
+   */
+  statedCaptions?: Partial<Pick<Captions, 'style' | 'position'>>;
   /** The Markdown after the front matter: what the format asks of the cut. */
   rules: string;
   /** The file name inside the formats folder, `short.md`. */
@@ -56,7 +66,7 @@ export function formatsDir(from: string = import.meta.url): string {
 
 /** A format file split into its front matter (parsed) and its rules, or why it can't be. */
 function splitFile(text: string): { front: unknown; rules: string } | string {
-  const lines = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').split('\n');
+  const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
   if (lines[0]?.trimEnd() !== '---') return 'no front matter: the file must start with a --- line, a JSON object, and a --- line';
   const end = lines.findIndex((l, i) => i > 0 && l.trimEnd() === '---');
   if (end < 0) return 'front matter has no closing --- line';
@@ -108,7 +118,9 @@ export function loadFormats(dir: string = formatsDir()): { formats: Format[]; pr
       problem(`id: the id "${parsed.data.id}" must be the file name, "${stem}"`);
       continue;
     }
-    formats.push({ ...parsed.data, rules: split.rules, file });
+    const raw = (split.front as { captions?: Partial<Captions> }).captions;
+    const statedCaptions = raw && { ...(raw.style !== undefined ? { style: raw.style } : {}), ...(raw.position !== undefined ? { position: raw.position } : {}) };
+    formats.push({ ...parsed.data, ...(statedCaptions ? { statedCaptions } : {}), rules: split.rules, file });
   }
   return { formats, problems };
 }

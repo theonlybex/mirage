@@ -161,11 +161,13 @@ export function createEngineServer(ctx: EngineContext): McpServer {
 
   /**
    * Writes every ⚠ warning of a report into the session log as a warning (the text from the marker on), then returns the
-   * report. With no video (ingest or music before the session has one) they go to the newest video's session folder; a
-   * project with no video yet has nowhere to log them, so they are dropped (the report still shows them).
+   * report. So do the ✖ lines a report carries without failing (check's unknown format or broken format file, with their
+   * hint), so the morning report shows them. With no video (ingest or music before the session has one) they go to the
+   * newest video's session folder; a project with no video yet has nowhere to log them, so they are dropped (the report
+   * still shows them).
    */
   async function report(n: number | null, lines: string[]): Promise<Result> {
-    const warnings = lines.flatMap((l) => (l.includes('⚠ ') ? [l.slice(l.indexOf('⚠ ') + 2)] : []));
+    const warnings = lines.flatMap((l) => (l.includes('⚠ ') ? [l.slice(l.indexOf('⚠ ') + 2)] : l.startsWith('✖ ') ? [l.slice(2)] : []));
     const target = warnings.length ? (n ?? (await newestVideo())) : null;
     if (target !== null) {
       for (const text of warnings) await appendLog(sessionDir(project, target, sid()), { at: new Date().toISOString(), kind: 'warning', text });

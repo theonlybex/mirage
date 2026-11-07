@@ -52,7 +52,7 @@ async function videoNumbers(project: string): Promise<number[]> {
 /**
  * The video.json answers of a new video (for `newVideo`) and its format (null when even the build story can't be
  * loaded). `from: n` starts from video n's footage and answers (the request's own are added to them) and makes a short
- * unless a format is given; a vlog without a number gets one more than the project's highest. Only keys asked for or
+ * unless a format is given; a vlog without a number gets one more than the highest of the project's vlogs of that name. Only keys asked for or
  * copied are set, so a plain video's video.json is as it always was.
  */
 export async function planVideo(
@@ -75,15 +75,19 @@ export async function planVideo(
   if (format !== undefined && !formats.some((f) => f.id === format)) {
     throw new MirageError('BAD_INPUT', `unknown format "${format}"`, [`The formats are: ${formats.map((f) => f.id).join(', ') || 'none'}.`, ...problems].join('\n  '));
   }
+  if (req.vlog && format !== 'vlog') {
+    throw new MirageError('BAD_INPUT', 'vlog: { name, date } is for format vlog', 'Pass format: "vlog" with it, or leave vlog out.');
+  }
   const add = (copied: string, more: string | undefined) => [copied, more ?? ''].filter((t) => t.trim()).join('\n');
   let vlog: Video['vlog'];
   if (req.vlog) {
     let number = req.vlog.number;
     if (number === undefined) {
+      // Each vlog name counts on its own: a "Paris" vlog starts at 1 after "Ibiza" #4.
       number = 1;
       for (const n of await videoNumbers(project)) {
         const other = await readVideo(project, n).catch(() => null);
-        if (other?.vlog) number = Math.max(number, other.vlog.number + 1);
+        if (other?.vlog && other.vlog.name === req.vlog.name) number = Math.max(number, other.vlog.number + 1);
       }
     }
     vlog = { name: req.vlog.name, number, date: req.vlog.date };

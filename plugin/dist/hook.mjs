@@ -33757,7 +33757,7 @@ function formatsDir(from = import.meta.url) {
   return SOURCE_LAYOUT2.test(here) ? resolve9(here, "..", "..", "..", "..", "plugin", "formats") : resolve9(here, "..", "formats");
 }
 function splitFile(text) {
-  const lines = text.replace(/^﻿/, "").replace(/\r\n/g, "\n").split("\n");
+  const lines = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").split("\n");
   if (lines[0]?.trimEnd() !== "---") return "no front matter: the file must start with a --- line, a JSON object, and a --- line";
   const end = lines.findIndex((l, i2) => i2 > 0 && l.trimEnd() === "---");
   if (end < 0) return "front matter has no closing --- line";
@@ -33803,7 +33803,9 @@ function loadFormats(dir = formatsDir()) {
       problem(`id: the id "${parsed.data.id}" must be the file name, "${stem}"`);
       continue;
     }
-    formats.push({ ...parsed.data, rules: split.rules, file: file2 });
+    const raw = split.front.captions;
+    const statedCaptions = raw && { ...raw.style !== void 0 ? { style: raw.style } : {}, ...raw.position !== void 0 ? { position: raw.position } : {} };
+    formats.push({ ...parsed.data, ...statedCaptions ? { statedCaptions } : {}, rules: split.rules, file: file2 });
   }
   return { formats, problems };
 }
@@ -33837,7 +33839,12 @@ var init_formats = __esm({
       warnPastSec: external_exports.number().positive().optional(),
       output: strictObject2({ width: even2, height: even2 }).optional(),
       captions: CaptionsSchema.optional(),
-      /** The kind of short a video of this format is made as when it doesn't say. */
+      /**
+       * The kind of short a video of this format is made as when it doesn't say. Its presence also makes the format a short
+       * for `check` (the hook, outro and loop warnings, and the Shorts and Reels covered-area check on a vertical frame): a new
+       * vertical format should include `"short": {...}` to get the covered-area check. `new_video { from }` without a format
+       * makes a video of the format whose id is `short`, whatever other formats have this.
+       */
       short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
     });
     SOURCE_LAYOUT2 = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
@@ -34046,6 +34053,9 @@ async function planVideo(project, req, { formats, problems }) {
   if (format2 !== void 0 && !formats.some((f) => f.id === format2)) {
     throw new MirageError("BAD_INPUT", `unknown format "${format2}"`, [`The formats are: ${formats.map((f) => f.id).join(", ") || "none"}.`, ...problems].join("\n  "));
   }
+  if (req.vlog && format2 !== "vlog") {
+    throw new MirageError("BAD_INPUT", "vlog: { name, date } is for format vlog", 'Pass format: "vlog" with it, or leave vlog out.');
+  }
   const add = (copied, more) => [copied, more ?? ""].filter((t) => t.trim()).join("\n");
   let vlog;
   if (req.vlog) {
@@ -34054,7 +34064,7 @@ async function planVideo(project, req, { formats, problems }) {
       number4 = 1;
       for (const n2 of await videoNumbers(project)) {
         const other = await readVideo(project, n2).catch(() => null);
-        if (other?.vlog) number4 = Math.max(number4, other.vlog.number + 1);
+        if (other?.vlog && other.vlog.name === req.vlog.name) number4 = Math.max(number4, other.vlog.number + 1);
       }
     }
     vlog = { name: req.vlog.name, number: number4, date: req.vlog.date };
@@ -34208,10 +34218,25 @@ function formatWarnings(ep, catalog, video, format2, formatted) {
     if (!known.includes(item.beat)) out.push(`item ${item.id}'s beat "${item.beat}" isn't one of the ${format2.name} format's beats (${format2.beats.join(", ")})`);
   }
   if (!formatted) return out;
+  const { width: w, height: h2 } = ep.output;
+  if (format2.output && (w !== format2.output.width || h2 !== format2.output.height)) {
+    out.push(`the video is ${w}\xD7${h2}, not the ${format2.name} format's ${format2.output.width}\xD7${format2.output.height}`);
+  }
+  const stated = format2.statedCaptions;
+  if (stated) {
+    const own2 = { style: ep.captions?.style ?? "phrase", position: ep.captions?.position ?? "bottom" };
+    const keys = ["style", "position"].filter((k) => stated[k] !== void 0);
+    if (keys.some((k) => own2[k] !== stated[k])) {
+      out.push(`captions are ${keys.map((k) => own2[k]).join("/")}, not the ${format2.name} format's ${keys.map((k) => stated[k]).join("/")}`);
+    }
+  }
   const D = timelineDuration(ep);
   if (format2.warnPastSec !== void 0) {
-    const limit = video?.targetSec !== void 0 && format2.targetSec !== void 0 ? format2.warnPastSec * video.targetSec / format2.targetSec : format2.warnPastSec;
-    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than the ${format2.name} format's ${formatTime(limit)} \u2014 cut whole bits rather than thinning laughs`);
+    const own2 = video?.targetSec !== void 0 && format2.targetSec !== void 0;
+    const limit = own2 ? format2.warnPastSec * video.targetSec / format2.targetSec : format2.warnPastSec;
+    const whose = own2 ? `this video's ${formatTime(limit)} limit` : `the ${format2.name} format's ${formatTime(limit)}`;
+    const cut = format2.short ? "cut whole moments" : "cut whole bits rather than thinning laughs";
+    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than ${whose} \u2014 ${cut}`);
   }
   if (format2.short) {
     const laid = layoutTimeline(ep);
@@ -34220,7 +34245,7 @@ function formatWarnings(ep, catalog, video, format2, formatted) {
     if (opening && !isCard(opening) && opening.audio === "keep" && opening.speed === 1) {
       const clip = catalog.clips.find((c3) => c3.id === opening.clip);
       if (clip?.probe.hasAudio && clip.transcript) {
-        const word = speechWords(ep, catalog, null).find((w) => w.start >= first.start - 1e-6 && w.start < first.end);
+        const word = speechWords(ep, catalog, null).find((w2) => w2.start >= first.start - 1e-6 && w2.start < first.end);
         const silence = (word?.start ?? first.end) - first.start;
         if (silence > MAX_OPENING_SILENCE_SEC + 1e-6) out.push(`a short opens on its hook: item ${opening.id} starts with ${s12(silence)} s of silence`);
       }
@@ -34236,15 +34261,15 @@ function formatWarnings(ep, catalog, video, format2, formatted) {
     }
     const { width, height } = ep.output;
     if (height > width) {
-      const covered = (what, s) => {
+      const covered = (what, s, todo) => {
         const areas = coveredBy(s, width, height);
-        if (areas.length) out.push(`${what} falls where the Shorts and Reels buttons cover it (${areas.join(", ")}) \u2014 move it`);
+        if (areas.length) out.push(`${what} falls where the Shorts and Reels buttons cover it (${areas.join(", ")}) \u2014 ${todo}`);
       };
       const position = ep.captions?.position ?? "bottom";
       const g = styleGeometry(width, height, position);
-      for (const o2 of ep.overlays) covered(`overlay ${o2.kind} ("${o2.text}")`, g[OVERLAY_STYLE[o2.kind]]);
+      for (const o2 of ep.overlays) covered(`overlay ${o2.kind} ("${o2.text}")`, g[OVERLAY_STYLE[o2.kind]], "leave it out, or use a callout");
       const style = ep.captions?.style ?? "phrase";
-      if (style !== "chosen" && style !== "off") covered(`captions at the ${position}`, g[style === "pop" ? "Pop" : style === "karaoke" ? "Karaoke" : "Caption"]);
+      if (style !== "chosen" && style !== "off") covered(`captions at the ${position}`, g[style === "pop" ? "Pop" : style === "karaoke" ? "Karaoke" : "Caption"], "set captions position middle");
     }
   }
   return out;
@@ -34255,7 +34280,9 @@ async function videoFormat(root, n2, dir) {
   try {
     video = await readVideo(root, n2);
   } catch (e) {
-    problems.push(`\u2716 ${describeError(e).message}`);
+    const { message, hint } = describeError(e);
+    problems.push(`\u2716 ${message}${hint ? `
+  ${hint}` : ""}`);
   }
   const named = video?.format === void 0 ? void 0 : formats.find((f) => f.id === video.format);
   if (named) return { video, format: named, formatted: true, problems };

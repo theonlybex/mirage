@@ -140,11 +140,28 @@ function formatWarnings(ep: Episode, catalog: Catalog, video: Video | null, form
     if (!known.includes(item.beat)) out.push(`item ${item.id}'s beat "${item.beat}" isn't one of the ${format.name} format's beats (${format.beats.join(', ')})`);
   }
   if (!formatted) return out;
+  const { width: w, height: h } = ep.output;
+  if (format.output && (w !== format.output.width || h !== format.output.height)) {
+    out.push(`the video is ${w}×${h}, not the ${format.name} format's ${format.output.width}×${format.output.height}`);
+  }
+  // Only what the format file itself writes: the vlog writes a style and no position. No captions in episode.json are
+  // phrase captions at the bottom.
+  const stated = format.statedCaptions;
+  if (stated) {
+    const own = { style: ep.captions?.style ?? 'phrase', position: ep.captions?.position ?? 'bottom' };
+    const keys = (['style', 'position'] as const).filter((k) => stated[k] !== undefined);
+    if (keys.some((k) => own[k] !== stated[k])) {
+      out.push(`captions are ${keys.map((k) => own[k]).join('/')}, not the ${format.name} format's ${keys.map((k) => stated[k]).join('/')}`);
+    }
+  }
   const D = timelineDuration(ep);
   if (format.warnPastSec !== undefined) {
     // A video's own target scales the limit: a vlog aiming at 15 min instead of 4:20 is warned past 400 s × 900 / 260.
-    const limit = video?.targetSec !== undefined && format.targetSec !== undefined ? (format.warnPastSec * video.targetSec) / format.targetSec : format.warnPastSec;
-    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than the ${format.name} format's ${formatTime(limit)} — cut whole bits rather than thinning laughs`);
+    const own = video?.targetSec !== undefined && format.targetSec !== undefined;
+    const limit = own ? (format.warnPastSec * video!.targetSec!) / format.targetSec! : format.warnPastSec;
+    const whose = own ? `this video's ${formatTime(limit)} limit` : `the ${format.name} format's ${formatTime(limit)}`;
+    const cut = format.short ? 'cut whole moments' : 'cut whole bits rather than thinning laughs';
+    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than ${whose} — ${cut}`);
   }
   if (format.short) {
     const laid = layoutTimeline(ep);
@@ -171,15 +188,16 @@ function formatWarnings(ep: Episode, catalog: Catalog, video: Video | null, form
     }
     const { width, height } = ep.output;
     if (height > width) {
-      const covered = (what: string, s: StyleGeometry) => {
+      // An overlay's place is fixed by its style on a vertical frame, so it can't be moved: left out, or a callout instead.
+      const covered = (what: string, s: StyleGeometry, todo: string) => {
         const areas = coveredBy(s, width, height);
-        if (areas.length) out.push(`${what} falls where the Shorts and Reels buttons cover it (${areas.join(', ')}) — move it`);
+        if (areas.length) out.push(`${what} falls where the Shorts and Reels buttons cover it (${areas.join(', ')}) — ${todo}`);
       };
       const position = ep.captions?.position ?? 'bottom';
       const g = styleGeometry(width, height, position);
-      for (const o of ep.overlays) covered(`overlay ${o.kind} ("${o.text}")`, g[OVERLAY_STYLE[o.kind]]);
+      for (const o of ep.overlays) covered(`overlay ${o.kind} ("${o.text}")`, g[OVERLAY_STYLE[o.kind]], 'leave it out, or use a callout');
       const style = ep.captions?.style ?? 'phrase';
-      if (style !== 'chosen' && style !== 'off') covered(`captions at the ${position}`, g[style === 'pop' ? 'Pop' : style === 'karaoke' ? 'Karaoke' : 'Caption']);
+      if (style !== 'chosen' && style !== 'off') covered(`captions at the ${position}`, g[style === 'pop' ? 'Pop' : style === 'karaoke' ? 'Karaoke' : 'Caption'], 'set captions position middle');
     }
   }
   return out;
@@ -195,7 +213,8 @@ async function videoFormat(root: string, n: number, dir?: string): Promise<{ vid
   try {
     video = await readVideo(root, n);
   } catch (e) {
-    problems.push(`✖ ${describeError(e).message}`);
+    const { message, hint } = describeError(e);
+    problems.push(`✖ ${message}${hint ? `\n  ${hint}` : ''}`);
   }
   const named = video?.format === undefined ? undefined : formats.find((f) => f.id === video!.format);
   if (named) return { video, format: named, formatted: true, problems };

@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   appendLog, listVersions, newVideo, readClaudeProcess, readControl, readLog, readSessionState, readSteps, sessionDir, writeControl, writeSessionState,
@@ -88,7 +88,10 @@ const loadedUpFront = async (entry: { file: string } | { contents: string; resol
     bundle: true, splitting: true, format: 'esm', platform: 'node', write: false, outdir: 'out', metafile: true, logLevel: 'silent', absWorkingDir: ROOT,
   });
   const outputs = result.metafile.outputs;
-  const entryOut = Object.keys(outputs).find((o) => outputs[o]!.entryPoint !== undefined) ?? Object.keys(outputs).find((o) => outputs[o]!.imports.length > 0)!;
+  // Every dynamic import() is an entry point of its own chunk too: start from the one built from the requested entry.
+  const wanted = 'file' in entry ? relative(ROOT, entry.file).split(sep).join('/') : '<stdin>';
+  const entryOut = Object.keys(outputs).find((o) => outputs[o]!.entryPoint === wanted);
+  if (!entryOut) throw new Error(`esbuild built no output from ${wanted}`);
   const seen = new Set<string>();
   const queue = [entryOut];
   while (queue.length) {

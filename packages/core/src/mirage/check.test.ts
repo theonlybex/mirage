@@ -427,7 +427,9 @@ describe('checkEpisode against the video format', () => {
   const spoken = (...starts: number[]) => ({ words: starts.map((s, i) => ({ w: `w${i}`, start: s, end: s + 0.3, conf: 1 })), segments: [], speech: [] });
   const SHORT_BEATS = '(hook, tease, pointer, payoff, loop)';
   const BUILD_BEATS = '(cold-open, title, recap, new-toy, problem, montage, twist, truth, outro, blooper)';
-  const covered = (what: string, area: string) => `${what} falls where the Shorts and Reels buttons cover it (${area}) — move it`;
+  const covered = (what: string, area: string) => `${what} falls where the Shorts and Reels buttons cover it (${area}) — leave it out, or use a callout`;
+  const coveredCaptions = 'captions at the bottom falls where the Shorts and Reels buttons cover it (bottom 20%) — set captions position middle';
+  const shortCaptions = (own: string) => `captions are ${own}, not the Short format's pop/middle`;
   async function formatsFolder(files: Record<string, string>) {
     const dir = await mkdtemp(join(tmpdir(), 'we-formats-'));
     for (const [name, text] of Object.entries(files)) await writeFile(join(dir, name), text);
@@ -480,12 +482,59 @@ describe('checkEpisode against the video format', () => {
     ];
     await saveEpisode(dir, short({ items: items(15) }));
     await writeVideo(dir, { format: 'short', from: 1 });
-    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1:05, longer than the Short format's 1:00 — cut whole bits rather than thinning laughs"]);
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1:05, longer than the Short format's 1:00 — cut whole moments"]);
     await saveEpisode(dir, short({ items: items(10) }));
     expect((await checkEpisode(dir, 1)).warnings).toEqual([]); // exactly 60 s
     await saveEpisode(dir, short({ items: items(15) }));
     await writeVideo(dir, { format: 'short', from: 1, targetSec: 90 }); // twice the format's 45 s: the limit is 2:00
     expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    // The video's own target is its own limit, and the warning says so.
+    await writeVideo(dir, { format: 'short', from: 1, targetSec: 30 }); // 60 s × 30 / 45: 0:40
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1:05, longer than this video's 0:40 limit — cut whole moments"]);
+  });
+
+  it("a long vlog is told to cut whole bits rather than thin its laughs", async () => {
+    const { dir } = await project(spoken(0.2));
+    const bits = Array.from({ length: 14 }, (_, i) => ({ id: `b${i}`, beat: 'bit', clip: 'c001', src: { in: 0, out: 30 } }));
+    await saveEpisode(dir, base({ items: bits, music: [], captions: { style: 'chosen' } }));
+    await writeVideo(dir, { format: 'vlog' });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 7:00, longer than the Vlog format's 6:40 — cut whole bits rather than thinning laughs"]);
+    await writeVideo(dir, { format: 'vlog', targetSec: 280 }); // 400 s × 280 / 260: 7:10
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    await writeVideo(dir, { format: 'vlog', targetSec: 270 }); // 400 s × 270 / 260: 6:55
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 7:00, longer than this video's 6:55 limit — cut whole bits rather than thinning laughs"]);
+  });
+
+  it("warns when the video's size or captions aren't what its format's file says", async () => {
+    const { dir } = await project(spoken(0.2));
+    await saveEpisode(dir, short({ output: { width: 720, height: 1280, fps: 30 } }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 720×1280, not the Short format's 1080×1920"]);
+    // A different style or position; no captions in episode.json are phrase captions at the bottom.
+    for (const [captions, own] of [[{ style: 'karaoke', position: 'middle' }, 'karaoke/middle'], [{ style: 'pop' }, 'pop/bottom'], [undefined, 'phrase/bottom']] as const) {
+      await saveEpisode(dir, short({ captions }));
+      expect((await checkEpisode(dir, 1)).warnings.slice(0, 1), own).toEqual([shortCaptions(own)]);
+    }
+    // The vlog's file writes only a style: its position is never compared.
+    const bit = [{ id: 'a', beat: 'bit', clip: 'c001', src: { in: 0, out: 3 } }];
+    await writeVideo(dir, { format: 'vlog' });
+    for (const captions of [{ style: 'chosen' }, { style: 'chosen', position: 'middle' }]) {
+      await saveEpisode(dir, base({ items: bit, music: [], captions }));
+      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([]);
+    }
+    await saveEpisode(dir, base({ items: bit, music: [] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["captions are phrase, not the Vlog format's chosen"]);
+    await saveEpisode(dir, base({ items: bit, music: [], output: { width: 1080, height: 1920, fps: 30 }, captions: { style: 'pop', position: 'middle' } }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1080×1920, not the Vlog format's 1920×1080", "captions are pop, not the Vlog format's chosen"]);
+  });
+
+  it('a video.json that is broken is one ✖ with what to do, and the video is checked as a build story', async () => {
+    const { dir } = await project(spoken(0.2));
+    await saveEpisode(dir, base());
+    await writeFile(join(dir, 'episodes', '1', 'video.json'), '{"title": ');
+    const r = await checkEpisode(dir, 1);
+    expect(r.problems).toEqual([expect.stringMatching(/^✖ episodes\/1\/video\.json: not valid JSON \(.*\)\n {2}Fix that field and run the command again\.$/)]);
+    expect(r.warnings).toEqual([]);
   });
 
   it('warns when a short opens on silence, measured from the first item\'s own sound', async () => {
@@ -558,6 +607,7 @@ describe('checkEpisode against the video format', () => {
     await saveEpisode(dir, short({ overlays, captions: { style: 'chosen', position: 'middle' } }));
     await writeVideo(dir, { format: 'short', from: 1 });
     expect((await checkEpisode(dir, 1)).warnings).toEqual([
+      shortCaptions('chosen/middle'),
       covered('overlay badge ("BADGE")', 'top 10%, right 15%'),
       covered('overlay counter ("COUNTER")', 'top 10%'),
       covered('overlay before ("BEFORE")', 'top 10%'),
@@ -568,15 +618,15 @@ describe('checkEpisode against the video format', () => {
     ]);
     // A subtitle sits where captions do: at the bottom it is covered too.
     await saveEpisode(dir, short({ overlays: [{ kind: 'subtitle', text: 'So I went back.', start: 1, end: 2 }], captions: { style: 'chosen' } }));
-    expect((await checkEpisode(dir, 1)).warnings).toEqual([covered('overlay subtitle ("So I went back.")', 'bottom 20%')]);
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([shortCaptions('chosen/bottom'), covered('overlay subtitle ("So I went back.")', 'bottom 20%')]);
     // Automatic captions at the bottom (set, or by default), not in the middle and not when there are none.
-    for (const captions of [{ style: 'pop', position: 'bottom' }, { style: 'phrase' }, undefined]) {
+    for (const [captions, own] of [[{ style: 'pop', position: 'bottom' }, 'pop/bottom'], [{ style: 'phrase' }, 'phrase/bottom'], [undefined, 'phrase/bottom']] as const) {
       await saveEpisode(dir, short({ captions }));
-      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([covered('captions at the bottom', 'bottom 20%')]);
+      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([shortCaptions(own), coveredCaptions]);
     }
-    for (const captions of [{ style: 'karaoke', position: 'middle' }, { style: 'off' }]) {
+    for (const [captions, own] of [[{ style: 'karaoke', position: 'middle' }, 'karaoke/middle'], [{ style: 'off' }, 'off/bottom']] as const) {
       await saveEpisode(dir, short({ captions }));
-      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([]);
+      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([shortCaptions(own)]);
     }
   });
 
@@ -585,7 +635,8 @@ describe('checkEpisode against the video format', () => {
     const overlays = (['badge', 'counter', 'timecard', 'label', 'name'] as const).map((kind) => ({ kind, text: kind, start: 1, end: 2 }));
     await saveEpisode(dir, short({ output: { width: 1920, height: 1080, fps: 30 }, overlays, captions: { style: 'pop', position: 'bottom' } }));
     await writeVideo(dir, { format: 'short', from: 1 });
-    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    // Only the size and the captions differ from the short's file; nothing is covered on a landscape frame.
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1920×1080, not the Short format's 1080×1920", shortCaptions('pop/bottom')]);
   });
 
   it('reports an unknown format as ✖ with the ids, and checks the rest as a build story', async () => {

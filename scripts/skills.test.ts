@@ -173,10 +173,29 @@ describe('the plugin skills', () => {
       '`a short has no outro: item <id>`',
       '`a standalone short loops: the last music cue fades out at the end — set its fadeOut to 0`',
       '`a teaser short ends pointing to the full video: add a pointer beat at the end`',
-      '`<what> falls where the Shorts and Reels buttons cover it (<area>) — move it`',
+      '`<what> falls where the Shorts and Reels buttons cover it (<area>) — leave it out, or use a callout`',
+      '`captions at the bottom falls where the Shorts and Reels buttons cover it (bottom 20%) — set captions position middle`',
+      '`the video is <w>×<h>, not the <name> format\'s <w>×<h>`',
+      '`captions are <style>/<position>, not the <name> format\'s <style>/<position>`',
+      '`longer than this video\'s <m:ss> limit`',
+      '`— cut whole moments`',
       '`✖ video.json: unknown format "<id>"`',
       '`✖ plugin/formats/<file>: <issue>`',
     ]) expect(edit, `edit never explains ${message}`).toContain(message);
+    expect(edit).toContain("If the hook is something you see rather than hear (the thing about to happen), don't trim into it: tell the person instead.");
+    // The vlog's title card is a title-card beat, as the vlog format names it; vlogs count up per name.
+    expect(edit).toContain('{ "id": "t1", "beat": "title-card", "card": { "text": "Sam\\nVlog #3\\n11-6-26", "style": "mono", "sec": 2 } }');
+    expect(edit).toContain("`number` is one more than the highest among the project's vlogs of that name, or 1");
+  });
+
+  it('status explains the Formats line and a broken format file', () => {
+    const status = read('status');
+    expect(status).toContain('`Formats: <id>, <id>, …`');
+    expect(status).toContain('`✖ plugin/formats/<file>: <issue>`');
+  });
+
+  it('overnight leaves out a vlog title card it has no name and date for, and asks', () => {
+    expect(read('overnight')).toContain('- A vlog whose `episodes/<n>/video.json` has no `vlog` (its name and date): leave out the title card and log a `question` asking for the vlog\'s name and the day it was filmed. The vlog rules say never guess the date.');
   });
 
   it('the copy the plan fixes word for word is there', () => {

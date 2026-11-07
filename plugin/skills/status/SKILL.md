@@ -16,6 +16,7 @@ Call `mcp__plugin_mirage_engine__status` (no input) and explain what it says in 
 
   The deliveries are the versions they can watch in the viewer (V1, V2 …).
 - `Viewer: running at <url>`: offer to open it (in the Claude desktop app, the browser pane; in the terminal, `open "<url>"` with Bash). `Viewer: not running`: it starts the next time they open Claude Code in this folder.
+- `Formats: <id>, <id>, …`: the kinds of video Mirage makes (build story, short, vlog …); mention them only if the person asks what Mirage can make. A `✖ plugin/formats/<file>: <issue>` line means that format file is broken and left out, while the other formats still work: if the person added or edited it, offer to fix what the line names; otherwise suggest reinstalling the Mirage plugin.
 - The tool lines:
   - `ffmpeg: missing` or `ffprobe: missing`: Mirage can't read or render video. Suggest `/mirage:setup`.
   - `ffmpeg: can't draw captions — <path> was built without libass. <hint>`: Mirage can read video, but it can't draw captions or text, so it can't render. Say so in plain words, give the hint's install (on a Mac, Homebrew's complete build, `brew install ffmpeg-full`), and suggest `/mirage:setup`.

@@ -127,6 +127,11 @@ describe('engine tools', () => {
     expect(await call('new_video', { ...vlog, title: 'Ibiza day 2', vlog: { name: 'Ibiza', date: '2026-07-02' }, targetSec: 600 })).toMatchObject({ isError: false });
     expect(JSON.parse(await readFile(join(dir, 'episodes', '2', 'video.json'), 'utf8'))).toMatchObject({ format: 'vlog', vlog: { name: 'Ibiza', number: 1, date: '2026-07-01' } });
     expect(JSON.parse(await readFile(join(dir, 'episodes', '3', 'video.json'), 'utf8'))).toMatchObject({ format: 'vlog', targetSec: 600, vlog: { name: 'Ibiza', number: 2, date: '2026-07-02' } });
+    // Another name counts from 1; vlog without format vlog is refused, and no video is made.
+    expect(await call('new_video', { ...vlog, title: 'Paris day 1', vlog: { name: 'Paris', date: '2026-08-01' } })).toMatchObject({ isError: false });
+    expect(JSON.parse(await readFile(join(dir, 'episodes', '4', 'video.json'), 'utf8'))).toMatchObject({ vlog: { name: 'Paris', number: 1 } });
+    expect(await call('new_video', { ...vlog, format: 'short' })).toEqual({ isError: true, text: '✖ vlog: { name, date } is for format vlog\n  Pass format: "vlog" with it, or leave vlog out.' });
+    expect(existsSync(join(dir, 'episodes', '5'))).toBe(false);
   });
 
   it('new_video from a big video copies its footage and answers and is a short; from a short too; ✖ for a missing video or an unknown format', async () => {
@@ -369,6 +374,16 @@ describe('engine tools', () => {
     expect(log).toHaveLength(1);
     expect(log[0]).toMatchObject({ kind: 'warning' });
     expect(log[0].text).toMatch(/^overlay 1 \("late"\) starts at/);
+  });
+
+  it("a ✖ line from check (an unknown format, a broken format file) goes into the session log as a warning, with its hint", async () => {
+    const dir = await projectWithVideo();
+    await writeFile(join(dir, 'episodes', '1', 'video.json'), JSON.stringify({ version: 1, title: 't', about: '', mention: '', hide: '', footage: [], createdAt: new Date().toISOString(), format: 'reel' }));
+    const { call } = await connect(dir);
+    const r = await call('check', { video: 1 });
+    expect(r.isError).toBe(false);
+    expect(r.text).toContain('✖ video.json: unknown format "reel"\n  The formats are: build-story, short, vlog.');
+    expect(await readLog(sessionDir(dir, 1, 's1'))).toMatchObject([{ kind: 'warning', text: 'video.json: unknown format "reel"\n  The formats are: build-story, short, vlog.' }]);
   });
 
   it('logs to sessions/unknown when no session is known', async () => {

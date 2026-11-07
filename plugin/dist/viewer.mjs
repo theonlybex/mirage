@@ -28464,7 +28464,12 @@ var FormatSchema = strictObject2({
   warnPastSec: external_exports.number().positive().optional(),
   output: strictObject2({ width: even2, height: even2 }).optional(),
   captions: CaptionsSchema.optional(),
-  /** The kind of short a video of this format is made as when it doesn't say. */
+  /**
+   * The kind of short a video of this format is made as when it doesn't say. Its presence also makes the format a short
+   * for `check` (the hook, outro and loop warnings, and the Shorts and Reels covered-area check on a vertical frame): a new
+   * vertical format should include `"short": {...}` to get the covered-area check. `new_video { from }` without a format
+   * makes a video of the format whose id is `short`, whatever other formats have this.
+   */
   short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
 });
 

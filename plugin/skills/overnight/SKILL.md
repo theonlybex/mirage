@@ -35,6 +35,7 @@ For each video in turn, follow the mirage:edit skill from its step 1 (catalog th
 Never ask the person anything; nobody is there to answer. Instead, write it down for the morning with `mcp__plugin_mirage_engine__log` (`{ video: n, kind, text }`):
 - Where you would have asked, make your best guess and carry on, then log it with kind `guess`: "Used the second take of the intro, because the first one cuts off mid-sentence."
 - What only the person can answer (a number for a counter, what went wrong off screen, how long something took) goes in with kind `question`. Leave that thing out of the video meanwhile: never invent footage, numbers or events.
+- A vlog whose `episodes/<n>/video.json` has no `vlog` (its name and date): leave out the title card and log a `question` asking for the vlog's name and the day it was filmed. The vlog rules say never guess the date.
 - Doubts about your own choices go in with kind `concern`: "The montage may be too long for how little happens in it."
 
 Write each in plain words, one point per entry. The `⚠` lines of the tools that take a video (`check`, `cut`, `slots`, `guide` …) are already kept for that video's morning report; act on them where you can and don't log them again. The `⚠` lines of `ingest` and `music` may not land on the right video when several are edited in one night: log each one that matters for a video with kind `concern` for that video.

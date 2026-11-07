@@ -72,7 +72,7 @@ describe('the plugin\'s format files', () => {
 
   it('the vlog has the playbook\'s numbers and guardrails', () => {
     const vlog = loadFormats().formats.find((f) => f.id === 'vlog')!;
-    for (const words of ['8–15 s', '2 s', '30–50 s', '`mono`', 'Vlog #', 'Cut out on the laugh', 'one song per bit', 'Cut whole bits before thinning laughs', '`hide`', 'injur']) {
+    for (const words of ['8–15 s', '2 s', '30–50 s', '`mono`', 'Vlog #', 'Cut out on the laugh', 'one song per bit', 'Cut whole bits before thinning laughs', '`hide`', 'injur', "the number counts up from the project's last vlog of that name by itself"]) {
       expect(vlog.rules, `vlog never says ${words}`).toContain(words);
     }
   });
@@ -91,6 +91,24 @@ describe('loadFormats', () => {
     const { formats, problems } = loadFormats(dir);
     expect(problems).toEqual([]);
     expect(formats[0]).toMatchObject({ id: 'demo', rules: 'Line one.\n' });
+  });
+
+  it('reads a file that starts with a byte order mark (as some Windows editors save it)', async () => {
+    const dir = await folder({ 'demo.md': '\uFEFF' + file({ ...FM }, 'Line one.\n') });
+    const { formats, problems } = loadFormats(dir);
+    expect(problems).toEqual([]);
+    expect(formats[0]).toMatchObject({ id: 'demo', rules: 'Line one.\n' });
+  });
+
+  it('keeps the caption style and position the file itself writes, without the schema\'s defaults', async () => {
+    const dir = await folder({ 'a.md': file({ ...FM, id: 'a', captions: { style: 'chosen' } }), 'b.md': file({ ...FM, id: 'b', captions: { style: 'pop', position: 'middle', highlight: ['x'] } }), 'c.md': file({ ...FM, id: 'c' }) });
+    const by = Object.fromEntries(loadFormats(dir).formats.map((f) => [f.id, f]));
+    expect(by.a!.statedCaptions).toEqual({ style: 'chosen' });
+    expect(by.a!.captions).toMatchObject({ style: 'chosen', position: 'bottom' });
+    expect(by.b!.statedCaptions).toEqual({ style: 'pop', position: 'middle' });
+    expect(by.c).not.toHaveProperty('statedCaptions');
+    const plugin = Object.fromEntries(loadFormats().formats.map((f) => [f.id, f.statedCaptions]));
+    expect(plugin).toEqual({ 'build-story': undefined, short: { style: 'pop', position: 'middle' }, vlog: { style: 'chosen' } });
   });
 
   it('puts a broken file in problems as one ✖ naming it, and still loads the others', async () => {

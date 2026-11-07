@@ -121,6 +121,23 @@ describe('planVideo', () => {
     expect(next.vlog).toEqual({ name: 'Ibiza', number: 5, date: '2026-07-05' });
     const given = (await planVideo(dir, { title: 'Day 2', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Ibiza', number: 2, date: '2026-07-02' } }, loaded)).video;
     expect(given.vlog?.number).toBe(2);
+    // Each name counts on its own: a "Paris" vlog starts at 1 after "Ibiza" #4, and goes on from its own highest.
+    const paris = (await planVideo(dir, { title: 'Paris 1', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Paris', date: '2026-08-01' } }, loaded)).video;
+    expect(paris.vlog).toEqual({ name: 'Paris', number: 1, date: '2026-08-01' });
+    await newVideo(dir, paris);
+    const paris2 = (await planVideo(dir, { title: 'Paris 2', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Paris', date: '2026-08-02' } }, loaded)).video;
+    expect(paris2.vlog?.number).toBe(2);
+    expect((await planVideo(dir, { title: 'Day 6', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Ibiza', date: '2026-07-06' } }, loaded)).video.vlog?.number).toBe(5);
+  });
+
+  it('refuses vlog for a video that is not in the vlog format', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const n = await newVideo(dir, big);
+    const vlog = { name: 'Ibiza', date: '2026-07-01' };
+    const refused = { message: 'vlog: { name, date } is for format vlog', hint: 'Pass format: "vlog" with it, or leave vlog out.' };
+    await expect(planVideo(dir, { title: 'x', about: 'x', footage: [], vlog }, loaded)).rejects.toMatchObject(refused); // a build story
+    await expect(planVideo(dir, { title: 'x', about: 'x', footage: [], format: 'short', vlog }, loaded)).rejects.toMatchObject(refused);
+    await expect(planVideo(dir, { title: 'x', from: n, vlog }, loaded)).rejects.toMatchObject(refused); // a short by default
   });
 
   it("from a big video: its footage and answers, the caller's added to them, a short by default", async () => {
