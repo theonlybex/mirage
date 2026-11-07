@@ -26,3 +26,4 @@ export * from './one-line.js';
 export * from './sfx.js';
 export * from './cards.js';
 export * from './formats.js';
+export * from './thumbnail.js';

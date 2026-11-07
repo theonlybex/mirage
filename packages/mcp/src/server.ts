@@ -8,16 +8,16 @@ import { z } from 'zod';
 import { ViewerInfoSchema } from '@wordedits/shared';
 import { LATER_DAYS, writeSetupState } from '@wordedits/shared/setup-state';
 import {
-  analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, formatsDir, ingestClips, ingestReport, initProject, listVersions, loadFormats,
+  analyzeLibrary, appendLog, candidatesReport, checkEpisode, checkReport, describeError, episodeDir, fitRecording, formatsDir, ingestClips, ingestReport, initProject, listVersions, loadFormats,
   MirageError, musicReport, newVideo, planVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
-  sessionDir, slotsReport, speakNarration, speakReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
+  sessionDir, slotsReport, speakNarration, speakReport, updateSlots, videoStage, voReport, writeCandidates, writeSessionState, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
 import { DEFAULT_VOICE, KOKORO_VOICES, kokoroSpeaker, type Speaker } from '@wordedits/sidecars';
 import { preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } from './preflight.js';
 import { runLong } from './run-long.js';
 
 export const TOOL_NAMES: readonly string[] = [
-  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later', 'formats',
+  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later', 'formats', 'thumbnail',
 ];
 
 export interface EngineContext {
@@ -290,6 +290,16 @@ export function createEngineServer(ctx: EngineContext): McpServer {
         speakNarration({ project, episode: a.video, tools, speaker, voice, speed: a.speed ?? 1, slots: a.slots, onStep: (m) => steps.push(`• ${m}`), onProgress: h.progress, signal: h.signal }),
       );
       return report(a.video, [...steps, ...speakReport(r, a.video, voice)]);
+    },
+  );
+
+  tool(
+    'thumbnail',
+    'Pick thumbnail frames for a video: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from.',
+    { video },
+    async ({ video: n }, { signal }) => {
+      const r = await long('thumbnail', n, signal, (h) => writeCandidates(project, n, tools, { signal: h.signal }));
+      return ok(candidatesReport(n, r));
     },
   );
 

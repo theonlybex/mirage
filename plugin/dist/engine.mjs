@@ -38594,9 +38594,9 @@ function groupCaptions(words, o2) {
   }));
 }
 function srtTime(sec) {
-  const ms = Math.round(sec * 1e3);
+  const ms2 = Math.round(sec * 1e3);
   const p = (n2, w = 2) => String(n2).padStart(w, "0");
-  return `${p(Math.floor(ms / 36e5))}:${p(Math.floor(ms % 36e5 / 6e4))}:${p(Math.floor(ms % 6e4 / 1e3))},${p(ms % 1e3, 3)}`;
+  return `${p(Math.floor(ms2 / 36e5))}:${p(Math.floor(ms2 % 36e5 / 6e4))}:${p(Math.floor(ms2 % 6e4 / 1e3))},${p(ms2 % 1e3, 3)}`;
 }
 function toSrt(cues) {
   return cues.map((c3, i2) => `${i2 + 1}
@@ -38879,17 +38879,17 @@ async function builtinSfx(name, tools, o2 = {}) {
     }
     if (!(loudest > 0)) throw new Error(`the ${name} recipe made silence`);
     const peakAt = Math.round(recipe.peakSec * SR);
-    const ms = SR / 1e3;
+    const ms2 = SR / 1e3;
     let onset = 0;
     while (Math.abs(x[onset]) < loudest / PASS.onsetDivisor) onset++;
-    const start = Math.min(Math.max(Math.min(at2 - peakAt, onset - PASS.leadMs * ms), 0), total - len);
+    const start = Math.min(Math.max(Math.min(at2 - peakAt, onset - PASS.leadMs * ms2), 0), total - len);
     const fadeOut = Math.round(recipe.fadeOutSec * SR);
     const gain = 10 ** (PEAK_DB / 20) / loudest;
     const af = [
       `atrim=start_sample=${start}:end_sample=${start + len}`,
       "asetpts=PTS-STARTPTS",
       `volume=${gain}:precision=double`,
-      `afade=t=out:ss=${len - PASS.tailMs * ms - fadeOut}:ns=${fadeOut}`,
+      `afade=t=out:ss=${len - PASS.tailMs * ms2 - fadeOut}:ns=${fadeOut}`,
       "pan=stereo|c0=c0|c1=c0"
     ].join(",");
     await tools.runFfmpeg(["-f", "f32le", "-ar", String(SR), "-ac", "1", "-i", raw, "-af", af, "-c:a", "pcm_s16le", "-f", "wav", part], { signal: o2.signal });
@@ -41483,16 +41483,123 @@ function speakReport(r, n2, voice) {
 // packages/core/src/mirage/report.ts
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
+// packages/core/src/mirage/thumbnail.ts
+import { existsSync as existsSync11 } from "node:fs";
+import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir8, readFile as readFile9, rm as rm12 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join21 } from "node:path";
+var MAX_CANDIDATES = 12;
+var MIN_GAP_SEC = 1;
+var THUMB_BEATS = ["truth", "headline", "payoff", "twist", "reveal"];
+var SILENT_LUFS2 = -70;
+var WINDOW_SEC = 0.4;
+var STEP_SEC = 0.1;
+var EPS5 = 1e-9;
+var ms = (t) => Math.round(t * 1e3) / 1e3;
+function thumbCandidates(ep, catalog, loudness, max = MAX_CANDIDATES) {
+  const laid = layoutTimeline(ep);
+  const duration3 = laid.length ? laid[laid.length - 1].end : 0;
+  const clips = new Map(catalog.clips.map((c3) => [c3.id, c3]));
+  const picks = [];
+  const add = (t, reason) => {
+    t = ms(t);
+    if (picks.length >= max || t < 0 || t >= duration3 - EPS5) return;
+    if (picks.some((p) => Math.abs(p.t - t) < MIN_GAP_SEC - EPS5)) return;
+    picks.push({ t, reason });
+  };
+  for (const l of laid) {
+    const item = l.item;
+    if (isCard(item)) continue;
+    const moments = (clips.get(item.clip)?.moments ?? []).filter((m) => m.t >= item.src.in && m.t < item.src.out).sort((a2, b) => a2.t - b.t);
+    for (const m of moments) add(l.start + (m.t - item.src.in) / item.speed, `moment: ${m.label}`);
+  }
+  for (const l of laid) {
+    const item = l.item;
+    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
+    const shown2 = l.start + l.srcFrames / ep.output.fps;
+    let best = null;
+    for (const s of loudness) {
+      if (s.t < l.start - EPS5 || s.t >= shown2 - EPS5 || !(s.lufs > SILENT_LUFS2)) continue;
+      if (!best || s.lufs > best.lufs) best = s;
+    }
+    if (best) add(best.t, `loudest moment of item ${item.id}`);
+  }
+  for (const l of laid) {
+    if (THUMB_BEATS.includes(l.item.beat)) add((l.start + l.end) / 2, `${l.item.beat} beat (item ${l.item.id})`);
+  }
+  for (const n2 of [max, max * 2, max * 4, max * 8]) {
+    for (let i2 = 0; i2 < n2; i2++) add(duration3 * (i2 + 0.5) / n2, "even spacing");
+    if (picks.length >= max) break;
+  }
+  return picks;
+}
+async function cutLoudness(file2, tools, o2 = {}) {
+  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
+  try {
+    const af = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,ebur128=metadata=1,ametadata=mode=print:file=loudness.txt";
+    await tools.runFfmpeg(["-i", file2, "-vn", "-af", af, "-f", "null", "-"], { cwd: work, signal: o2.signal });
+    const text = await readFile9(join21(work, "loudness.txt"), "utf8");
+    const out = [];
+    let at2 = null;
+    for (const line of text.split(/\r?\n/)) {
+      const frame = /pts_time:(\S+)/.exec(line);
+      if (frame) at2 = Number(frame[1]);
+      const m = /^lavfi\.r128\.M=(\S+)$/.exec(line);
+      if (m && at2 !== null && Number.isFinite(at2)) {
+        const lufs2 = Number(m[1]);
+        const end = at2 + STEP_SEC;
+        if (Number.isFinite(lufs2)) out.push({ t: ms((Math.max(0, end - WINDOW_SEC) + end) / 2), lufs: lufs2 });
+      }
+    }
+    return out;
+  } finally {
+    await rm12(work, { recursive: true, force: true });
+  }
+}
+var CAND_FILE = /^cand-\d+\.jpg$/;
+async function writeCandidates(project2, n2, tools, o2 = {}) {
+  const dir = episodeDir(project2, n2);
+  const source = ["final.mp4", "rough.mp4"].find((f) => existsSync11(join21(dir, f)));
+  if (!source) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
+  const cut = join21(dir, source);
+  const ep = await loadEpisode(project2, n2);
+  const catalog = await loadCatalog(project2);
+  const ownSound2 = ep.items.some((i2) => !isCard(i2) && i2.audio === "keep" && i2.speed === 1);
+  const loudness = ownSound2 && (await tools.probe(cut)).hasAudio ? await cutLoudness(cut, tools, o2) : [];
+  const picks = thumbCandidates(ep, catalog, loudness);
+  const thumbs = join21(dir, "thumbs");
+  await mkdir10(thumbs, { recursive: true });
+  for (const f of await readdir8(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
+  const frames = [];
+  for (const [i2, p] of picks.entries()) {
+    const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
+    await tools.runFfmpeg(["-accurate_seek", "-ss", p.t.toFixed(3), "-i", cut, "-frames:v", "1", "-q:v", "2", join21(thumbs, file2)], { signal: o2.signal });
+    if (!existsSync11(join21(thumbs, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
+    frames.push({ ...p, file: file2 });
+  }
+  return { source, frames };
+}
+function formatThumbTime(t) {
+  const tenths = Math.round(t * 10);
+  return `${Math.floor(tenths / 600)}:${(tenths % 600 / 10).toFixed(1).padStart(4, "0")}`;
+}
+function candidatesReport(n2, r) {
+  return [
+    `wrote ${r.frames.length} candidate frames to episodes/${n2}/thumbs/ (from ${r.source})`,
+    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`)
+  ];
+}
+
 // packages/mcp/src/fallback-viewer.ts
 import { spawn as spawn2 } from "node:child_process";
-import { existsSync as existsSync11 } from "node:fs";
-import { dirname as dirname8, join as join21 } from "node:path";
+import { existsSync as existsSync12 } from "node:fs";
+import { dirname as dirname8, join as join22 } from "node:path";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 function fallbackViewerArgs(o2) {
   if (o2.env.MIRAGE_FALLBACK_VIEWER === "0") return null;
-  const exists3 = o2.exists ?? existsSync11;
-  const script = join21(o2.here, "viewer.mjs");
-  const ui = join21(o2.here, "viewer-ui");
+  const exists3 = o2.exists ?? existsSync12;
+  const script = join22(o2.here, "viewer.mjs");
+  const ui = join22(o2.here, "viewer-ui");
   if (!exists3(script) || !exists3(ui)) return null;
   const data = o2.env.MIRAGE_PLUGIN_DATA;
   return [script, "--project", o2.project, "--ui", ui, ...data ? ["--data", data] : [], "--fallback"];
@@ -41507,9 +41614,9 @@ function startFallbackViewer(project2) {
 }
 
 // packages/mcp/src/server.ts
-import { existsSync as existsSync12, readdirSync as readdirSync3, readFileSync as readFileSync6, realpathSync, statSync as statSync5 } from "node:fs";
-import { readdir as readdir9 } from "node:fs/promises";
-import { isAbsolute as isAbsolute2, join as join23, relative as relative2, resolve as resolve13, sep } from "node:path";
+import { existsSync as existsSync13, readdirSync as readdirSync3, readFileSync as readFileSync6, realpathSync, statSync as statSync5 } from "node:fs";
+import { readdir as readdir10 } from "node:fs/promises";
+import { isAbsolute as isAbsolute2, join as join24, relative as relative2, resolve as resolve13, sep } from "node:path";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v3/helpers/util.js
 var util;
@@ -49557,8 +49664,8 @@ var EMPTY_COMPLETION_RESULT = {
 
 // packages/mcp/src/preflight.ts
 import { execFile, spawn as spawn3 } from "node:child_process";
-import { readdir as readdir8, stat as stat6, statfs } from "node:fs/promises";
-import { join as join22 } from "node:path";
+import { readdir as readdir9, stat as stat6, statfs } from "node:fs/promises";
+import { join as join23 } from "node:path";
 import { promisify as promisify3 } from "node:util";
 var GB = 1024 ** 3;
 async function preflight(o2) {
@@ -49587,8 +49694,8 @@ function captionsProblem(c3) {
 var execFileAsync = promisify3(execFile);
 async function folderBytes(dir) {
   let total = 0;
-  for (const e of await readdir8(dir, { withFileTypes: true }).catch(() => [])) {
-    const path6 = join22(dir, e.name);
+  for (const e of await readdir9(dir, { withFileTypes: true }).catch(() => [])) {
+    const path6 = join23(dir, e.name);
     if (e.isDirectory()) total += await folderBytes(path6);
     else if (e.isFile()) total += (await stat6(path6).catch(() => null))?.size ?? 0;
   }
@@ -49680,7 +49787,7 @@ async function runLong(o2) {
 // packages/mcp/src/server.ts
 var SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 function newestSessionId(project2) {
-  const dir = join23(resolve13(project2), ".mirage", "sessions");
+  const dir = join24(resolve13(project2), ".mirage", "sessions");
   let best = null;
   let names;
   try {
@@ -49693,7 +49800,7 @@ function newestSessionId(project2) {
     if (!id || id === "unknown" || id.includes("..")) continue;
     let mtime;
     try {
-      mtime = statSync5(join23(dir, name)).mtimeMs;
+      mtime = statSync5(join24(dir, name)).mtimeMs;
     } catch {
       continue;
     }
@@ -49702,7 +49809,7 @@ function newestSessionId(project2) {
   return best?.id ?? null;
 }
 function footageProblem(folder, project2) {
-  if (!existsSync12(folder)) return `\u2716 ${folder} does not exist`;
+  if (!existsSync13(folder)) return `\u2716 ${folder} does not exist`;
   if (!statSync5(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
   const rel = relative2(realpathSync(folder), realpathSync(project2));
   if (rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute2(rel)) {
@@ -49758,7 +49865,7 @@ function createEngineServer(ctx) {
     }));
   }
   async function newestVideo() {
-    const numbers = (await readdir9(join23(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+    const numbers = (await readdir10(join24(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }
   async function report(n2, lines) {
@@ -49819,8 +49926,8 @@ function createEngineServer(ctx) {
     }
   });
   tool("music", "Find the tempo and mood of the tracks in the project's music folder.", {}, async () => {
-    const dir = join23(project2, "music");
-    if (!existsSync12(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
+    const dir = join24(project2, "music");
+    if (!existsSync13(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
     return report(await sessionVideo(), musicReport(dir, await analyzeLibrary(dir, tools)));
   });
   tool("check", "Check the timeline of a video against the catalog and music, snap montages to the beat, and list it.", { video }, async ({ video: n2 }) => report(n2, checkReport(await checkEpisode(project2, n2, tools, { formatsDir: formatFiles() }))));
@@ -49890,6 +49997,15 @@ function createEngineServer(ctx) {
       return report(a2.video, [...steps, ...speakReport(r, a2.video, voice)]);
     }
   );
+  tool(
+    "thumbnail",
+    "Pick thumbnail frames for a video: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from.",
+    { video },
+    async ({ video: n2 }, { signal }) => {
+      const r = await long("thumbnail", n2, signal, (h2) => writeCandidates(project2, n2, tools, { signal: h2.signal }));
+      return ok(candidatesReport(n2, r));
+    }
+  );
   tool("versions", "List the saved versions of a video: deliveries as V1, V2 \u2026 and the other saves, each with its id.", { video }, async ({ video: n2 }) => {
     const all = await listVersions(project2, n2);
     if (!all.length) return ok("no saved versions yet");
@@ -49911,7 +50027,7 @@ function createEngineServer(ctx) {
       inRound.map((x) => [
         `Note ${x.id} at ${x.t.toFixed(1)} s: ${x.text}`,
         ...x.box ? [`(about the area ${pct(x.box.x)}%\u2013${pct(x.box.x + x.box.w)}% across, ${pct(x.box.y)}%\u2013${pct(x.box.y + x.box.h)}% down)`] : [],
-        `Still: ${join23(episodeDir(project2, n2), x.still)}`
+        `Still: ${join24(episodeDir(project2, n2), x.still)}`
       ].join("\n")).join("\n\n")
     );
   });
@@ -49951,13 +50067,13 @@ function createEngineServer(ctx) {
     });
     if (meta3 === null) lines.push(`No Mirage project here yet (${project2}). Use new_project to start one.`);
     else if (meta3) lines.push(`Project: ${meta3.title}`);
-    const numbers = (await readdir9(join23(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+    const numbers = (await readdir10(join24(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
     for (const n2 of numbers) {
       const { stage, deliveries } = await videoStage(project2, n2);
       const title = (await readVideo(project2, n2).catch(() => null))?.title;
       lines.push(`Video ${n2}${title ? ` \u201C${title}\u201D` : ""}: ${stage} \xB7 ${deliveries} ${deliveries === 1 ? "delivery" : "deliveries"}`);
     }
-    const viewer = await readJsonFile(join23(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
+    const viewer = await readJsonFile(join24(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
     lines.push(viewer && alive2(viewer.pid) ? `Viewer: running at ${viewer.url}` : "Viewer: not running");
     const { formats, problems } = loadFormats(formatFiles());
     lines.push(`Formats: ${formats.map((f) => f.id).join(", ") || "none"}`, ...problems);
@@ -49982,7 +50098,7 @@ function createEngineServer(ctx) {
       if (id === void 0) return ok([...formats.map((f) => `${f.id} \u2014 ${f.name}: ${f.describe} (words: ${f.words.join(", ")})`), ...problems]);
       const found = formats.find((f) => f.id === id);
       if (!found) throw new MirageError("BAD_INPUT", `unknown format "${id}"`, [`The formats are: ${formats.map((f) => f.id).join(", ") || "none"}.`, ...problems].join("\n  "));
-      return ok(readFileSync6(join23(formatFiles(), found.file), "utf8"));
+      return ok(readFileSync6(join24(formatFiles(), found.file), "utf8"));
     },
     false
   );

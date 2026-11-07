@@ -6,11 +6,11 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  formatsDir, loadEpisode, readLog, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeClaudeProcess, writeControl, writeSessionState,
+  formatsDir, loadCatalog, loadEpisode, readLog, realMediaTools, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeClaudeProcess, writeControl, writeSessionState,
   type MediaTools,
 } from '@wordedits/core';
 import { EpisodeSchema } from '@wordedits/shared';
-import { SidecarError, type Speaker } from '@wordedits/sidecars';
+import { run, SidecarError, type Speaker } from '@wordedits/sidecars';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PreflightDeps } from './preflight.js';
 import { createEngineServer, newestSessionId, TOOL_NAMES, type EngineContext } from './server.js';
@@ -65,7 +65,7 @@ describe('engine tools', () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names.sort()).toEqual([...TOOL_NAMES].sort());
     expect([...TOOL_NAMES]).toEqual([
-      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later', 'formats',
+      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later', 'formats', 'thumbnail',
     ]);
   });
 
@@ -646,6 +646,63 @@ describe('session identity', () => {
     const { call } = await connect(dir, { sessionId: undefined, ppid: 333 });
     await call('log', { video: 1, kind: 'guess', text: 'guessed' });
     expect((await readLog(sessionDir(dir, 1, 'sess-b'))).map((e) => e.text)).toEqual(['guessed']);
+  });
+});
+
+describe('thumbnail', () => {
+  const twoItems = [
+    { id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 10 } },
+    { id: 'b', beat: 'reveal', clip: 'c001', src: { in: 10, out: 14 } },
+  ];
+  async function withCut(file: string | null) {
+    const dir = await projectWithVideo({ items: twoItems });
+    const catalog = await loadCatalog(dir);
+    await saveCatalog(dir, { ...catalog, clips: [{ ...catalog.clips[0]!, moments: [{ t: 2.5, label: 'big laugh' }] }] });
+    if (file) {
+      const out = join(dir, 'episodes', '1', file);
+      await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=320x180:r=30:d=14', '-pix_fmt', 'yuv420p', out]);
+    }
+    return dir;
+  }
+
+  it('writes the candidate frames and lists each with its time and reason', async () => {
+    const dir = await withCut('rough.mp4');
+    const { call } = await connect(dir, { tools: await realMediaTools() });
+    const r = await call('thumbnail', { video: 1 });
+    expect(r).toEqual({
+      isError: false,
+      text: [
+        'wrote 11 candidate frames to episodes/1/thumbs/ (from rough.mp4)',
+        'cand-01.jpg  0:02.5  moment: big laugh',
+        'cand-02.jpg  0:12.0  reveal beat (item b)',
+        'cand-03.jpg  0:00.6  even spacing',
+        'cand-04.jpg  0:04.1  even spacing',
+        'cand-05.jpg  0:05.3  even spacing',
+        'cand-06.jpg  0:06.4  even spacing',
+        'cand-07.jpg  0:07.6  even spacing',
+        'cand-08.jpg  0:08.8  even spacing',
+        'cand-09.jpg  0:09.9  even spacing',
+        'cand-10.jpg  0:13.4  even spacing',
+        'cand-11.jpg  0:10.9  even spacing',
+      ].join('\n'),
+    });
+    expect((await readdir(join(dir, 'episodes', '1', 'thumbs'))).sort()).toEqual(Array.from({ length: 11 }, (_, i) => `cand-${String(i + 1).padStart(2, '0')}.jpg`));
+    expect(existsSync(join(sessionDir(dir, 1, 's1'), 'progress.json'))).toBe(false);
+  });
+
+  it('says there is no cut yet, with what to run', async () => {
+    const { call } = await connect(await withCut(null), { tools: await realMediaTools() });
+    expect(await call('thumbnail', { video: 1 })).toEqual({ isError: true, text: '✖ video 1 has no cut yet\n  Run cut (or render) first.' });
+  });
+
+  it('is stopped when the person stops it, and says nothing was changed', async () => {
+    const dir = await withCut('rough.mp4');
+    const tools = { ...(await realMediaTools()), runFfmpeg: async (_a: string[], o?: { signal?: AbortSignal }) => { await new Promise((_r, rej) => o?.signal?.addEventListener('abort', () => rej(Object.assign(new Error('stopped'), { name: 'AbortError' })))); } } as unknown as MediaTools;
+    const { call } = await connect(dir, { tools });
+    const running = call('thumbnail', { video: 1 });
+    await new Promise((r) => setTimeout(r, 100));
+    await writeControl(dir, 1, { pauseNow: true });
+    expect(await running).toEqual({ isError: true, text: '✖ Stopped by the person before it finished. Nothing was changed.' });
   });
 });
 

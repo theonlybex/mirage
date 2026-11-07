@@ -214,7 +214,7 @@ var init_policy = __esm({
     engineTool = (tool) => tool.startsWith(ENGINE_PREFIX) ? tool.slice(ENGINE_PREFIX.length) : null;
     SAVE_TOOLS = /* @__PURE__ */ new Set(["Write", "Edit", "MultiEdit"]);
     FILE_TOOLS = /* @__PURE__ */ new Set([...SAVE_TOOLS, "NotebookEdit"]);
-    READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log", "formats"]);
+    READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log", "formats", "thumbnail"]);
     STAGES = /* @__PURE__ */ new Set(["ingest", "check", "cut", "slots", "guide", "vo", "speak", "render"]);
     NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video", "setup_later", "formats"]);
     ENGINE_LABELS = {
@@ -237,7 +237,8 @@ var init_policy = __esm({
       log: ["Making a note for you", "Noted"],
       overnight: ["Getting ready for overnight", "Ready for overnight"],
       setup_later: ["Noting that for later", "Noted for later"],
-      formats: ["Looking up the formats", "Formats looked up"]
+      formats: ["Looking up the formats", "Formats looked up"],
+      thumbnail: ["Picking thumbnail frames", "Thumbnail frames ready"]
     };
     record = (input2) => input2 !== null && typeof input2 === "object" && !Array.isArray(input2) ? input2 : {};
     baseName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
@@ -31794,9 +31795,9 @@ function groupCaptions(words, o2) {
   }));
 }
 function srtTime(sec) {
-  const ms = Math.round(sec * 1e3);
+  const ms2 = Math.round(sec * 1e3);
   const p = (n2, w = 2) => String(n2).padStart(w, "0");
-  return `${p(Math.floor(ms / 36e5))}:${p(Math.floor(ms % 36e5 / 6e4))}:${p(Math.floor(ms % 6e4 / 1e3))},${p(ms % 1e3, 3)}`;
+  return `${p(Math.floor(ms2 / 36e5))}:${p(Math.floor(ms2 % 36e5 / 6e4))}:${p(Math.floor(ms2 % 6e4 / 1e3))},${p(ms2 % 1e3, 3)}`;
 }
 function toSrt(cues) {
   return cues.map((c3, i2) => `${i2 + 1}
@@ -32050,17 +32051,17 @@ async function builtinSfx(name, tools, o2 = {}) {
     }
     if (!(loudest > 0)) throw new Error(`the ${name} recipe made silence`);
     const peakAt = Math.round(recipe.peakSec * SR);
-    const ms = SR / 1e3;
+    const ms2 = SR / 1e3;
     let onset = 0;
     while (Math.abs(x[onset]) < loudest / PASS.onsetDivisor) onset++;
-    const start = Math.min(Math.max(Math.min(at2 - peakAt, onset - PASS.leadMs * ms), 0), total - len);
+    const start = Math.min(Math.max(Math.min(at2 - peakAt, onset - PASS.leadMs * ms2), 0), total - len);
     const fadeOut = Math.round(recipe.fadeOutSec * SR);
     const gain = 10 ** (PEAK_DB / 20) / loudest;
     const af = [
       `atrim=start_sample=${start}:end_sample=${start + len}`,
       "asetpts=PTS-STARTPTS",
       `volume=${gain}:precision=double`,
-      `afade=t=out:ss=${len - PASS.tailMs * ms - fadeOut}:ns=${fadeOut}`,
+      `afade=t=out:ss=${len - PASS.tailMs * ms2 - fadeOut}:ns=${fadeOut}`,
       "pan=stereo|c0=c0|c1=c0"
     ].join(",");
     await tools.runFfmpeg(["-f", "f32le", "-ar", String(SR), "-ac", "1", "-i", raw, "-af", af, "-c:a", "pcm_s16le", "-f", "wav", part], { signal: o2.signal });
@@ -35100,6 +35101,124 @@ var init_one_line = __esm({
   }
 });
 
+// packages/core/src/mirage/thumbnail.ts
+import { existsSync as existsSync11 } from "node:fs";
+import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir9, readFile as readFile9, rm as rm12 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join21 } from "node:path";
+function thumbCandidates(ep, catalog, loudness, max = MAX_CANDIDATES) {
+  const laid = layoutTimeline(ep);
+  const duration3 = laid.length ? laid[laid.length - 1].end : 0;
+  const clips = new Map(catalog.clips.map((c3) => [c3.id, c3]));
+  const picks = [];
+  const add = (t, reason) => {
+    t = ms(t);
+    if (picks.length >= max || t < 0 || t >= duration3 - EPS5) return;
+    if (picks.some((p) => Math.abs(p.t - t) < MIN_GAP_SEC - EPS5)) return;
+    picks.push({ t, reason });
+  };
+  for (const l of laid) {
+    const item = l.item;
+    if (isCard(item)) continue;
+    const moments = (clips.get(item.clip)?.moments ?? []).filter((m) => m.t >= item.src.in && m.t < item.src.out).sort((a2, b) => a2.t - b.t);
+    for (const m of moments) add(l.start + (m.t - item.src.in) / item.speed, `moment: ${m.label}`);
+  }
+  for (const l of laid) {
+    const item = l.item;
+    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
+    const shown2 = l.start + l.srcFrames / ep.output.fps;
+    let best = null;
+    for (const s of loudness) {
+      if (s.t < l.start - EPS5 || s.t >= shown2 - EPS5 || !(s.lufs > SILENT_LUFS2)) continue;
+      if (!best || s.lufs > best.lufs) best = s;
+    }
+    if (best) add(best.t, `loudest moment of item ${item.id}`);
+  }
+  for (const l of laid) {
+    if (THUMB_BEATS.includes(l.item.beat)) add((l.start + l.end) / 2, `${l.item.beat} beat (item ${l.item.id})`);
+  }
+  for (const n2 of [max, max * 2, max * 4, max * 8]) {
+    for (let i2 = 0; i2 < n2; i2++) add(duration3 * (i2 + 0.5) / n2, "even spacing");
+    if (picks.length >= max) break;
+  }
+  return picks;
+}
+async function cutLoudness(file2, tools, o2 = {}) {
+  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
+  try {
+    const af = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,ebur128=metadata=1,ametadata=mode=print:file=loudness.txt";
+    await tools.runFfmpeg(["-i", file2, "-vn", "-af", af, "-f", "null", "-"], { cwd: work, signal: o2.signal });
+    const text = await readFile9(join21(work, "loudness.txt"), "utf8");
+    const out = [];
+    let at2 = null;
+    for (const line of text.split(/\r?\n/)) {
+      const frame = /pts_time:(\S+)/.exec(line);
+      if (frame) at2 = Number(frame[1]);
+      const m = /^lavfi\.r128\.M=(\S+)$/.exec(line);
+      if (m && at2 !== null && Number.isFinite(at2)) {
+        const lufs2 = Number(m[1]);
+        const end = at2 + STEP_SEC;
+        if (Number.isFinite(lufs2)) out.push({ t: ms((Math.max(0, end - WINDOW_SEC) + end) / 2), lufs: lufs2 });
+      }
+    }
+    return out;
+  } finally {
+    await rm12(work, { recursive: true, force: true });
+  }
+}
+async function writeCandidates(project, n2, tools, o2 = {}) {
+  const dir = episodeDir(project, n2);
+  const source = ["final.mp4", "rough.mp4"].find((f) => existsSync11(join21(dir, f)));
+  if (!source) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
+  const cut = join21(dir, source);
+  const ep = await loadEpisode(project, n2);
+  const catalog = await loadCatalog(project);
+  const ownSound2 = ep.items.some((i2) => !isCard(i2) && i2.audio === "keep" && i2.speed === 1);
+  const loudness = ownSound2 && (await tools.probe(cut)).hasAudio ? await cutLoudness(cut, tools, o2) : [];
+  const picks = thumbCandidates(ep, catalog, loudness);
+  const thumbs = join21(dir, "thumbs");
+  await mkdir10(thumbs, { recursive: true });
+  for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
+  const frames = [];
+  for (const [i2, p] of picks.entries()) {
+    const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
+    await tools.runFfmpeg(["-accurate_seek", "-ss", p.t.toFixed(3), "-i", cut, "-frames:v", "1", "-q:v", "2", join21(thumbs, file2)], { signal: o2.signal });
+    if (!existsSync11(join21(thumbs, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
+    frames.push({ ...p, file: file2 });
+  }
+  return { source, frames };
+}
+function formatThumbTime(t) {
+  const tenths = Math.round(t * 10);
+  return `${Math.floor(tenths / 600)}:${(tenths % 600 / 10).toFixed(1).padStart(4, "0")}`;
+}
+function candidatesReport(n2, r) {
+  return [
+    `wrote ${r.frames.length} candidate frames to episodes/${n2}/thumbs/ (from ${r.source})`,
+    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`)
+  ];
+}
+var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, CAND_FILE;
+var init_thumbnail = __esm({
+  "packages/core/src/mirage/thumbnail.ts"() {
+    "use strict";
+    init_src();
+    init_errors4();
+    init_ingest();
+    init_render_episode();
+    init_timeline();
+    MAX_CANDIDATES = 12;
+    MIN_GAP_SEC = 1;
+    THUMB_BEATS = ["truth", "headline", "payoff", "twist", "reveal"];
+    SILENT_LUFS2 = -70;
+    WINDOW_SEC = 0.4;
+    STEP_SEC = 0.1;
+    EPS5 = 1e-9;
+    ms = (t) => Math.round(t * 1e3) / 1e3;
+    CAND_FILE = /^cand-\d+\.jpg$/;
+  }
+});
+
 // packages/core/src/mirage/index.ts
 var init_mirage = __esm({
   "packages/core/src/mirage/index.ts"() {
@@ -35132,6 +35251,7 @@ var init_mirage = __esm({
     init_sfx();
     init_cards();
     init_formats();
+    init_thumbnail();
   }
 });
 
@@ -35147,10 +35267,12 @@ __export(src_exports2, {
   FormatSchema: () => FormatSchema,
   JsonFileError: () => JsonFileError,
   MAX_BACKUPS: () => MAX_BACKUPS,
+  MAX_CANDIDATES: () => MAX_CANDIDATES,
   MAX_CHECKPOINTS: () => MAX_CHECKPOINTS,
   MAX_COMMAND: () => MAX_COMMAND,
   MAX_PERSON_SFX_SEC: () => MAX_PERSON_SFX_SEC,
   MAX_SPEEDUP: () => MAX_SPEEDUP,
+  MIN_GAP_SEC: () => MIN_GAP_SEC,
   MirageError: () => MirageError,
   NARRATION_GAPS: () => NARRATION_GAPS,
   OVERLAY_STYLE: () => OVERLAY_STYLE,
@@ -35162,6 +35284,7 @@ __export(src_exports2, {
   SFX_RECIPE_VERSION: () => SFX_RECIPE_VERSION,
   SPEECH_PAD_SEC: () => SPEECH_PAD_SEC,
   SR: () => SR,
+  THUMB_BEATS: () => THUMB_BEATS,
   VIDEO_EXTENSIONS: () => VIDEO_EXTENSIONS,
   addNote: () => addNote,
   alignWritten: () => alignWritten,
@@ -35175,6 +35298,7 @@ __export(src_exports2, {
   buildReport: () => buildReport,
   buildVoiceTrack: () => buildVoiceTrack,
   builtinSfx: () => builtinSfx,
+  candidatesReport: () => candidatesReport,
   cardImageFile: () => cardImageFile,
   cardImagesFor: () => cardImagesFor,
   cardLabel: () => cardLabel,
@@ -35193,6 +35317,7 @@ __export(src_exports2, {
   cueTrack: () => cueTrack,
   cutChanged: () => cutChanged,
   cutChangedError: () => cutChangedError,
+  cutLoudness: () => cutLoudness,
   cutOf: () => cutOf,
   decodeMono: () => decodeMono,
   deleteNote: () => deleteNote,
@@ -35215,6 +35340,7 @@ __export(src_exports2, {
   fitVoiceover: () => fitVoiceover,
   fittedRecordingSha: () => fittedRecordingSha,
   formatOf: () => formatOf,
+  formatThumbTime: () => formatThumbTime,
   formatTime: () => formatTime,
   formatsDir: () => formatsDir,
   frameInterval: () => frameInterval,
@@ -35322,6 +35448,7 @@ __export(src_exports2, {
   styleGeometry: () => styleGeometry,
   takeCorrection: () => takeCorrection,
   textTokens: () => textTokens,
+  thumbCandidates: () => thumbCandidates,
   tidy: () => tidy,
   timelineDuration: () => timelineDuration,
   toSrt: () => toSrt,
@@ -35337,6 +35464,7 @@ __export(src_exports2, {
   voiceRecordings: () => voiceRecordings,
   voicedSpan: () => voicedSpan,
   wavBytes: () => wavBytes,
+  writeCandidates: () => writeCandidates,
   writeClaudeProcess: () => writeClaudeProcess,
   writeControl: () => writeControl,
   writeJsonFile: () => writeJsonFile,
@@ -35360,15 +35488,15 @@ __export(hook_exports, {
   logHookError: () => logHookError,
   runHook: () => runHook
 });
-import { appendFileSync as appendFileSync2, existsSync as existsSync11, mkdirSync as mkdirSync2, readdirSync as readdirSync2 } from "node:fs";
-import { mkdir as mkdir10, writeFile as writeFile8 } from "node:fs/promises";
-import { join as join21 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync12, mkdirSync as mkdirSync2, readdirSync as readdirSync2 } from "node:fs";
+import { mkdir as mkdir11, writeFile as writeFile8 } from "node:fs/promises";
+import { join as join22 } from "node:path";
 function logHookError(pluginData2, event2, e) {
   if (!pluginData2) return;
   try {
     mkdirSync2(pluginData2, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync2(join21(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
+    appendFileSync2(join22(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
 `);
   } catch {
   }
@@ -35436,7 +35564,7 @@ var init_hook = __esm({
     preDecision = (permissionDecision, reason) => result(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, ...reason === void 0 ? {} : { permissionDecisionReason: reason } } }));
     videoNumbers2 = (project) => {
       try {
-        return readdirSync2(join21(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+        return readdirSync2(join22(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
       } catch {
         return [];
       }
@@ -35470,7 +35598,7 @@ var init_hook = __esm({
       async session() {
         return await this.soft(() => this.core.readSessionState(this.project, this.sid)) ?? { video: null, overnight: null, awakePid: null };
       }
-      videoExists = (n2) => existsSync11(this.core.episodeDir(this.project, n2));
+      videoExists = (n2) => existsSync12(this.core.episodeDir(this.project, n2));
       /** Appends a step line for video `n`; nothing for a video that isn't there (a step needs a video's folder). */
       async step(n2, line) {
         if (n2 === null || !this.videoExists(n2)) return;
@@ -35573,7 +35701,7 @@ var init_hook = __esm({
         const numbers = videoNumbers2(project);
         const touched = new Set(numbers.filter((n2) => {
           try {
-            return existsSync11(core.sessionDir(project, n2, sid));
+            return existsSync12(core.sessionDir(project, n2, sid));
           } catch {
             return false;
           }
@@ -35620,8 +35748,8 @@ var init_hook = __esm({
           delivered,
           ...last ? { stoppedAt: last.label } : {}
         });
-        await mkdir10(dir, { recursive: true });
-        await writeFile8(join21(dir, "report.md"), md);
+        await mkdir11(dir, { recursive: true });
+        await writeFile8(join22(dir, "report.md"), md);
       }
     };
   }
@@ -35631,7 +35759,7 @@ var init_hook = __esm({
 init_project_root();
 import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync6 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
-import { join as join22 } from "node:path";
+import { join as join23 } from "node:path";
 
 // packages/hooks/src/setup-notice.ts
 init_setup_state();
@@ -35734,7 +35862,7 @@ function logError2(e) {
   try {
     mkdirSync3(pluginData, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync3(join22(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
+    appendFileSync3(join23(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
 `);
   } catch {
   }
@@ -35748,7 +35876,7 @@ function pluginVersion() {
   try {
     const root = process.env.CLAUDE_PLUGIN_ROOT;
     if (!root) return "unknown";
-    const version2 = JSON.parse(readFileSync6(join22(root, ".claude-plugin", "plugin.json"), "utf8")).version;
+    const version2 = JSON.parse(readFileSync6(join23(root, ".claude-plugin", "plugin.json"), "utf8")).version;
     return typeof version2 === "string" && version2 !== "" ? version2 : "unknown";
   } catch {
     return "unknown";
@@ -35777,7 +35905,7 @@ async function main() {
   const { runHook: runHook2 } = await Promise.resolve().then(() => (init_hook(), hook_exports));
   const r = await runHook2(event, input2, {
     now: () => /* @__PURE__ */ new Date(),
-    sleep: (ms) => new Promise((r2) => setTimeout(r2, ms)),
+    sleep: (ms2) => new Promise((r2) => setTimeout(r2, ms2)),
     pluginData,
     ppid: process.ppid,
     projectDir,
