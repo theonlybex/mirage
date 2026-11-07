@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -23,11 +23,11 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-/** A folder holding empty files, each named as an executable of this platform. */
+/** A folder holding empty executable files, each named as an executable of this platform. */
 function folderWith(name: string, ...tools: string[]): string {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
-  for (const t of tools) writeFileSync(join(dir, WIN ? `${t}.exe` : t), '');
+  for (const t of tools) writeFileSync(join(dir, WIN ? `${t}.exe` : t), '', { mode: 0o755 });
   return dir;
 }
 
@@ -65,6 +65,18 @@ describe('missingTools', () => {
     const env = { PATH: '' };
     expect(missingTools({ env, platform: process.platform, home: root, whisperDirs: [inst] })).toEqual(['ffmpeg', 'ffprobe', 'speech-model']);
     expect(missingTools({ env, platform: process.platform, home: root, whisperDirs: [] })).toContain('whisper-cli');
+  });
+
+  it.skipIf(WIN)('does not take a file that is not executable', () => {
+    const bin = folderWith('bin', 'ffmpeg', 'ffprobe', 'whisper-cli');
+    chmodSync(join(bin, 'ffmpeg'), 0o644);
+    const home = join(root, 'home');
+    expect(missingTools({ env: { PATH: bin }, platform: process.platform, home, whisperDirs: [] })).toEqual(['ffmpeg', 'speech-model']);
+    // the model file only has to exist
+    const model = join(root, 'model.bin');
+    writeFileSync(model, '');
+    chmodSync(model, 0o644);
+    expect(missingTools({ env: { PATH: bin, WORDEDITS_WHISPER_MODEL: model }, platform: process.platform, home, whisperDirs: [] })).toEqual(['ffmpeg']);
   });
 
   it('names only the one of ffmpeg and ffprobe that is missing', () => {
@@ -111,9 +123,19 @@ describe('setupNotice', () => {
     expect(setupNotice({ dataDir, version: 'v', inProject: true, now, missing: ['ffmpeg'] })).not.toBeNull();
   });
 
-  it('does not record the version when it only shows the notice in a project', () => {
-    setupNotice({ dataDir, version: 'v', inProject: true, now, missing: ['ffmpeg'] });
-    expect(readSetupState(dataDir)).toEqual({});
+  it('records the version also when it shows the notice in a project, so another folder does not ask again', () => {
+    const o = { dataDir, version: 'v', now, missing: ['ffmpeg'] as MissingTool[] };
+    expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
+    expect(readSetupState(dataDir)).toEqual({ askedVersion: 'v' });
+    expect(setupNotice({ ...o, inProject: false })).toBeNull();
+    // inside a project it is still shown every session
+    expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
+  });
+
+  it('remembers nothing without a data folder, but still shows the notice in a project', () => {
+    const o = { dataDir: '', version: 'v', now, missing: ['ffmpeg'] as MissingTool[] };
+    expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
+    expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
   });
 
   it('builds the notice from fixed text only', () => {
@@ -124,12 +146,14 @@ describe('setupNotice', () => {
     const notice = (missing: MissingTool[]) => setupNotice({ dataDir: join(root, `d${missing.join('')}`), version: 'v', inProject: true, now, missing })!;
     expect(notice(['ffmpeg'])).toMatch(/^This Mirage project can't edit videos until FFmpeg is installed\. .* whether Mirage may install it now\./);
     expect(notice(['ffmpeg', 'ffprobe'])).toContain('until FFmpeg is installed');
+    expect(notice(['ffmpeg', 'ffprobe'])).toContain('install it now');
     expect(notice(['ffprobe'])).toContain('until FFmpeg (ffprobe) is installed');
     expect(notice(['whisper-cli'])).toContain('until whisper.cpp is installed');
     expect(notice(['speech-model'])).toContain("until whisper.cpp's speech model is installed");
-    expect(notice(['whisper-cli', 'speech-model'])).toContain('until whisper.cpp with its speech model are installed');
-    expect(notice(['whisper-cli', 'speech-model'])).toContain('install them now');
+    expect(notice(['whisper-cli', 'speech-model'])).toContain('until whisper.cpp with its speech model is installed');
+    expect(notice(['whisper-cli', 'speech-model'])).toContain('install it now');
     expect(notice(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg and whisper.cpp with its speech model are installed');
+    expect(notice(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model'])).toContain('install them now');
     expect(notice(['ffmpeg', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg and whisper.cpp with its speech model are installed');
     expect(notice(['ffmpeg', 'speech-model'])).toContain("until FFmpeg and whisper.cpp's speech model are installed");
   });
