@@ -11,7 +11,7 @@ The person leaves; you edit their videos up to the guide cut without asking them
 Mirage viewer: the person wants videos 2, 3 edited overnight. Use the mirage:overnight skill.
 ```
 
-With no such line, ask which videos (`mcp__plugin_mirage_engine__status` lists them). Each needs to have been started with its footage folders (the edit skill's step 0).
+With no such line, ask which videos (`mcp__plugin_mirage_engine__status` lists them). Each needs to have been started with `mcp__plugin_mirage_engine__new_video` (the edit skill's step 0): with its footage folders, or made `from` a big video. Its format is the `format` in `episodes/<n>/video.json` (none is a build story): read that format's rules with `mcp__plugin_mirage_engine__formats` and its `id` before editing the video, and follow them, as the edit skill's step 0 says.
 
 First load the `mirage:edit` skill with the Skill tool, then follow its rules throughout: the `episode.json` fields, how to read `⚠` and `✖` lines, and what to do when the person pauses, corrects or stops you.
 

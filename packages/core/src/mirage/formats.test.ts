@@ -50,6 +50,32 @@ describe('the plugin\'s format files', () => {
       targetSec: 260, warnPastSec: 400, output: { width: 1920, height: 1080 }, captions: { style: 'chosen' },
     });
   });
+
+  it('have rules that name every beat of their front matter, as `beat`', () => {
+    for (const f of loadFormats().formats) {
+      for (const beat of f.beats) expect(f.rules, `${f.file} never names its ${beat} beat`).toContain(`\`${beat}\``);
+    }
+  });
+
+  it('the build story points to the edit skill, whose build-story rules are pinned there', () => {
+    const story = loadFormats().formats.find((f) => f.id === 'build-story')!;
+    expect(story.rules).toContain('mirage:edit');
+  });
+
+  it('the short keeps the payoff in the big video, and says how the two kinds end', () => {
+    const short = loadFormats().formats.find((f) => f.id === 'short')!;
+    expect(short.rules).toContain("A teaser short never shows the headline's reveal.");
+    for (const words of ['frame 0', 'Full video on my channel', 'Related video', 'link in the bio', '1080×1920', '"style": "pop", "position": "middle"', '`from`']) {
+      expect(short.rules, `short never says ${words}`).toContain(words);
+    }
+  });
+
+  it('the vlog has the playbook\'s numbers and guardrails', () => {
+    const vlog = loadFormats().formats.find((f) => f.id === 'vlog')!;
+    for (const words of ['8–15 s', '2 s', '30–50 s', '`mono`', 'Vlog #', 'Cut out on the laugh', 'one song per bit', 'Cut whole bits before thinning laughs', '`hide`', 'injur']) {
+      expect(vlog.rules, `vlog never says ${words}`).toContain(words);
+    }
+  });
 });
 
 describe('loadFormats', () => {

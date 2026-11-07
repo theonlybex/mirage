@@ -149,6 +149,36 @@ describe('the plugin skills', () => {
     expect(edit).toContain("Leave a sound effect out rather than use one that doesn't fit; the person reviews the finished edit, and a sound they don't like comes back as a note.");
   });
 
+  it('edit picks a format from the person\'s words, says it in one line and follows its rules', () => {
+    const edit = read('edit');
+    expect(edit).toContain('Pick the format from the person\'s own words and the footage, and say which in one line before planning, e.g. "Editing this as a vlog: cold open, title card, premise, bits, headline, plugs, tag."');
+    expect(toolsNamed(edit)).toContain('formats');
+    expect(edit).toContain('`formats`');
+    expect(edit).toContain('`from`');
+    expect(edit).toContain('`new_video { from, format: "short" }`');
+    expect(edit).toContain('a few shorts from this?');
+    // The new_video row documents the new inputs and the reply that names the format.
+    const row = edit.split('\n').find((l) => l.startsWith('| `mcp__plugin_mirage_engine__new_video` |'))!;
+    for (const input of ['format?', 'from?', 'vlog?', 'targetSec?']) expect(row, `new_video row lacks ${input}`).toContain(input);
+    expect(row).toContain('video <n> created (format <id>: <beat> → <beat> → …)');
+  });
+
+  it('edit passes on each format message from check, in plain words with what to do', () => {
+    const edit = read('edit');
+    for (const message of [
+      '`item <id>\'s beat "<beat>" isn\'t one of the <name> format\'s beats (<b1>, <b2>, …)`',
+      '`the video is <m:ss>, longer than the <name> format\'s <m:ss> — cut whole bits rather than thinning laughs`',
+      '`a short opens on its hook: item <id> starts with <s> s of silence`',
+      '`a short opens on its hook, not a <beat>: item <id>`',
+      '`a short has no outro: item <id>`',
+      '`a standalone short loops: the last music cue fades out at the end — set its fadeOut to 0`',
+      '`a teaser short ends pointing to the full video: add a pointer beat at the end`',
+      '`<what> falls where the Shorts and Reels buttons cover it (<area>) — move it`',
+      '`✖ video.json: unknown format "<id>"`',
+      '`✖ plugin/formats/<file>: <issue>`',
+    ]) expect(edit, `edit never explains ${message}`).toContain(message);
+  });
+
   it('the copy the plan fixes word for word is there', () => {
     const edit = read('edit');
     expect(edit).toContain("Here's the rough cut in Mirage's viewer. Click on the video to leave notes, then press Send notes.");
