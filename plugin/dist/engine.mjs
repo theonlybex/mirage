@@ -38411,6 +38411,17 @@ function spills(ep, sources, laid) {
   });
   return { spills: out, shortened };
 }
+function fadesFor(laid, spills2) {
+  const out = /* @__PURE__ */ new Map();
+  for (const s of spills2) {
+    const i2 = laid.findIndex((l) => l.item.id === s.item);
+    if (i2 < 0) continue;
+    const n2 = laid[s.kind === "lead" ? i2 - 1 : i2 + 1]?.item;
+    if (!playsOwnSound(n2)) continue;
+    out.set(n2.id, { ...out.get(n2.id), ...s.kind === "lead" ? { fadeOutSec: s.sec } : { fadeInSec: s.sec } });
+  }
+  return out;
+}
 
 // packages/core/src/mirage/overlays.ts
 var r35 = (n2) => Math.round(n2 * 1e3) / 1e3;
@@ -39721,6 +39732,14 @@ function moveFilters(l, item, k, o2, src) {
   return `${pre}perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=cubic:eval=frame,${fill ? `scale=${W}:${H}` : framed(item.frame, cropAt(item.focus), o2, k)}`;
 }
 var UPRIGHT = ["", "", "hflip,", "hflip,vflip,", "vflip,", "transpose=0,", "transpose=1,", "transpose=3,", "transpose=2,"];
+function readFrom(src, sec) {
+  if (sec < (src.videoStartSec ?? 0)) return [...sec > 0 ? ["-itsoffset", ffNum(-sec)] : [], "-i", src.path];
+  return ["-noaccurate_seek", "-ss", ffNum(sec), "-i", src.path];
+}
+var ownSound = (k, src, sec) => `[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(sec)}`;
+function crossfades(f, dur) {
+  return (f?.fadeInSec ? `,afade=t=in:d=${ffNum(f.fadeInSec)}:curve=qsin` : "") + (f?.fadeOutSec ? `,afade=t=out:st=${ffNum(Math.max(0, dur - f.fadeOutSec))}:d=${ffNum(f.fadeOutSec)}:curve=qsin` : "");
+}
 function itemChunkArgs(laid, o2, sources, output2) {
   const inputs = [];
   const chains = [];
@@ -39746,8 +39765,7 @@ function itemChunkArgs(laid, o2, sources, output2) {
     }
     const src = sources.get(item.clip);
     inputs.push("-threads", item.speed <= 1 ? "1" : "4");
-    if (item.src.in < (src.videoStartSec ?? 0)) inputs.push(...item.src.in > 0 ? ["-itsoffset", ffNum(-item.src.in)] : [], "-i", src.path);
-    else inputs.push("-noaccurate_seek", "-ss", ffNum(item.src.in), "-i", src.path);
+    inputs.push(...readFrom(src, item.src.in));
     const at2 = cropAt(item.focus);
     const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2${at2},` : "";
     const head = `[${k}:v]setpts=(PTS-${frameTolerance(o2.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o2.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},`;
@@ -39756,7 +39774,7 @@ function itemChunkArgs(laid, o2, sources, output2) {
       item.move ? `${head}${hold}${moveFilters(l, item, k, o2, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]` : `${head}${zoom}${framed(item.frame, at2, o2, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`
     );
     if (item.audio === "keep" && item.speed === 1 && src.hasAudio) {
-      chains.push(`[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o2.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
+      chains.push(`${ownSound(k, src, l.srcFrames / o2.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS${crossfades(o2.fades?.get(item.id), l.frames / o2.fps)}[a${k}]`);
     } else {
       chains.push(silence);
     }
@@ -39860,6 +39878,38 @@ function sfxTrackArgs(sounds, durationSec, output2) {
   chains.push(`${sounds.map((_, i2) => `[s${i2}]`).join("")}amix=inputs=${sounds.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, "-filter_complex", chains.join(";"), "-map", "[out]", "-c:a", "pcm_f32le", "-ar", String(SR2), "-ac", "2", output2];
 }
+function spillTrackArgs(list, sources, durationSec, output2, under) {
+  const SR2 = 48e3;
+  const inputs = [];
+  const chains = [];
+  list.forEach((s, i2) => {
+    const src = sources.get(s.clip);
+    inputs.push(...readFrom(src, s.srcIn));
+    const sec = ffNum(s.sec);
+    const fade = s.kind === "lead" ? `afade=t=in:d=${sec}:curve=qsin` : `afade=t=out:st=0:d=${sec}:curve=qsin`;
+    chains.push(`${ownSound(i2, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},adelay=delays=${Math.round(s.at * SR2)}S:all=1[s${i2}]`);
+  });
+  if (under) inputs.push("-i", under);
+  const mix = [...list.map((_, i2) => `[s${i2}]`), ...under ? [`[${list.length}:a]`] : []];
+  chains.push(`${mix.join("")}amix=inputs=${mix.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  return [...inputs, "-filter_complex", chains.join(";"), "-map", "[out]", "-c:a", "pcm_f32le", "-ar", String(SR2), "-ac", "2", output2];
+}
+function spillTrackCommands(list, sources, durationSec, dir) {
+  const out = join11(dir, "spill.wav");
+  const part = (n2) => join11(dir, `spill-${n2}.wav`);
+  const groups = [];
+  let group = [];
+  for (const s of list) {
+    const under = groups.length ? part(groups.length - 1) : void 0;
+    if (group.length && commandLength(spillTrackArgs([...group, s], sources, durationSec, part(groups.length), under)) > MAX_COMMAND) {
+      groups.push(group);
+      group = [];
+    }
+    group.push(s);
+  }
+  groups.push(group);
+  return groups.map((g, n2) => spillTrackArgs(g, sources, durationSec, n2 === groups.length - 1 ? out : part(n2), n2 ? part(n2 - 1) : void 0));
+}
 function buildVoiceTrack(o2) {
   const sr = o2.sampleRate;
   const out = new Float32Array(Math.round(o2.durationSec * sr));
@@ -39904,14 +39954,20 @@ function episodeFinalArgs(o2) {
   if (o2.voiceRaw) inputs.push("-f", "f32le", "-ar", "48000", "-ac", "1", "-i", o2.voiceRaw);
   const sfxIdx = o2.sfxWav ? next++ : -1;
   if (o2.sfxWav) inputs.push("-i", o2.sfxWav);
+  const spillIdx = o2.spillWav ? next++ : -1;
+  if (o2.spillWav) inputs.push("-i", o2.spillWav);
   const D = ffNum(o2.durationSec);
   const chains = [`[0:v]ass=${filterValue(o2.assFile)}${o2.fontsDir ? `:fontsdir=${filterValue(o2.fontsDir)}` : ""}[vout]`];
-  if (o2.voiceRaw) {
-    chains.push(`[0:a]${FLTP_STEREO}[live]`, `[${voiceIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[vo]`, "[live][vo]amix=inputs=2:duration=first:normalize=0[speechraw]");
+  if (o2.voiceRaw || o2.spillWav) {
+    chains.push(`[0:a]${FLTP_STEREO}[live]`);
+    if (o2.voiceRaw) chains.push(`[${voiceIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[vo]`);
+    if (o2.spillWav) chains.push(`[${spillIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[spill]`);
+    const parts = ["[live]", ...o2.voiceRaw ? ["[vo]"] : [], ...o2.spillWav ? ["[spill]"] : []];
+    chains.push(`${parts.join("")}amix=inputs=${parts.length}:duration=first:normalize=0[speechraw]`);
   } else {
     chains.push("[0:a]anull[speechraw]");
   }
-  const normalise = o2.liveAudio !== false || o2.voiceRaw !== void 0;
+  const normalise = o2.liveAudio !== false || o2.voiceRaw !== void 0 || o2.spillWav !== void 0;
   const short = normalise && o2.durationSec < LOUDNORM_MIN_SEC;
   chains.push(
     `[speechraw]highpass=f=90,${normalise ? `${short ? `apad=whole_dur=${LOUDNORM_MIN_SEC},` : ""}loudnorm=I=${lufs(o2.loudnessLufs)}:TP=-1:LRA=11,` : ""}aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB${short ? `,atrim=end=${D}` : ""}${o2.musicWav || o2.sfxWav ? "[speech]" : "[aout]"}`
@@ -40042,7 +40098,8 @@ async function renderLocked(o2) {
   const report = (f) => o2.onProgress?.(Math.min(1, Math.max(0, f)));
   try {
     const sfx = await placeSfx(project2, sfxCues, D, ep.loudnessLufs, o2.tools, work, o2.signal);
-    const shape = { width: W, height: H, fps, cardImages };
+    const spilled = spills(ep, sources, laid).spills;
+    const shape = { width: W, height: H, fps, cardImages, ...spilled.length ? { fades: fadesFor(laid, spilled) } : {} };
     const chunks = episodeChunks(laid, shape, sources, join11(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i2, chunk] of chunks.entries()) {
@@ -40073,6 +40130,14 @@ async function renderLocked(o2) {
       o2.signal?.throwIfAborted();
       await o2.tools.runFfmpeg(sfxTrackArgs(sfx, D, join11(work, "sfx.wav")), { expectedDurationSec: D, timeoutMs: Math.max(12e4, D * 10 * 1e3), signal: o2.signal });
       sfxWav = "sfx.wav";
+    }
+    let spillWav;
+    if (spilled.length) {
+      for (const args of spillTrackCommands(spilled, sources, D, work)) {
+        o2.signal?.throwIfAborted();
+        await o2.tools.runFfmpeg(args, { expectedDurationSec: D, timeoutMs: Math.max(12e4, D * 10 * 1e3), signal: o2.signal });
+      }
+      spillWav = "spill.wav";
     }
     report(0.7);
     o2.signal?.throwIfAborted();
@@ -40124,6 +40189,7 @@ async function renderLocked(o2) {
         musicWav,
         voiceRaw,
         sfxWav,
+        spillWav,
         liveAudio: laid.some((l) => !isCard(l.item) && l.item.audio === "keep" && l.item.speed === 1 && sources.get(l.item.clip).hasAudio)
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(12e4, D * 20 * 1e3), signal: o2.signal, onProgress: (f) => report(0.7 + 0.3 * f) }

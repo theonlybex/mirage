@@ -18,6 +18,7 @@ import { moveExprs } from './move.js';
 import { checkCueFiles, cueTrack, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
+import { fadesFor, spills, type Spill } from './spill.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
 import { cutChanged, cutChangedError, fittedRecordingSha, lineChangeWarnings } from './voiceover.js';
 
@@ -175,12 +176,41 @@ function moveFilters(l: LaidItem, item: ClipItem, k: number, o: { width: number;
  */
 const UPRIGHT = ['', '', 'hflip,', 'hflip,vflip,', 'vflip,', 'transpose=0,', 'transpose=1,', 'transpose=3,', 'transpose=2,'];
 
-/** A chunk's output size and frame rate, and the pictures of its image cards (cardImagesFor), by item id. */
+/**
+ * A chunk's output size and frame rate, the pictures of its image cards (cardImagesFor), and the fades J- and L-cuts ask
+ * of shots' own sound (fadesFor), by item id.
+ */
 export interface ChunkShape {
   width: number;
   height: number;
   fps: number;
   cardImages?: Map<string, CardImage>;
+  fades?: Map<string, { fadeInSec?: number; fadeOutSec?: number }>;
+}
+
+/**
+ * Reads `src` from `sec` on its own clock (0 = `sec`): seeks to the keyframe before it, or, before a late-starting video
+ * stream (no keyframe to seek to: the demuxer would move the audio up to the video's first frame too, losing the sound
+ * before it), reads from the start on the same clock.
+ */
+function readFrom(src: ClipSource, sec: number): string[] {
+  if (sec < (src.videoStartSec ?? 0)) return [...(sec > 0 ? ['-itsoffset', ffNum(-sec)] : []), '-i', src.path];
+  return ['-noaccurate_seek', '-ss', ffNum(sec), '-i', src.path];
+}
+
+/**
+ * A clip's sound from its input's clock 0 (readFrom) for `sec` seconds, as 48 kHz stereo float: aresample on the source
+ * clock drops what the seek read before 0 and pads silence before audio that starts late (or across a gap), so the sound
+ * stays with its picture.
+ */
+const ownSound = (k: number, src: ClipSource, sec: number) => `[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(sec)}`;
+
+/** Equal-power fades (a quarter sine in, its mirror out: the two add to one level) on a sound `dur` seconds long. */
+function crossfades(f: { fadeInSec?: number; fadeOutSec?: number } | undefined, dur: number): string {
+  return (
+    (f?.fadeInSec ? `,afade=t=in:d=${ffNum(f.fadeInSec)}:curve=qsin` : '') +
+    (f?.fadeOutSec ? `,afade=t=out:st=${ffNum(Math.max(0, dur - f.fadeOutSec))}:d=${ffNum(f.fadeOutSec)}:curve=qsin` : '')
+  );
 }
 
 export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<string, ClipSource>, output: string): string[] {
@@ -225,10 +255,8 @@ export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<stri
     // Seek to the keyframe before src.in and keep the source clock (time 0 = src.in) instead of starting at the first
     // frame after the seek point: VFR screen recordings write no frames while the screen is still, and a video stream
     // can start after the container does.
-    // Before a late-starting video stream there is no keyframe to seek to: the demuxer would move the audio up to the
-    // video's first frame too, losing the sound before it. Read from the start instead, on the same clock.
-    if (item.src.in < (src.videoStartSec ?? 0)) inputs.push(...(item.src.in > 0 ? ['-itsoffset', ffNum(-item.src.in)] : []), '-i', src.path);
-    else inputs.push('-noaccurate_seek', '-ss', ffNum(item.src.in), '-i', src.path);
+    // Before a late-starting video stream it reads from the start instead, on the same clock (readFrom).
+    inputs.push(...readFrom(src, item.src.in));
     const at = cropAt(item.focus);
     const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2${at},` : '';
     // fps (right after setpts, so it drops frames before any crop or scale touches them) shows at each output frame
@@ -246,9 +274,9 @@ export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<stri
         : `${head}${zoom}${framed(item.frame, at, o, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`,
     );
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
-      // aresample on the source clock drops what the seek read before src.in and pads silence before audio that
-      // starts late (or across a gap), so sound stays with its picture. Cut at src.out before padding under a hold.
-      chains.push(`[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
+      // Cut at src.out before padding silence under a hold. Where a neighbour's lead or tail plays over this shot, its
+      // sound fades out under the lead or in under the tail.
+      chains.push(`${ownSound(k, src, l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS${crossfades(o.fades?.get(item.id), l.frames / o.fps)}[a${k}]`);
     } else {
       chains.push(silence);
     }
@@ -370,6 +398,51 @@ export function sfxTrackArgs(sounds: PlacedSfx[], durationSec: number, output: s
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', output];
 }
 
+/**
+ * The spill track of J- and L-cuts (48 kHz stereo float WAV, `durationSec` long): each spill is its clip's sound from
+ * `srcIn` to `srcOut`, read as the shot reads it, faded over its whole length with an equal-power curve (a lead in, a tail
+ * out: the shot's sound under it fades the other way) and placed sample-exact at `at`. `under`, an earlier part of the
+ * track, is mixed in as it is.
+ */
+export function spillTrackArgs(list: Spill[], sources: Map<string, ClipSource>, durationSec: number, output: string, under?: string): string[] {
+  const SR = 48000;
+  const inputs: string[] = [];
+  const chains: string[] = [];
+  list.forEach((s, i) => {
+    const src = sources.get(s.clip)!;
+    inputs.push(...readFrom(src, s.srcIn));
+    const sec = ffNum(s.sec);
+    const fade = s.kind === 'lead' ? `afade=t=in:d=${sec}:curve=qsin` : `afade=t=out:st=0:d=${sec}:curve=qsin`;
+    chains.push(`${ownSound(i, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},adelay=delays=${Math.round(s.at * SR)}S:all=1[s${i}]`);
+  });
+  if (under) inputs.push('-i', under);
+  const mix = [...list.map((_, i) => `[s${i}]`), ...(under ? [`[${list.length}:a]`] : [])];
+  chains.push(`${mix.join('')}amix=inputs=${mix.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', output];
+}
+
+/**
+ * The commands that make the spill track `dir`/spill.wav: one, or as many as keep each under MAX_COMMAND (every spill
+ * opens an input), each writing a part that the next mixes in.
+ */
+export function spillTrackCommands(list: Spill[], sources: Map<string, ClipSource>, durationSec: number, dir: string): string[][] {
+  const out = join(dir, 'spill.wav');
+  const part = (n: number) => join(dir, `spill-${n}.wav`);
+  const groups: Spill[][] = [];
+  let group: Spill[] = [];
+  for (const s of list) {
+    const under = groups.length ? part(groups.length - 1) : undefined;
+    // Measured with a part's name, the longer of the two it may write.
+    if (group.length && commandLength(spillTrackArgs([...group, s], sources, durationSec, part(groups.length), under)) > MAX_COMMAND) {
+      groups.push(group);
+      group = [];
+    }
+    group.push(s);
+  }
+  groups.push(group);
+  return groups.map((g, n) => spillTrackArgs(g, sources, durationSec, n === groups.length - 1 ? out : part(n), n ? part(n - 1) : undefined));
+}
+
 /** Lays the fitted lines out on the timeline. `recording` is one decoded recording, or one per path (lines without their own `recording` use `defaultRecording`). */
 export function buildVoiceTrack(o: { recording: Float32Array | Map<string, Float32Array>; defaultRecording?: string; sampleRate: number; lines: VoiceLine[]; durationSec: number }): Float32Array {
   const sr = o.sampleRate;
@@ -433,6 +506,8 @@ export interface FinalEpisodeOptions {
   sfxWav?: string;
   /** Some item keeps its live sound (default true). */
   liveAudio?: boolean;
+  /** The spill track of J- and L-cuts (spillTrackArgs): the shots' own sound, mixed into the speech bus before it is normalised. */
+  spillWav?: string;
 }
 
 /**
@@ -450,18 +525,25 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   if (o.voiceRaw) inputs.push('-f', 'f32le', '-ar', '48000', '-ac', '1', '-i', o.voiceRaw);
   const sfxIdx = o.sfxWav ? next++ : -1;
   if (o.sfxWav) inputs.push('-i', o.sfxWav);
+  const spillIdx = o.spillWav ? next++ : -1;
+  if (o.spillWav) inputs.push('-i', o.spillWav);
   const D = ffNum(o.durationSec);
 
   const chains = [`[0:v]ass=${filterValue(o.assFile)}${o.fontsDir ? `:fontsdir=${filterValue(o.fontsDir)}` : ''}[vout]`];
-  if (o.voiceRaw) {
-    chains.push(`[0:a]${FLTP_STEREO}[live]`, `[${voiceIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[vo]`, '[live][vo]amix=inputs=2:duration=first:normalize=0[speechraw]');
+  if (o.voiceRaw || o.spillWav) {
+    // The live sound, the voice-over and the shots' sound carried over a cut make one speech bus.
+    chains.push(`[0:a]${FLTP_STEREO}[live]`);
+    if (o.voiceRaw) chains.push(`[${voiceIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[vo]`);
+    if (o.spillWav) chains.push(`[${spillIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[spill]`);
+    const parts = ['[live]', ...(o.voiceRaw ? ['[vo]'] : []), ...(o.spillWav ? ['[spill]'] : [])];
+    chains.push(`${parts.join('')}amix=inputs=${parts.length}:duration=first:normalize=0[speechraw]`);
   } else {
     chains.push('[0:a]anull[speechraw]');
   }
   // A speech bus with no live sound and no voice-over is silence, which needs no normalising. loudnorm turns digital
   // silence shorter than 3 s into NaN, so an episode that short is measured over 3.1 s (silence after its end), then
   // cut back to length.
-  const normalise = o.liveAudio !== false || o.voiceRaw !== undefined;
+  const normalise = o.liveAudio !== false || o.voiceRaw !== undefined || o.spillWav !== undefined;
   const short = normalise && o.durationSec < LOUDNORM_MIN_SEC;
   chains.push(
     `[speechraw]highpass=f=90,${normalise ? `${short ? `apad=whole_dur=${LOUDNORM_MIN_SEC},` : ''}loudnorm=I=${lufs(o.loudnessLufs)}:TP=-1:LRA=11,` : ''}` +
@@ -649,7 +731,9 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   try {
     // Before the chunks: a sound file FFmpeg can't read stops the render here.
     const sfx = await placeSfx(project, sfxCues, D, ep.loudnessLufs, o.tools, work, o.signal);
-    const shape: ChunkShape = { width: W, height: H, fps, cardImages };
+    // J- and L-cuts: the shots' own sound played over the cut, and the fades they ask of the shots' sound under them.
+    const spilled = spills(ep, sources, laid).spills;
+    const shape: ChunkShape = { width: W, height: H, fps, cardImages, ...(spilled.length ? { fades: fadesFor(laid, spilled) } : {}) };
     const chunks = episodeChunks(laid, shape, sources, join(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i, chunk] of chunks.entries()) {
@@ -681,6 +765,14 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
       o.signal?.throwIfAborted();
       await o.tools.runFfmpeg(sfxTrackArgs(sfx, D, join(work, 'sfx.wav')), { expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 10 * 1000), signal: o.signal });
       sfxWav = 'sfx.wav';
+    }
+    let spillWav: string | undefined;
+    if (spilled.length) {
+      for (const args of spillTrackCommands(spilled, sources, D, work)) {
+        o.signal?.throwIfAborted();
+        await o.tools.runFfmpeg(args, { expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 10 * 1000), signal: o.signal });
+      }
+      spillWav = 'spill.wav';
     }
     report(0.7);
     o.signal?.throwIfAborted();
@@ -716,7 +808,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
         // fontsdir only for the plugin's own fonts folder: libass loads every font in it into memory (about 1 GB for
         // /System/Library/Fonts), and it finds system fonts and fallbacks itself; buildAss names a font for the scripts
         // whose fallback it can't open.
-        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir, musicWav, voiceRaw, sfxWav,
+        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir, musicWav, voiceRaw, sfxWav, spillWav,
         liveAudio: laid.some((l) => !isCard(l.item) && l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), signal: o.signal, onProgress: (f) => report(0.7 + 0.3 * f) },

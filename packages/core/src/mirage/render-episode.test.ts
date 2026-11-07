@@ -13,7 +13,8 @@ import { bundledFontsDir, CAPTION_FONT_FILE, MONO_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
-import { buildVoiceTrack, chunkItems, chunkSize, type ClipSource, commandLength, episodeChunks, MAX_COMMAND, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sfxTrackArgs, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkItems, chunkSize, type ClipSource, commandLength, episodeChunks, MAX_COMMAND, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sfxTrackArgs, sourcesFor, spillTrackArgs, spillTrackCommands } from './render-episode.js';
+import { fadesFor, spills } from './spill.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover, holdAt } from './voiceover.js';
 
@@ -501,6 +502,130 @@ describe('episodeFinalArgs with sound effects', () => {
     const short = graph(episodeFinalArgs({ ...o, durationSec: 2, sfxWav: 'sfx.wav' }));
     expect(short).toContain('apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,');
     expect(short.match(/loudnorm/g)).toHaveLength(1);
+  });
+});
+
+describe('J- and L-cut arguments', () => {
+  writeFileSync(join(CLIPS, 'c003.mp4'), '');
+  const jl: Catalog = { version: 1, clips: [clipOf('c001', 10, true), clipOf('c002', 600, false), clipOf('c003', 10, true)] };
+  const shape = { width: 960, height: 540, fps: 30 };
+  const keep = (id: string, clip: string, from: number, to: number, extra: object = {}) => ({ id, beat: 'problem', clip, src: { in: from, out: to }, audio: 'keep', ...extra });
+  const plain = ep([keep('a', 'c001', 2, 4), keep('b', 'c003', 2, 4), keep('s', 'c002', 0, 2), keep('c', 'c001', 6, 8)]);
+  // a's tail plays under b, b's lead under a (both at one cut), c's lead under the silent clip s.
+  const both = ep([keep('a', 'c001', 2, 4, { tailOut: 1 }), keep('b', 'c003', 2, 4, { leadIn: 0.5 }), keep('s', 'c002', 0, 2), keep('c', 'c001', 6, 8, { leadIn: 0.5 })]);
+  const chunk = (e: typeof plain) => {
+    const laid = layoutTimeline(e);
+    const sources = sourcesFor(e, jl);
+    const fades = fadesFor(laid, spills(e, sources, laid).spills);
+    return itemChunkArgs(laid, { ...shape, fades }, sources, '/w/chunk-000.mov');
+  };
+  const graphOf = (a: string[]) => a[a.indexOf('-filter_complex') + 1];
+
+  it('are exactly what they were before J- and L-cuts for an episode without them', () => {
+    const laid = layoutTimeline(plain);
+    expect(chunk(plain)).toEqual(itemChunkArgs(laid, shape, sourcesFor(plain, jl), '/w/chunk-000.mov'));
+    expect(graphOf(itemChunkArgs(laid, shape, sourcesFor(plain, jl), '/w/chunk-000.mov')).split(';')).toMatchInlineSnapshot(`
+      [
+        "[0:v]setpts=(PTS-0.008333/TB)/1,fps=30:start_time=0:round=up,trim=end_frame=61,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0]",
+        "[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a0]",
+        "[1:v]setpts=(PTS-0.008333/TB)/1,fps=30:start_time=0:round=up,trim=end_frame=61,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v1]",
+        "[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a1]",
+        "[2:v]setpts=(PTS-0.008333/TB)/1,fps=30:start_time=0:round=up,trim=end_frame=61,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v2]",
+        "anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,aformat=sample_fmts=fltp:channel_layouts=stereo[a2]",
+        "[3:v]setpts=(PTS-0.008333/TB)/1,fps=30:start_time=0:round=up,trim=end_frame=61,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v3]",
+        "[3:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2,asetpts=PTS-STARTPTS[a3]",
+        "[v0][a0][v1][a1][v2][a2][v3][a3]concat=n=4:v=1:a=1[vcat][acat]",
+      ]
+    `);
+  });
+
+  it("fades the neighbours' own sound with an equal-power curve where a spill plays over them; the shot that spills is unchanged", () => {
+    const g = graphOf(chunk(both)).split(';');
+    const p = graphOf(chunk(plain)).split(';');
+    const chain = (lines: string[], k: number) => lines.find((c) => c.endsWith(`[a${k}]`))!;
+    // b's lead fades a out over its last 0.5 s; a's tail fades b in over its first 1 s.
+    expect(chain(g, 0)).toBe(chain(p, 0).replace('[a0]', ',afade=t=out:st=1.5:d=0.5:curve=qsin[a0]'));
+    expect(chain(g, 1)).toBe(chain(p, 1).replace('[a1]', ',afade=t=in:d=1:curve=qsin[a1]'));
+    // s's clip has no sound: its silence stays as it was. c (which spills) is unchanged.
+    expect(chain(g, 2)).toBe(chain(p, 2));
+    expect(chain(g, 3)).toBe(chain(p, 3));
+    expect(g.filter((c) => !/\[a\d\]$/.test(c))).toEqual(p.filter((c) => !/\[a\d\]$/.test(c)));
+    // A middle shot under a tail from before and a lead from after fades in and out.
+    const mid = ep([keep('a', 'c001', 2, 4, { tailOut: 0.5 }), keep('b', 'c003', 2, 4), keep('c', 'c001', 6, 8, { leadIn: 0.4 })]);
+    expect(graphOf(chunk(mid))).toContain('asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,afade=t=out:st=1.6:d=0.4:curve=qsin[a1]');
+  });
+
+  it("decodes each spill from its clip, fades a lead in and a tail out over its length (equal power), and places it sample-exact", () => {
+    const sources = sourcesFor(both, jl);
+    const sp = spills(both, sources).spills;
+    const a = spillTrackArgs(sp, sources, 8, '/w/spill.wav');
+    expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual([
+      '-noaccurate_seek', '-ss', '4', '-i', join(CLIPS, 'c001.mp4'),
+      '-noaccurate_seek', '-ss', '1.5', '-i', join(CLIPS, 'c003.mp4'),
+      '-noaccurate_seek', '-ss', '5.5', '-i', join(CLIPS, 'c001.mp4'),
+    ]);
+    expect(graphOf(a).split(';')).toEqual([
+      '[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=1,apad,atrim=end=1,asetpts=PTS-STARTPTS,afade=t=out:st=0:d=1:curve=qsin,adelay=delays=96000S:all=1[s0]',
+      '[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=72000S:all=1[s1]',
+      '[2:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=264000S:all=1[s2]',
+      '[s0][s1][s2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=end=8[out]',
+    ]);
+    expect(a.slice(a.indexOf('-map'))).toEqual(['-map', '[out]', '-c:a', 'pcm_f32le', '-ar', '48000', '-ac', '2', '/w/spill.wav']);
+  });
+
+  it('reads a spill before a late video stream from the start of the clip, as the shot itself does, from its audio stream', () => {
+    const late = new Map<string, ClipSource>([['c001', { path: '/c.mov', hasAudio: true, durationSec: 10, videoStartSec: 2, audioStream: 1 }]]);
+    const a = spillTrackArgs([{ item: 'b', kind: 'lead', clip: 'c001', srcIn: 0.5, srcOut: 1.5, at: 1, sec: 1 }], late, 4, '/w/spill.wav');
+    expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual(['-itsoffset', '-0.5', '-i', '/c.mov']);
+    expect(graphOf(a).startsWith('[0:a:1]aresample=48000:async=1:first_pts=0,')).toBe(true);
+    const zero = spillTrackArgs([{ item: 'b', kind: 'lead', clip: 'c001', srcIn: 0, srcOut: 1, at: 1, sec: 1 }], late, 4, '/w/spill.wav');
+    expect(zero.slice(0, zero.indexOf('-filter_complex'))).toEqual(['-i', '/c.mov']);
+  });
+
+  it('splits the spill track into commands short enough for Windows, each mixing in the one before', () => {
+    const long = join(CLIPS, 'x'.repeat(180));
+    const sources = new Map<string, ClipSource>([['c001', { path: long, hasAudio: true, durationSec: 600 }]]);
+    const sp = Array.from({ length: 90 }, (_, i) => ({ item: `i${i}`, kind: 'tail' as const, clip: 'c001', srcIn: i * 3 + 1, srcOut: i * 3 + 2, at: i * 2, sec: 1 }));
+    const cmds = spillTrackCommands(sp, sources, 200, '/w');
+    expect(cmds.length).toBeGreaterThan(1);
+    for (const c of cmds) expect(commandLength(c)).toBeLessThanOrEqual(MAX_COMMAND);
+    expect(cmds.at(-1)!.at(-1)).toBe(join('/w', 'spill.wav'));
+    cmds.slice(1).forEach((c, i) => {
+      const prev = cmds[i]!.at(-1)!;
+      expect(c).toContain(prev);
+      const n = c.filter((x) => x === '-i').length;
+      expect(graphOf(c)).toContain(`[${n - 1}:a]amix=inputs=${n}:duration=longest:normalize=0,apad,atrim=end=200[out]`);
+    });
+    // Every spill is in exactly one command.
+    expect(cmds.reduce((s, c) => s + (graphOf(c).match(/afade=/g) ?? []).length, 0)).toBe(90);
+    // A short track is one command, the same as spillTrackArgs.
+    expect(spillTrackCommands(sp.slice(0, 3), sources, 200, '/w')).toEqual([spillTrackArgs(sp.slice(0, 3), sources, 200, join('/w', 'spill.wav'))]);
+  });
+
+  describe('episodeFinalArgs with spilled sound', () => {
+    const o = { chunkList: 'chunks.txt', output: '/o.mp4', encoder: enc, mode: 'final' as const, width: 1920, height: 1080, fps: 30, durationSec: 20, loudnessLufs: -14, assFile: 'overlays.ass' };
+    it('mixes the spill track into the speech bus before it is normalised', () => {
+      const a = episodeFinalArgs({ ...o, spillWav: 'spill.wav' });
+      expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual(['-f', 'concat', '-safe', '0', '-i', 'chunks.txt', '-i', 'spill.wav']);
+      expect(graphOf(a)).toContain(
+        '[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[live];[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[spill];' +
+          '[live][spill]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11,',
+      );
+    });
+    it('with music, a voice-over and sound effects, adds it as the last input and changes nothing else', () => {
+      const plainArgs = episodeFinalArgs({ ...o, musicWav: 'music.wav', voiceRaw: 'vo.f32', sfxWav: 'sfx.wav' });
+      const a = episodeFinalArgs({ ...o, musicWav: 'music.wav', voiceRaw: 'vo.f32', sfxWav: 'sfx.wav', spillWav: 'spill.wav' });
+      expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual([...plainArgs.slice(0, plainArgs.indexOf('-filter_complex')), '-i', 'spill.wav']);
+      const g = graphOf(a);
+      expect(g).toContain('[4:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[spill];[live][vo][spill]amix=inputs=3:duration=first:normalize=0[speechraw]');
+      expect(g.replace(';[4:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[spill]', '').replace('[live][vo][spill]amix=inputs=3', '[live][vo]amix=inputs=2')).toBe(graphOf(plainArgs));
+      expect(a.slice(a.indexOf('-filter_complex') + 2)).toEqual(plainArgs.slice(plainArgs.indexOf('-filter_complex') + 2));
+    });
+    it('measures an episode under 3 s over 3.1 s with the spill in it', () => {
+      const g = graphOf(episodeFinalArgs({ ...o, durationSec: 2, spillWav: 'spill.wav' }));
+      expect(g).toContain('[live][spill]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,');
+      expect(g).toMatch(/asetpts=N\/SR\/TB,atrim=end=2\[aout\]$/);
+    });
   });
 });
 
@@ -1806,4 +1931,165 @@ describe('cards (real ffmpeg)', () => {
     await renderEpisode({ project, episode: 4, mode: 'rough', tools: verbose });
     expect(graphs[2].split(';')[0]).toBe(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout]`);
   }, 300_000);
+});
+
+describe('J- and L-cuts (real ffmpeg)', () => {
+  const SR = 48000;
+  let tools: MediaTools;
+  let project: string;
+  const ids: Record<string, string> = {};
+  beforeAll(async () => {
+    tools = { ...(await realMediaTools()), transcribe: async () => ({ words: [], segments: [], speech: [] }) };
+    project = await mkdtemp(join(tmpdir(), 'we-jl-'));
+    const clips = join(project, 'clips');
+    await mkdir(clips, { recursive: true });
+    const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+    // Two shots whose own sound is a steady tone, 440 Hz and 880 Hz, so each is measured on its own; a silent one to fill.
+    for (const [name, f] of [['a440', 440], ['b880', 880]] as const) {
+      await gen(['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=6', '-f', 'lavfi', '-i', `sine=frequency=${f}:sample_rate=48000:duration=6`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', join(clips, `${name}.mp4`)]);
+    }
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=8', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', join(clips, 'c-quiet.mp4')]);
+    await ingestClips({ project, clipsDir: clips, tools });
+    for (const c of (await loadCatalog(project)).clips) ids[c.path.split(/[\\/]/).at(-1)!.replace('.mp4', '')] = c.id;
+  }, 300_000);
+
+  const counting = () => {
+    const calls: string[][] = [];
+    return { calls, tools: { ...tools, runFfmpeg: async (args: string[], opts?: object) => { calls.push(args); return tools.runFfmpeg(args, opts); } } };
+  };
+  const shot = (id: string, clip: string, from: number, to: number, extra: object = {}) => ({ id, beat: 'problem', clip: ids[clip], src: { in: from, out: to }, audio: 'keep', ...extra });
+  /** The left channel of a file's audio as 48 kHz float samples. */
+  const left = async (file: string) => {
+    const out = join(tmpdir(), `we-jl-${randomUUID()}.f32`);
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', file, '-map', '0:a:0', '-af', 'pan=mono|c0=c0,aresample=48000', '-f', 'f32le', out]);
+    const buf = await readFile(out);
+    await rm(out, { force: true });
+    return new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+  };
+  const db = (v: number) => 20 * Math.log10(v + 1e-12);
+  /** The level of the `f` Hz tone between `from` and `to` (a whole number of its cycles), in dBFS of its amplitude. */
+  const tone = (x: Float32Array, f: number, from: number, to: number) => {
+    const [a, b] = [Math.round(from * SR), Math.round(to * SR)];
+    const w = (2 * Math.PI * f) / SR;
+    let [re, im] = [0, 0];
+    for (let i = a; i < b; i++) [re, im] = [re + x[i]! * Math.cos(w * i), im + x[i]! * Math.sin(w * i)];
+    return db((2 * Math.hypot(re, im)) / (b - a));
+  };
+  /** The level of everything between `from` and `to`: an RMS, in dBFS of a tone's amplitude (RMS × √2). */
+  const level = (x: Float32Array, from: number, to: number) => {
+    const [a, b] = [Math.round(from * SR), Math.round(to * SR)];
+    let sum = 0;
+    for (let i = a; i < b; i++) sum += x[i]! * x[i]!;
+    return db(Math.sqrt((2 * sum) / (b - a)));
+  };
+  /** 50 ms windows (22 cycles of 440 Hz, 44 of 880 Hz) from `from` to `to`. */
+  const windows = (from: number, to: number) => Array.from({ length: Math.round((to - from) / 0.05) }, (_, i) => from + i * 0.05);
+  const render = async (n: number, items: object[], mode: 'rough' | 'guide' = 'rough') => {
+    await saveEpisode(project, ep(items, { number: n }));
+    const c = counting();
+    const r = await renderEpisode({ project, episode: n, mode, tools: c.tools });
+    expect(Math.abs((await tools.probe(r.outputPath)).durationSec - r.durationSec)).toBeLessThanOrEqual(0.1);
+    return { x: await left(r.outputPath), calls: c.calls, r };
+  };
+  /**
+   * Across the crossfade from `from` to `to`, the sound as a whole stays at the level of one shot's sound alone (each
+   * measured where it plays alone): never more than 1 dB over it (two sounds at full level), nor 1.5 dB under (a dip).
+   */
+  const equalPower = (x: Float32Array, from: number, to: number, alone: number[]) => {
+    const got = windows(from, to).map((t) => level(x, t, t + 0.05));
+    expect(Math.max(...got)).toBeLessThanOrEqual(Math.max(...alone) + 1);
+    expect(Math.min(...got)).toBeGreaterThanOrEqual(Math.min(...alone) - 1.5);
+    return got;
+  };
+  const falls = (v: number[]) => v.every((d, i) => i === 0 || d <= v[i - 1]! + 0.5);
+  // The cut is at 2.5 s: a440 (from 0.5 s of its clip) then b880 (from 1 s of its clip).
+  const T = 2.5;
+  const pair = (a: object, b: object) => [shot('a', 'a440', 0.5, 3, a), shot('b', 'b880', 1, 4, b)];
+
+  it('renders an episode without J- or L-cuts as before: no spill track, no fades', async () => {
+    const { calls } = await render(1, pair({}, {}));
+    expect(calls.filter((a) => a.at(-1)!.endsWith('spill.wav'))).toEqual([]);
+    expect(calls.some((a) => a.join(' ').includes('afade'))).toBe(false);
+    expect(calls.at(-1)!.join(' ')).not.toContain('spill');
+  }, 120_000);
+
+  it("L-cut: the first shot's sound carries on under the second for 1 s, fading out as the second's fades in, at one level", async () => {
+    const { x, calls } = await render(2, pair({ tailOut: 1 }, {}));
+    const spill = calls.find((a) => a.at(-1)!.endsWith('spill.wav'))!;
+    expect(spill).toBeDefined();
+    expect(calls.find((a) => a.at(-1)!.endsWith('.mov'))!.join(' ')).toContain('afade=t=in:d=1:curve=qsin[a1]');
+    expect(calls.at(-1)![calls.at(-1)!.indexOf('-filter_complex') + 1]).toContain('[live][spill]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,loudnorm=');
+    const [a440, b880] = [tone(x, 440, 1.5, 2.4), tone(x, 880, 4, 5)];
+    const w = windows(T, T + 1);
+    const lo = w.map((t) => tone(x, 440, t, t + 0.05));
+    const hi = w.map((t) => tone(x, 880, t, t + 0.05));
+    const total = equalPower(x, T, T + 1, [level(x, 1.5, 2.4), level(x, 4, 5)]);
+    console.log(`L-cut, alone: 440 Hz ${a440.toFixed(1)} dB, 880 Hz ${b880.toFixed(1)} dB; over the second's first second:\n  440 ${lo.map((d) => d.toFixed(1)).join(' ')}\n  880 ${hi.map((d) => d.toFixed(1)).join(' ')}\n  all ${total.map((d) => d.toFixed(1)).join(' ')}`);
+    // Before the cut only the first shot plays.
+    expect(tone(x, 880, 1.5, 2.4)).toBeLessThan(b880 - 40);
+    expect(Math.abs(tone(x, 440, T, T + 0.1) - a440)).toBeLessThanOrEqual(1.5);
+    expect(tone(x, 440, T + 0.9, T + 1)).toBeLessThan(a440 - 12);
+    expect(falls(lo)).toBe(true);
+    expect(falls([...hi].reverse())).toBe(true);
+    expect(tone(x, 880, T, T + 0.1)).toBeLessThan(b880 - 12);
+    expect(Math.abs(tone(x, 880, T + 0.9, T + 1) - b880)).toBeLessThanOrEqual(1.5);
+    // After the tail only the second shot plays.
+    expect(tone(x, 440, T + 1.1, 5)).toBeLessThan(a440 - 40);
+  }, 120_000);
+
+  it("J-cut: the second shot's sound starts 1 s before its picture, fading in as the first's fades out, at one level", async () => {
+    const { x } = await render(3, pair({}, { leadIn: 1 }));
+    const [a440, b880] = [tone(x, 440, 0.5, 1.4), tone(x, 880, 3, 5)];
+    const w = windows(T - 1, T);
+    const lo = w.map((t) => tone(x, 440, t, t + 0.05));
+    const hi = w.map((t) => tone(x, 880, t, t + 0.05));
+    equalPower(x, T - 1, T, [level(x, 0.5, 1.4), level(x, 3, 5)]);
+    expect(tone(x, 880, 0.5, 1.4)).toBeLessThan(b880 - 40);
+    expect(falls(lo)).toBe(true);
+    expect(falls([...hi].reverse())).toBe(true);
+    expect(Math.abs(tone(x, 440, T - 1, T - 0.9) - a440)).toBeLessThanOrEqual(1.5);
+    expect(tone(x, 440, T - 0.1, T)).toBeLessThan(a440 - 12);
+    expect(tone(x, 880, T - 1, T - 0.9)).toBeLessThan(b880 - 12);
+    expect(Math.abs(tone(x, 880, T - 0.1, T) - b880)).toBeLessThanOrEqual(1.5);
+    expect(tone(x, 440, T + 0.1, 5)).toBeLessThan(a440 - 40);
+  }, 120_000);
+
+  it('both at one cut: each crossfade plays, and the two sounds are never both at full level', async () => {
+    const { x } = await render(4, pair({ tailOut: 1 }, { leadIn: 1 }));
+    const [a440, b880] = [tone(x, 440, 0.5, 1.4), tone(x, 880, 4, 5)];
+    const total = equalPower(x, T - 1, T + 1, [level(x, 0.5, 1.4), level(x, 4, 5)]);
+    const both = windows(T - 1, T + 1).filter((t) => tone(x, 440, t, t + 0.05) > a440 - 3 && tone(x, 880, t, t + 0.05) > b880 - 3);
+    console.log(`both at one cut: all ${total.map((d) => d.toFixed(1)).join(' ')}`);
+    expect(both).toEqual([]);
+    // The lead is in full just before the cut, the tail just after.
+    expect(Math.abs(tone(x, 880, T - 0.1, T) - b880)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(tone(x, 440, T, T + 0.1) - a440)).toBeLessThanOrEqual(1.5);
+  }, 120_000);
+
+  it('plays an L-cut across a chunk boundary (items 30 and 31)', async () => {
+    const fill = Array.from({ length: 29 }, (_, i) => ({ id: `f${i}`, beat: 'montage', clip: ids['c-quiet'], src: { in: i * 0.2, out: i * 0.2 + 0.2 } }));
+    const { x, calls } = await render(5, [...fill, shot('a', 'a440', 1, 2.5, { tailOut: 1 }), shot('b', 'b880', 1, 3)]);
+    expect(calls.filter((a) => a.at(-1)!.endsWith('.mov'))).toHaveLength(2);
+    const cut = 29 * 0.2 + 1.5;
+    expect(tone(x, 440, cut, cut + 0.25)).toBeGreaterThan(tone(x, 440, cut + 0.75, cut + 1) + 6);
+    expect(tone(x, 440, cut, cut + 0.25)).toBeGreaterThan(-30);
+    expect(tone(x, 880, cut + 0.75, cut + 1)).toBeGreaterThan(tone(x, 880, cut, cut + 0.25) + 6);
+    expect(tone(x, 440, cut + 1.1, cut + 2)).toBeLessThan(tone(x, 440, cut - 1, cut) - 40);
+  }, 300_000);
+
+  it('renders an episode of 2 s with both a lead and a tail at its cut, at the loudness target', async () => {
+    const { x, r } = await render(6, [shot('a', 'a440', 1, 2, { tailOut: 0.5 }), shot('b', 'b880', 1, 2, { leadIn: 0.5 })]);
+    expect(r.durationSec).toBe(2);
+    expect(x.every(Number.isFinite)).toBe(true);
+    expect(tone(x, 880, 0.75, 1)).toBeGreaterThan(-30);
+    expect(tone(x, 440, 1, 1.25)).toBeGreaterThan(-30);
+    expect(level(x, 0.1, 1.9)).toBeGreaterThan(-20);
+  }, 120_000);
+
+  it("the guide cut plays the spill too: it's the shot's own sound", async () => {
+    const { x, calls } = await render(7, pair({ tailOut: 1 }, {}), 'guide');
+    expect(calls.some((a) => a.at(-1)!.endsWith('spill.wav'))).toBe(true);
+    expect(tone(x, 440, T, T + 0.25)).toBeGreaterThan(tone(x, 440, T + 0.75, T + 1) + 6);
+    expect(tone(x, 440, T, T + 0.25)).toBeGreaterThan(-30);
+  }, 120_000);
 });
