@@ -8,9 +8,11 @@ import { fileURLToPath } from 'node:url';
 import {
   appendLog, listVersions, newVideo, readClaudeProcess, readControl, readLog, readSessionState, readSteps, sessionDir, writeControl, writeSessionState,
 } from '@wordedits/core';
+import { build as esbuild } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 import { runHook, type HookDeps, type HookInput } from './hook.js';
 
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const E = (x: string) => `mcp__plugin_mirage_engine__${x}`;
 const DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../../plugin/dist/hook.mjs');
 const ALLOW = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } });
@@ -20,33 +22,84 @@ const STOP = 'The person stopped the edit. Stop now and say in one line what was
 const tmp = async (prefix = 'mirage-hook-') => realpathSync(await mkdtemp(join(tmpdir(), prefix)));
 
 /**
- * How much CPU the bundled hook uses for one run, as a multiple of what a bare Node start uses on the same machine at
- * the same moment. Both are read from inside the process as it exits, and each is the fastest of several runs.
- * "Fast" means the hook does little beyond starting Node, and the ratio says that without depending on how busy the
- * machine is: a wall-clock bound on a spawn fails whenever the suite runs in parallel, and even CPU time alone grows
- * threefold under load, but a loaded machine slows Node's start and the hook alike (the ratio is about 2 idle or busy).
+ * Runs the bundled hook (or a bare Node start) with a `--require` probe that reports, as the process exits, its own CPU
+ * time and how many child processes it started. The probe wraps every spawning function of node:child_process, and
+ * ChildProcess.prototype.spawn under them, before the hook's ES module imports the builtin, so the hook sees the wrapped
+ * functions; the test "the probe counts a spawn made from an ES module" below checks that this holds.
+ * Why not just time it: "fast outside a Mirage project" means the hook starts no process and loads no engine, and neither
+ * shows in a stopwatch on a busy machine, nor in CPU time (a child's work and a wait are not the process's own CPU).
  */
-const hookCpuRatio = async (args: string[], stdin: string, env: Record<string, string>, runs = 7): Promise<{ ratio: number; out: string }> => {
+const PROBE = `
+const cp = require('node:child_process');
+let spawns = 0;
+for (const name of ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork']) {
+  const original = cp[name];
+  cp[name] = function (...args) { spawns++; return original.apply(this, args); };
+}
+const spawnMethod = cp.ChildProcess.prototype.spawn;
+cp.ChildProcess.prototype.spawn = function (...args) { spawns++; return spawnMethod.apply(this, args); };
+process.on('exit', () => { const u = process.cpuUsage(); require('node:fs').writeSync(2, 'PROBE ' + JSON.stringify({ cpu: (u.user + u.system) / 1000, spawns })); });
+`;
+/** A minimal environment: no PATH to search (so nothing on this machine changes the result), but what Windows needs to start Node. */
+const bareEnv = (extra: Record<string, string> = {}): Record<string, string> => {
+  const keep: Record<string, string> = { PATH: '' };
+  if (process.platform === 'win32') for (const k of ['SystemRoot', 'TEMP', 'TMP']) if (process.env[k]) keep[k] = process.env[k]!;
+  return { ...keep, ...extra };
+};
+const probed = (probe: string, script: string[], stdin: string, env: Record<string, string>): { cpu: number; spawns: number; out: string } => {
+  const r = spawnSync(process.execPath, ['--require', probe, ...script], { input: stdin, encoding: 'utf8', env });
+  const m = /PROBE (\{.*\})/.exec(r.stderr);
+  expect(m, `the process ran and reported to the probe: ${r.stderr}`).not.toBeNull();
+  return { ...(JSON.parse(m![1]!) as { cpu: number; spawns: number }), out: r.stdout };
+};
+const writeProbe = async (): Promise<string> => {
   const probe = join(await tmp('mirage-probe-'), 'probe.cjs');
-  await writeFile(probe, "process.on('exit', () => { const u = process.cpuUsage(); require('node:fs').writeSync(2, `CPU ${(u.user + u.system) / 1000}`); });");
-  const cpu = (script: string[]): { ms: number; out: string } => {
-    const r = spawnSync(process.execPath, ['--require', probe, ...script], { input: stdin, encoding: 'utf8', env });
-    const m = /CPU ([\d.]+)/.exec(r.stderr);
-    expect(m, `the process ran and reported its CPU time: ${r.stderr}`).not.toBeNull();
-    return { ms: Number(m![1]), out: r.stdout };
-  };
+  await writeFile(probe, PROBE);
+  return probe;
+};
+
+/**
+ * Runs the hook 7 times, each next to a bare Node start. The hook must start no process and print nothing in any run, and,
+ * as a coarse backstop for other slowness, its CPU time (the fastest run) must stay within a few times that of a bare Node
+ * start (the fastest bare run): a loaded machine slows both alike, where a fixed bound would not hold (about 35 ms idle,
+ * 3 times that under load). Windows counts CPU in ticks of about 16 ms, so the bound never goes below 50 ms.
+ */
+const checkHookIsLight = async (args: string[], stdin: string, env: Record<string, string>): Promise<{ out: string; spawns: number; hook: number; limit: number }> => {
+  const probe = await writeProbe();
   let hook = Infinity;
   let bare = Infinity;
   let out = '';
-  for (let i = 0; i < runs; i++) {
-    bare = Math.min(bare, cpu(['-e', '']).ms);
-    const run = cpu([DIST, ...args]);
-    hook = Math.min(hook, run.ms);
-    out += run.out; // every run must print nothing
+  let spawns = 0;
+  for (let i = 0; i < 7; i++) {
+    bare = Math.min(bare, probed(probe, ['-e', ''], '', env).cpu);
+    const run = probed(probe, [DIST, ...args], stdin, env);
+    hook = Math.min(hook, run.cpu);
+    out += run.out;
+    spawns += run.spawns;
   }
-  return { ratio: hook / bare, out };
+  return { out, spawns, hook, limit: Math.max(bare * CPU_RATIO_LIMIT, 50) };
 };
-const CPU_RATIO_LIMIT = 4; // the hook was about 2 on an idle machine and 2 under load; 150 ms of wall clock was about 4 times
+const CPU_RATIO_LIMIT = 4;
+
+/** The source files that an entry point loads before it runs anything (static imports, followed all the way down), bundled the way build-plugin does but split, so a dynamic import() is a separate chunk. */
+const loadedUpFront = async (entry: { file: string } | { contents: string; resolveDir: string }): Promise<string[]> => {
+  const result = await esbuild({
+    ...('file' in entry ? { entryPoints: [entry.file] } : { stdin: { contents: entry.contents, resolveDir: entry.resolveDir, loader: 'ts' as const } }),
+    bundle: true, splitting: true, format: 'esm', platform: 'node', write: false, outdir: 'out', metafile: true, logLevel: 'silent', absWorkingDir: ROOT,
+  });
+  const outputs = result.metafile.outputs;
+  const entryOut = Object.keys(outputs).find((o) => outputs[o]!.entryPoint !== undefined) ?? Object.keys(outputs).find((o) => outputs[o]!.imports.length > 0)!;
+  const seen = new Set<string>();
+  const queue = [entryOut];
+  while (queue.length) {
+    const o = queue.pop()!;
+    if (seen.has(o)) continue;
+    seen.add(o);
+    for (const i of outputs[o]!.imports) if (i.kind === 'import-statement' && outputs[i.path]) queue.push(i.path);
+  }
+  return [...seen].flatMap((o) => Object.keys(outputs[o]!.inputs));
+};
+const ENGINE_FILE = /packages[\\/]core[\\/]|node_modules[\\/](?:\.pnpm[\\/][^\\/]+[\\/]node_modules[\\/])?zod[\\/]/;
 
 /** Fake deps: a clock that `sleep` advances. */
 async function fakeDeps(over: Partial<HookDeps> = {}) {
@@ -93,9 +146,32 @@ describe('runHook', () => {
   it.skipIf(!existsSync(DIST))('does nothing outside a Mirage project, fast, through the bundled script', async () => {
     const dir = await tmp();
     const json = JSON.stringify(input(dir, { tool_name: 'Read', tool_input: { file_path: 'x' } }));
-    const { ratio, out } = await hookCpuRatio(['pre'], json, { PATH: '' });
-    expect(ratio).toBeLessThan(CPU_RATIO_LIMIT);
+    const { out, spawns, hook, limit } = await checkHookIsLight(['pre'], json, bareEnv());
+    expect(spawns).toBe(0);
+    expect(hook).toBeLessThan(limit);
     expect(out).toBe('');
+  });
+
+  it('loads neither the engine nor its libraries before it knows it is in a Mirage project', async () => {
+    const files = await loadedUpFront({ file: join(ROOT, 'packages/hooks/src/main.ts') });
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((f) => ENGINE_FILE.test(f))).toEqual([]);
+  });
+
+  it('knows an engine import when it sees one (so the test above can fail)', async () => {
+    const eager = await loadedUpFront({ contents: "import '@wordedits/core';", resolveDir: join(ROOT, 'packages/hooks/src') });
+    expect(eager.some((f) => ENGINE_FILE.test(f))).toBe(true);
+    const lazy = await loadedUpFront({ contents: "await import('@wordedits/core');", resolveDir: join(ROOT, 'packages/hooks/src') });
+    expect(lazy.some((f) => ENGINE_FILE.test(f))).toBe(false);
+  });
+
+  it('the probe counts a spawn made from an ES module, by any of the spawning functions', async () => {
+    const dir = await tmp();
+    const script = join(dir, 'spawns.mjs');
+    await writeFile(script, "import { execFileSync, spawnSync, spawn } from 'node:child_process';\nexecFileSync(process.execPath, ['-e', '']);\nspawnSync(process.execPath, ['-e', '']);\nspawn(process.execPath, ['-e', '']);\n");
+    const r = probed(await writeProbe(), [script], '', bareEnv());
+    expect(r.spawns).toBeGreaterThanOrEqual(3);
+    expect(probed(await writeProbe(), ['-e', ''], '', bareEnv()).spawns).toBe(0);
   });
 
   it('writes the session file and tells Claude about the project at session start', async () => {
@@ -536,9 +612,10 @@ describe.skipIf(!existsSync(DIST))('session start through the bundled script', (
       JSON.parse(await readFile(join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version,
     );
     const stdin = JSON.stringify(input(await tmp(), { hook_event_name: 'SessionStart' }));
-    const second = await hookCpuRatio(['session-start'], stdin, { PATH: '', ...env, CLAUDE_PLUGIN_DATA: data });
+    const second = await checkHookIsLight(['session-start'], stdin, bareEnv({ ...env, CLAUDE_PLUGIN_DATA: data }));
     expect(second.out).toBe('');
-    expect(second.ratio).toBeLessThan(CPU_RATIO_LIMIT);
+    expect(second.spawns).toBe(0);
+    expect(second.hook).toBeLessThan(second.limit);
   });
 
   it('says nothing outside a Mirage project without a data folder', async () => {
