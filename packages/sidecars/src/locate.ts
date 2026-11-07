@@ -15,7 +15,7 @@ let kegDirs = KEG_DIRS;
 let captionsTimeoutMs = CAPTIONS_TIMEOUT_MS;
 let useStatic = true;
 /** What ffmpeg -filters said, per FFmpeg file (path and mtime): each file is asked once per process. */
-const captionChecks = new Map<string, Promise<boolean>>();
+const captionChecks = new Map<string, Promise<boolean | null>>();
 
 export function _resetLocateCache(): void {
   captionChecks.clear();
@@ -32,7 +32,7 @@ const exe = (tool: Tool) => (process.platform === 'win32' ? `${tool}.exe` : tool
 
 /** What to tell the user when a tool is missing or cannot be started. */
 export function installHint(tool: Tool): string {
-  return `Install FFmpeg (macOS: brew install ffmpeg; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
+  return `Install FFmpeg (macOS: brew install ffmpeg-full; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -85,21 +85,27 @@ async function ffmpegCandidates(): Promise<string[]> {
   return found;
 }
 
-/** Whether `ffmpeg -filters` lists the `ass` filter (which needs libass). A run that fails or hangs counts as no. */
-async function listsAssFilter(path: string): Promise<boolean> {
+/** How soon after the timeout a check that ignores the request to end is killed. */
+const CAPTIONS_KILL_AFTER_MS = 500;
+
+/**
+ * Whether `ffmpeg -filters` lists the `ass` filter (which needs libass). Null when the check did not run to a list of filters
+ * (it hung, failed or could not be started): that counts as no captions this time, but is neither remembered nor recorded.
+ */
+async function listsAssFilter(path: string): Promise<boolean | null> {
   try {
-    const { stdout } = await runPath('ffmpeg', path, ['-hide_banner', '-filters'], { timeoutMs: captionsTimeoutMs });
+    const { stdout } = await runPath('ffmpeg', path, ['-hide_banner', '-filters'], { timeoutMs: captionsTimeoutMs, forceKillAfterDelayMs: CAPTIONS_KILL_AFTER_MS });
     return /^\s*\S+\s+ass\s/m.test(stdout);
   } catch {
-    return false;
+    return null;
   }
 }
 
 interface Resolved {
   path: string;
   captions: boolean;
-  /** Whether this call had to run an FFmpeg (rather than reuse what it already knew). */
-  asked: boolean;
+  /** Whether this call ran a check that listed the filters, so setup.json should record the result. */
+  record: boolean;
 }
 
 /**
@@ -112,28 +118,32 @@ async function resolveFfmpeg(): Promise<Resolved> {
     throw new SidecarError('ffmpeg', 'NOT_FOUND', 'ffmpeg was not found', installHint('ffmpeg'));
   }
   let asked = false;
-  let first: Resolved | undefined;
+  let first: (Resolved & { mtimeMs: number }) | undefined;
   for (const path of candidates) {
     const mtimeMs = (await stat(path)).mtimeMs;
     const key = `${path}\0${mtimeMs}`;
     let check = captionChecks.get(key);
+    const ran = !check;
     if (!check) {
-      asked = true;
       check = listsAssFilter(path);
       captionChecks.set(key, check);
     }
-    const captions = await check;
-    if (captions) return remembered({ path, captions, asked }, mtimeMs);
-    first ??= { path, captions, asked: false };
+    const result = await check;
+    // A check that did not run to a list of filters is forgotten, so the next call asks this FFmpeg again.
+    if (result === null && captionChecks.get(key) === check) captionChecks.delete(key);
+    if (ran && result !== null) asked = true;
+    const captions = result === true;
+    if (captions) return remembered({ path, captions, record: asked }, mtimeMs);
+    first ??= { path, captions, record: result !== null, mtimeMs };
   }
   const chosen = first!;
-  return remembered({ ...chosen, asked }, (await stat(chosen.path)).mtimeMs);
+  return remembered({ path: chosen.path, captions: chosen.captions, record: asked && chosen.record }, chosen.mtimeMs);
 }
 
-/** Writes what the check found to setup.json (the SessionStart hook reads it; it never starts a process) when an FFmpeg was asked. */
+/** Writes what the check found to setup.json (the SessionStart hook reads it; it never starts a process) when a check was run. */
 function remembered(r: Resolved, mtimeMs: number): Resolved {
   const dataDir = process.env.MIRAGE_PLUGIN_DATA;
-  if (r.asked && dataDir) writeSetupState(dataDir, { ffmpeg: { path: r.path, mtimeMs, captions: r.captions } });
+  if (r.record && dataDir) writeSetupState(dataDir, { ffmpeg: { path: r.path, mtimeMs, captions: r.captions } });
   return r;
 }
 

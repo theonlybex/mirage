@@ -14,6 +14,7 @@ description: "Check and install what Mirage needs (Node, FFmpeg, whisper.cpp and
 When the session start says tools are missing (or that Node is), ask before doing anything else. Ask in one message, with one plain sentence per missing tool, from this list:
 - **Node.js** — runs Mirage itself: its engine and the viewer you watch your videos in.
 - **FFmpeg** — does the actual video work: cutting, joining, captions, music and the final export.
+- **FFmpeg with caption support** — the plain Homebrew FFmpeg can't draw captions or text on the video, so Mirage needs Homebrew's complete build, ffmpeg-full; it's a bigger install because it brings the caption and font libraries.
 - **whisper.cpp and its speech model (about 574 MB)** — lets Claude hear what's said in your clips, so it can pick the best takes and write captions; it runs on your computer, nothing is uploaded.
 - **Kokoro AI voice (about 260 MB, optional)** — reads narration aloud if you don't record your own; it downloads the first time you use it, so there's nothing to install now.
 
@@ -59,6 +60,7 @@ The steps below go in the order the tools depend on each other. Step 8 is the fi
 
 Call `mcp__plugin_mirage_engine__status` (no input; it works in any folder) and read its tool lines:
 - `ffmpeg: ok` / `ffprobe: ok`, or `missing`: step 3.
+- `ffmpeg: can't draw captions — <path> was built without libass. <hint>`: the FFmpeg is there but can't draw captions or text, so renders refuse: step 3 (it installs the complete build).
 - `transcriber: ok`, or `missing — …` (it names what is missing: whisper-cli, the model, or both): step 4.
 - `Node: v… ok`, or `… is too old`: step 1.
 - `tts: ok`, `tts: not downloaded yet …` or `tts: missing — …`: step 4b.
@@ -107,15 +109,20 @@ claude --version
 
 ## Step 3 · FFmpeg (job 2, the finisher; required now)
 
-**Check:**
+Mirage needs an FFmpeg built with libass, the library that draws captions and text on the video. Homebrew's plain `ffmpeg` is built without it; its complete build, `ffmpeg-full`, has it.
+
+**Check:** the `ffmpeg:` line of `status` is the answer, because Mirage also looks in places a terminal doesn't. By hand:
 
 ```bash
 ffmpeg -version && ffprobe -version
+ffmpeg -hide_banner -filters | grep -w ass    # prints a line when captions can be drawn
 ```
 
 **Install:**
-- macOS: `brew install ffmpeg`
-- Windows: `winget install --id Gyan.FFmpeg -e`, then open a new terminal so it's on PATH.
+- macOS: `brew install ffmpeg-full`. It's keg-only, so Homebrew doesn't link it onto PATH; that's fine. Mirage finds it in `/opt/homebrew/opt/ffmpeg-full/bin` (`/usr/local/opt/ffmpeg-full/bin` on an Intel Mac) by itself, so there's nothing to put on PATH. Leave a plain `ffmpeg` that's already installed alone.
+- Windows: `winget install --id Gyan.FFmpeg -e`, then open a new terminal so it's on PATH. This build can draw captions.
+
+**Then:** call `status` again: `ffmpeg: ok`. Installing needs no restart.
 
 ---
 

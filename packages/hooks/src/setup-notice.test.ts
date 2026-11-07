@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readSetupState, SETUP_FILE, writeSetupState } from '@wordedits/shared/setup-state';
-import { missingTools, setupNotice, type MissingTool } from './setup-notice.js';
+import { kegDirsFor, missingTools, setupNotice, type MissingTool } from './setup-notice.js';
 
 const WIN = process.platform === 'win32';
 const now = new Date('2026-11-06T12:00:00Z');
@@ -103,6 +103,105 @@ describe('missingTools', () => {
   });
 });
 
+describe('missingTools and the FFmpeg that can draw captions', () => {
+  /** A home holding the speech model, so only FFmpeg decides the result. */
+  function homeWithModel(): string {
+    const home = join(root, 'home');
+    mkdirSync(join(home, '.local', 'share', 'whisper-cpp', 'models'), { recursive: true });
+    writeFileSync(join(home, '.local', 'share', 'whisper-cpp', 'models', 'ggml-large-v3-turbo-q5_0.bin'), '');
+    return home;
+  }
+  const exeName = (t: string) => (WIN ? `${t}.exe` : t);
+  /** Writes what the engine records after asking the ffmpeg at `file`: its path and mtime as the engine stores them. */
+  function record(file: string, captions: boolean, patch: { path?: string; mtimeMs?: number } = {}): void {
+    writeSetupState(dataDir, { ffmpeg: { path: patch.path ?? file, mtimeMs: patch.mtimeMs ?? statSync(file).mtimeMs, captions } });
+  }
+  const check = (env: NodeJS.ProcessEnv, extra: { kegDirs?: string[]; dataDir?: string } = {}) =>
+    missingTools({ env, platform: process.platform, home: homeWithModel(), whisperDirs: [], dataDir, kegDirs: [], ...extra });
+
+  it('lists FFmpeg with caption support when the ffmpeg found is recorded as unable to draw captions', () => {
+    const bin = folderWith('bin', 'ffmpeg', 'ffprobe', 'whisper-cli');
+    record(join(bin, exeName('ffmpeg')), false);
+    expect(check({ PATH: bin, WORDEDITS_WHISPER_DIR: bin })).toEqual(['ffmpeg-captions']);
+  });
+
+  it('keeps ffmpeg-captions in the place of ffmpeg, before the other tools', () => {
+    const bin = folderWith('bin', 'ffmpeg', 'ffprobe');
+    record(join(bin, exeName('ffmpeg')), false);
+    expect(check({ PATH: bin })).toEqual(['ffmpeg-captions', 'whisper-cli']);
+  });
+
+  it('ignores a record of another mtime or another path, a record that can draw captions, and no record', () => {
+    const bin = folderWith('bin', 'ffmpeg', 'ffprobe', 'whisper-cli');
+    const ff = join(bin, exeName('ffmpeg'));
+    const env = { PATH: bin };
+    expect(check(env)).toEqual([]);
+    record(ff, false, { mtimeMs: statSync(ff).mtimeMs + 1 });
+    expect(check(env)).toEqual([]);
+    record(ff, false, { path: join(root, 'elsewhere', exeName('ffmpeg')) });
+    expect(check(env)).toEqual([]);
+    record(ff, true);
+    expect(check(env)).toEqual([]);
+    // no data folder: nothing to read
+    record(ff, false);
+    expect(check(env, { dataDir: '' })).toEqual([]);
+    expect(check(env, { dataDir: join(root, 'no-such-folder') })).toEqual([]);
+  });
+
+  it('is not fooled by a record for an ffmpeg that is gone: ffmpeg is missing then', () => {
+    const bin = folderWith('bin', 'ffmpeg', 'ffprobe');
+    record(join(bin, exeName('ffmpeg')), false);
+    expect(check({ PATH: join(root, 'empty') })).toEqual(['ffmpeg', 'ffprobe', 'whisper-cli']);
+  });
+
+  it.skipIf(WIN)('compares the mtime of the file a symlink points to, as the engine stores it (Homebrew links bin/ffmpeg into the Cellar)', () => {
+    const cellar = folderWith('cellar', 'ffmpeg');
+    const old = new Date('2020-01-01T00:00:00Z');
+    utimesSync(join(cellar, 'ffmpeg'), old, old);
+    const bin = folderWith('bin', 'ffprobe', 'whisper-cli');
+    symlinkSync(join(cellar, 'ffmpeg'), join(bin, 'ffmpeg'));
+    const link = join(bin, 'ffmpeg');
+    // the engine's stat follows the link: the target's mtime, under the link's path
+    record(link, false);
+    expect(check({ PATH: bin, WORDEDITS_WHISPER_DIR: bin })).toEqual(['ffmpeg-captions']);
+  });
+
+  it.skipIf(WIN)('searches the keg folders after PATH, for ffmpeg and ffprobe', () => {
+    const keg = folderWith('keg', 'ffmpeg', 'ffprobe');
+    const bin = folderWith('bin', 'whisper-cli');
+    expect(check({ PATH: bin, WORDEDITS_WHISPER_DIR: bin }, { kegDirs: [keg] })).toEqual([]);
+    expect(check({ PATH: bin, WORDEDITS_WHISPER_DIR: bin }, { kegDirs: [] })).toEqual(['ffmpeg', 'ffprobe']);
+    record(join(keg, 'ffmpeg'), false);
+    expect(check({ PATH: bin, WORDEDITS_WHISPER_DIR: bin }, { kegDirs: [keg] })).toEqual(['ffmpeg-captions']);
+  });
+
+  it.skipIf(WIN)('does not flag the ffmpeg on PATH while an ffmpeg-full sits in the keg folder: the engine has not asked it yet', () => {
+    const keg = folderWith('keg', 'ffmpeg', 'ffprobe');
+    const bin = folderWith('bin', 'ffmpeg', 'ffprobe', 'whisper-cli');
+    const env = { PATH: bin, WORDEDITS_WHISPER_DIR: bin };
+    record(join(bin, 'ffmpeg'), false);
+    expect(check(env, { kegDirs: [keg] })).toEqual([]);
+    // once the engine chose the keg one and recorded it, still fine
+    record(join(keg, 'ffmpeg'), true);
+    expect(check(env, { kegDirs: [keg] })).toEqual([]);
+  });
+
+  it.skipIf(WIN)('looks only in WORDEDITS_FFMPEG_DIR once it is set, keg folders included', () => {
+    const keg = folderWith('keg', 'ffmpeg', 'ffprobe');
+    const mine = folderWith('mine', 'ffmpeg', 'ffprobe', 'whisper-cli');
+    const empty = folderWith('empty');
+    expect(check({ PATH: '', WORDEDITS_FFMPEG_DIR: empty, WORDEDITS_WHISPER_DIR: mine }, { kegDirs: [keg] })).toEqual(['ffmpeg', 'ffprobe']);
+    record(join(mine, 'ffmpeg'), false);
+    expect(check({ PATH: keg, WORDEDITS_FFMPEG_DIR: mine, WORDEDITS_WHISPER_DIR: mine }, { kegDirs: [keg] })).toEqual(['ffmpeg-captions']);
+  });
+
+  it('has the keg folders on macOS and Linux and none on Windows', () => {
+    expect(kegDirsFor('darwin')).toEqual(['/opt/homebrew/opt/ffmpeg-full/bin', '/usr/local/opt/ffmpeg-full/bin', '/home/linuxbrew/.linuxbrew/opt/ffmpeg-full/bin']);
+    expect(kegDirsFor('linux')).toEqual(kegDirsFor('darwin'));
+    expect(kegDirsFor('win32')).toEqual([]);
+  });
+});
+
 describe('setupNotice', () => {
   it('asks once anywhere per version, then only in a Mirage project', () => {
     const o = { dataDir, version: '0.2.0', now, missing: ['ffmpeg'] as MissingTool[] };
@@ -180,6 +279,11 @@ describe('setupNotice', () => {
     expect(notice(['ffmpeg', 'ffprobe', 'whisper-cli', 'speech-model'])).toContain('install them now');
     expect(notice(['ffmpeg', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg and whisper.cpp with its speech model are installed');
     expect(notice(['ffmpeg', 'speech-model'])).toContain("until FFmpeg and whisper.cpp's speech model are installed");
+    expect(notice(['ffmpeg-captions'])).toMatch(/^This Mirage project can't edit videos until FFmpeg with caption support is installed\. .* whether Mirage may install it now\./);
+    expect(notice(['ffmpeg-captions', 'ffprobe'])).toContain('until FFmpeg with caption support is installed');
+    expect(notice(['ffmpeg-captions', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg with caption support and whisper.cpp with its speech model are installed');
+    expect(notice(['ffmpeg-captions', 'whisper-cli', 'speech-model'])).toContain('install them now');
+    expect(notice(['ffmpeg-captions', 'speech-model'])).toContain("until FFmpeg with caption support and whisper.cpp's speech model are installed");
   });
 });
 

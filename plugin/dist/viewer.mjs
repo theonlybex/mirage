@@ -7420,7 +7420,7 @@ async function run(tool, args, opts = {}) {
 }
 async function runPath(name, bin, args, opts = {}) {
   const timeout = opts.timeoutMs ?? 10 * 6e4;
-  const child = execa(bin, args, { timeout, reject: false, all: false, stripFinalNewline: false, cwd: opts.cwd, cancelSignal: opts.signal, buffer: { stdout: opts.keepStdout !== false, stderr: true } });
+  const child = execa(bin, args, { timeout, forceKillAfterDelay: opts.forceKillAfterDelayMs, reject: false, all: false, stripFinalNewline: false, cwd: opts.cwd, cancelSignal: opts.signal, buffer: { stdout: opts.keepStdout !== false, stderr: true } });
   let splitter;
   if (opts.onStdoutLine && child.stdout) {
     splitter = createLineSplitter(opts.onStdoutLine);
@@ -7462,7 +7462,7 @@ var useStatic = true;
 var captionChecks = /* @__PURE__ */ new Map();
 var exe = (tool) => process.platform === "win32" ? `${tool}.exe` : tool;
 function installHint(tool) {
-  return `Install FFmpeg (macOS: brew install ffmpeg; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
+  return `Install FFmpeg (macOS: brew install ffmpeg-full; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
 }
 async function exists(p) {
   try {
@@ -7510,12 +7510,13 @@ async function ffmpegCandidates() {
   }
   return found;
 }
+var CAPTIONS_KILL_AFTER_MS = 500;
 async function listsAssFilter(path6) {
   try {
-    const { stdout } = await runPath("ffmpeg", path6, ["-hide_banner", "-filters"], { timeoutMs: captionsTimeoutMs });
+    const { stdout } = await runPath("ffmpeg", path6, ["-hide_banner", "-filters"], { timeoutMs: captionsTimeoutMs, forceKillAfterDelayMs: CAPTIONS_KILL_AFTER_MS });
     return /^\s*\S+\s+ass\s/m.test(stdout);
   } catch {
-    return false;
+    return null;
   }
 }
 async function resolveFfmpeg() {
@@ -7529,21 +7530,24 @@ async function resolveFfmpeg() {
     const mtimeMs = (await stat(path6)).mtimeMs;
     const key = `${path6}\0${mtimeMs}`;
     let check2 = captionChecks.get(key);
+    const ran = !check2;
     if (!check2) {
-      asked = true;
       check2 = listsAssFilter(path6);
       captionChecks.set(key, check2);
     }
-    const captions = await check2;
-    if (captions) return remembered({ path: path6, captions, asked }, mtimeMs);
-    first ??= { path: path6, captions, asked: false };
+    const result = await check2;
+    if (result === null && captionChecks.get(key) === check2) captionChecks.delete(key);
+    if (ran && result !== null) asked = true;
+    const captions = result === true;
+    if (captions) return remembered({ path: path6, captions, record: asked }, mtimeMs);
+    first ??= { path: path6, captions, record: result !== null, mtimeMs };
   }
   const chosen = first;
-  return remembered({ ...chosen, asked }, (await stat(chosen.path)).mtimeMs);
+  return remembered({ path: chosen.path, captions: chosen.captions, record: asked && chosen.record }, chosen.mtimeMs);
 }
 function remembered(r, mtimeMs) {
   const dataDir = process.env.MIRAGE_PLUGIN_DATA;
-  if (r.asked && dataDir) writeSetupState(dataDir, { ffmpeg: { path: r.path, mtimeMs, captions: r.captions } });
+  if (r.record && dataDir) writeSetupState(dataDir, { ffmpeg: { path: r.path, mtimeMs, captions: r.captions } });
   return r;
 }
 function captionsHint(platform2 = process.platform) {

@@ -135,6 +135,25 @@ describe('the plugin skills', () => {
     expect(setup).toContain("If Node is the missing tool, don't call it");
   });
 
+  it('setup asks for an FFmpeg that can draw captions: the reason, the check, the macOS install and the status line', () => {
+    const setup = read('setup');
+    const lines = setup.split('\n');
+    const reason = "- **FFmpeg with caption support** — the plain Homebrew FFmpeg can't draw captions or text on the video, so Mirage needs Homebrew's complete build, ffmpeg-full; it's a bigger install because it brings the caption and font libraries.";
+    const ffmpegLine = lines.findIndex((l) => l.startsWith('- **FFmpeg** — '));
+    expect(lines[ffmpegLine + 1]).toBe(reason);
+    expect(setup.indexOf(reason)).toBeLessThan(setup.indexOf('**How to work through it**'));
+    const step3 = setup.slice(setup.indexOf('## Step 3 ·'), setup.indexOf('## Step 4 ·'));
+    expect(step3).toContain('- macOS: `brew install ffmpeg-full`');
+    expect(step3).toContain('/opt/homebrew/opt/ffmpeg-full/bin');
+    expect(step3).toContain('ffmpeg -hide_banner -filters | grep -w ass');
+    expect(step3).not.toMatch(/brew install ffmpeg(?!-full)/);
+    expect(setup).not.toMatch(/brew install ffmpeg(?!-full)/);
+    const step0 = setup.slice(setup.indexOf('## Step 0 ·'), setup.indexOf('## Step 1 ·'));
+    expect(step0).toContain("`ffmpeg: can't draw captions — <path> was built without libass. <hint>`");
+    expect(step0).toMatch(/can't draw captions[^\n]*step 3/);
+    expect(read('status')).toContain("`ffmpeg: can't draw captions");
+  });
+
   it('the skills that run on engine output say to use the tool when a message suggests a command', () => {
     for (const name of ['edit', 'voiceover'] as const) expect(read(name)).toMatch(/never run `pnpm`/i);
   });

@@ -4,6 +4,8 @@ import { installHint, locate, type Tool } from './locate.js';
 
 export interface RunOptions {
   timeoutMs?: number;
+  /** After the timeout (or a stop) asks the child to end, how long before it is killed outright; execa's default is 5 s. */
+  forceKillAfterDelayMs?: number;
   onStdoutLine?: (line: string) => void;
   /** Keep stdout to return it (default true). False with onStdoutLine streams long output without holding it all. */
   keepStdout?: boolean;
@@ -58,7 +60,7 @@ export async function run(tool: Tool, args: string[], opts: RunOptions = {}): Pr
 /** Runs a binary at a known path. `name` is used in errors. */
 export async function runPath(name: string, bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
   const timeout = opts.timeoutMs ?? 10 * 60_000;
-  const child = execa(bin, args, { timeout, reject: false, all: false, stripFinalNewline: false, cwd: opts.cwd, cancelSignal: opts.signal, buffer: { stdout: opts.keepStdout !== false, stderr: true } });
+  const child = execa(bin, args, { timeout, forceKillAfterDelay: opts.forceKillAfterDelayMs, reject: false, all: false, stripFinalNewline: false, cwd: opts.cwd, cancelSignal: opts.signal, buffer: { stdout: opts.keepStdout !== false, stderr: true } });
 
   let splitter: LineSplitter | undefined;
   if (opts.onStdoutLine && child.stdout) {

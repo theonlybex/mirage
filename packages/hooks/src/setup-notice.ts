@@ -5,7 +5,8 @@ import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
 import { readSetupState, writeSetupState } from '@wordedits/shared/setup-state';
 
-export type MissingTool = 'ffmpeg' | 'ffprobe' | 'whisper-cli' | 'speech-model';
+/** 'ffmpeg-captions': an FFmpeg is there, but the engine recorded that it can't draw captions (no libass). */
+export type MissingTool = 'ffmpeg' | 'ffmpeg-captions' | 'ffprobe' | 'whisper-cli' | 'speech-model';
 
 const DEFAULT_MODEL = 'ggml-large-v3-turbo-q5_0.bin';
 
@@ -38,28 +39,61 @@ function installerDirs(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, home: 
   return ['/opt/homebrew/bin', '/usr/local/bin', '/home/linuxbrew/.linuxbrew/bin'];
 }
 
+/** Homebrew's complete FFmpeg is keg-only (never on PATH): where the engine looks for it after PATH (packages/sidecars/src/locate.ts). Windows has none. */
+export function kegDirsFor(platform: NodeJS.Platform): string[] {
+  if (platform === 'win32') return [];
+  return ['/opt/homebrew/opt/ffmpeg-full/bin', '/usr/local/opt/ffmpeg-full/bin', '/home/linuxbrew/.linuxbrew/opt/ffmpeg-full/bin'];
+}
+
 /**
- * Whether `tool` is found, as an executable file, as the engine finds it: only in `override` when that is set, else on PATH, then `extra`.
+ * Every executable file named `tool`, as the engine finds it, in order: only in `override` when that is set, else on PATH, then `extra`.
+ * The paths are the folder entries joined to the name, not resolved, as the engine stores them in setup.json.
  * (FFmpeg is not looked for in ffmpeg-static: the plugin doesn't ship it.)
  */
-function found(tool: string, o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform }, override: string | undefined, extra: string[]): boolean {
+function findAll(tool: string, o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform }, override: string | undefined, extra: string[]): string[] {
   const p = o.platform === 'win32' ? path.win32 : path.posix;
   const name = o.platform === 'win32' ? `${tool}.exe` : tool;
   const dirs = override ? [override] : [...(o.env.PATH ?? '').split(p.delimiter).filter(Boolean), ...extra];
-  return dirs.some((dir) => isExecutable(p.join(dir, name), o.platform));
+  const files: string[] = [];
+  for (const dir of dirs) {
+    const file = p.join(dir, name);
+    if (!files.includes(file) && isExecutable(file, o.platform)) files.push(file);
+  }
+  return files;
+}
+
+/**
+ * Whether the ffmpeg the engine would use is recorded (in setup.json, by the engine, which asked it with `-filters`) as unable to
+ * draw captions: the record must be of the very file found, same path and same mtime (`statSync` follows symlinks, as the engine's
+ * `stat` does). Only a lone ffmpeg is flagged: with another one around (say ffmpeg-full just installed in its keg folder) the engine
+ * may choose differently and the record is no proof, so it stays quiet until the engine has asked again. Never starts a process.
+ */
+function lacksCaptions(ffmpegs: string[], dataDir: string | undefined): boolean {
+  if (!dataDir || ffmpegs.length !== 1) return false;
+  const rec = readSetupState(dataDir).ffmpeg;
+  if (!rec || rec.captions || rec.path !== ffmpegs[0]) return false;
+  try {
+    return statSync(rec.path).mtimeMs === rec.mtimeMs;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Which of the tools Mirage needs are missing, in the order the engine needs them. `env`, `platform` and `home` are
- * arguments so tests control them; `whisperDirs` replaces the installers' folders where whisper-cli is also looked for.
+ * arguments so tests control them; `whisperDirs` replaces the installers' folders where whisper-cli is also looked for,
+ * `kegDirs` the folders of Homebrew's ffmpeg-full, and `dataDir` is the plugin's data folder, where the engine's record of
+ * whether the FFmpeg can draw captions is read (without it, no FFmpeg is called captions-less).
  */
-export function missingTools(o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string; whisperDirs?: string[] }): MissingTool[] {
+export function missingTools(o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platform; home: string; whisperDirs?: string[]; kegDirs?: string[]; dataDir?: string }): MissingTool[] {
   const p = o.platform === 'win32' ? path.win32 : path.posix;
   const missing: MissingTool[] = [];
-  for (const tool of ['ffmpeg', 'ffprobe'] as const) {
-    if (!found(tool, o, o.env.WORDEDITS_FFMPEG_DIR, [])) missing.push(tool);
-  }
-  if (!found('whisper-cli', o, o.env.WORDEDITS_WHISPER_DIR, o.whisperDirs ?? installerDirs(o.env, o.platform, o.home))) missing.push('whisper-cli');
+  const keg = o.kegDirs ?? kegDirsFor(o.platform);
+  const ffmpegs = findAll('ffmpeg', o, o.env.WORDEDITS_FFMPEG_DIR, keg);
+  if (ffmpegs.length === 0) missing.push('ffmpeg');
+  else if (lacksCaptions(ffmpegs, o.dataDir)) missing.push('ffmpeg-captions');
+  if (findAll('ffprobe', o, o.env.WORDEDITS_FFMPEG_DIR, keg).length === 0) missing.push('ffprobe');
+  if (findAll('whisper-cli', o, o.env.WORDEDITS_WHISPER_DIR, o.whisperDirs ?? installerDirs(o.env, o.platform, o.home)).length === 0) missing.push('whisper-cli');
   const model = o.env.WORDEDITS_WHISPER_MODEL || p.join(o.home, '.local', 'share', 'whisper-cpp', 'models', DEFAULT_MODEL);
   if (!isFile(model)) missing.push('speech-model');
   return missing;
@@ -67,7 +101,8 @@ export function missingTools(o: { env: NodeJS.ProcessEnv; platform: NodeJS.Platf
 
 /** The plain names of what is missing, and whether the joined list has several items ("whisper.cpp with its speech model" is one). */
 function describeMissing(missing: MissingTool[]): { list: string; several: boolean } {
-  const ffmpeg = missing.includes('ffmpeg') ? 'FFmpeg' : missing.includes('ffprobe') ? 'FFmpeg (ffprobe)' : null;
+  // The complete build brings ffprobe too, so it covers a missing ffprobe in one name.
+  const ffmpeg = missing.includes('ffmpeg') ? 'FFmpeg' : missing.includes('ffmpeg-captions') ? 'FFmpeg with caption support' : missing.includes('ffprobe') ? 'FFmpeg (ffprobe)' : null;
   const whisper = missing.includes('whisper-cli');
   const model = missing.includes('speech-model');
   const names: string[] = [];

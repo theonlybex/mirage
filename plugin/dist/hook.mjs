@@ -1408,10 +1408,10 @@ var require_which = __commonJS({
       if (!opt)
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
-      const found2 = [];
+      const found = [];
       const step = (i2) => new Promise((resolve12, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found2.length ? resolve12(found2) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve12(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path8.join(pathPart, cmd);
@@ -1425,7 +1425,7 @@ var require_which = __commonJS({
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
-              found2.push(p + ext);
+              found.push(p + ext);
             else
               return resolve12(p + ext);
           }
@@ -1437,7 +1437,7 @@ var require_which = __commonJS({
     var whichSync = (cmd, opt) => {
       opt = opt || {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
-      const found2 = [];
+      const found = [];
       for (let i2 = 0; i2 < pathEnv.length; i2++) {
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
@@ -1449,7 +1449,7 @@ var require_which = __commonJS({
             const is = isexe.sync(cur, { pathExt: pathExtExe });
             if (is) {
               if (opt.all)
-                found2.push(cur);
+                found.push(cur);
               else
                 return cur;
             }
@@ -1457,8 +1457,8 @@ var require_which = __commonJS({
           }
         }
       }
-      if (opt.all && found2.length)
-        return found2;
+      if (opt.all && found.length)
+        return found;
       if (opt.nothrow)
         return null;
       throw getNotFoundError(cmd);
@@ -8543,7 +8543,7 @@ async function run(tool, args, opts = {}) {
 }
 async function runPath(name, bin, args, opts = {}) {
   const timeout = opts.timeoutMs ?? 10 * 6e4;
-  const child = execa(bin, args, { timeout, reject: false, all: false, stripFinalNewline: false, cwd: opts.cwd, cancelSignal: opts.signal, buffer: { stdout: opts.keepStdout !== false, stderr: true } });
+  const child = execa(bin, args, { timeout, forceKillAfterDelay: opts.forceKillAfterDelayMs, reject: false, all: false, stripFinalNewline: false, cwd: opts.cwd, cancelSignal: opts.signal, buffer: { stdout: opts.keepStdout !== false, stderr: true } });
   let splitter;
   if (opts.onStdoutLine && child.stdout) {
     splitter = createLineSplitter(opts.onStdoutLine);
@@ -8588,7 +8588,7 @@ var init_run = __esm({
 import { access, constants as constants5, stat } from "node:fs/promises";
 import { delimiter, dirname as dirname2, join as join3 } from "node:path";
 function installHint(tool) {
-  return `Install FFmpeg (macOS: brew install ffmpeg; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
+  return `Install FFmpeg (macOS: brew install ffmpeg-full; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
 }
 async function exists(p) {
   try {
@@ -8625,23 +8625,23 @@ async function ffmpegCandidates() {
     return await exists(p) ? [p] : overrideMissing("ffmpeg", override);
   }
   const dirs = [...(process.env.PATH ?? "").split(delimiter).filter(Boolean), ...process.platform === "win32" ? [] : kegDirs];
-  const found2 = [];
+  const found = [];
   for (const dir of dirs) {
     const p = join3(dir, exe("ffmpeg"));
-    if (!found2.includes(p) && await exists(p)) found2.push(p);
+    if (!found.includes(p) && await exists(p)) found.push(p);
   }
-  if (found2.length === 0 && useStatic) {
+  if (found.length === 0 && useStatic) {
     const bundled = await fromStaticPackage("ffmpeg");
-    if (bundled && await exists(bundled)) found2.push(bundled);
+    if (bundled && await exists(bundled)) found.push(bundled);
   }
-  return found2;
+  return found;
 }
 async function listsAssFilter(path8) {
   try {
-    const { stdout } = await runPath("ffmpeg", path8, ["-hide_banner", "-filters"], { timeoutMs: captionsTimeoutMs });
+    const { stdout } = await runPath("ffmpeg", path8, ["-hide_banner", "-filters"], { timeoutMs: captionsTimeoutMs, forceKillAfterDelayMs: CAPTIONS_KILL_AFTER_MS });
     return /^\s*\S+\s+ass\s/m.test(stdout);
   } catch {
-    return false;
+    return null;
   }
 }
 async function resolveFfmpeg() {
@@ -8655,21 +8655,24 @@ async function resolveFfmpeg() {
     const mtimeMs = (await stat(path8)).mtimeMs;
     const key = `${path8}\0${mtimeMs}`;
     let check2 = captionChecks.get(key);
+    const ran = !check2;
     if (!check2) {
-      asked = true;
       check2 = listsAssFilter(path8);
       captionChecks.set(key, check2);
     }
-    const captions = await check2;
-    if (captions) return remembered({ path: path8, captions, asked }, mtimeMs);
-    first ??= { path: path8, captions, asked: false };
+    const result2 = await check2;
+    if (result2 === null && captionChecks.get(key) === check2) captionChecks.delete(key);
+    if (ran && result2 !== null) asked = true;
+    const captions = result2 === true;
+    if (captions) return remembered({ path: path8, captions, record: asked }, mtimeMs);
+    first ??= { path: path8, captions, record: result2 !== null, mtimeMs };
   }
   const chosen = first;
-  return remembered({ ...chosen, asked }, (await stat(chosen.path)).mtimeMs);
+  return remembered({ path: chosen.path, captions: chosen.captions, record: asked && chosen.record }, chosen.mtimeMs);
 }
 function remembered(r, mtimeMs) {
   const dataDir = process.env.MIRAGE_PLUGIN_DATA;
-  if (r.asked && dataDir) writeSetupState(dataDir, { ffmpeg: { path: r.path, mtimeMs, captions: r.captions } });
+  if (r.record && dataDir) writeSetupState(dataDir, { ffmpeg: { path: r.path, mtimeMs, captions: r.captions } });
   return r;
 }
 function captionsHint(platform2 = process.platform) {
@@ -8703,7 +8706,7 @@ async function locate(tool) {
     installHint(tool)
   );
 }
-var KEG_DIRS, CAPTIONS_TIMEOUT_MS, kegDirs, captionsTimeoutMs, useStatic, captionChecks, exe;
+var KEG_DIRS, CAPTIONS_TIMEOUT_MS, kegDirs, captionsTimeoutMs, useStatic, captionChecks, exe, CAPTIONS_KILL_AFTER_MS;
 var init_locate = __esm({
   "packages/sidecars/src/locate.ts"() {
     "use strict";
@@ -8717,6 +8720,7 @@ var init_locate = __esm({
     useStatic = true;
     captionChecks = /* @__PURE__ */ new Map();
     exe = (tool) => process.platform === "win32" ? `${tool}.exe` : tool;
+    CAPTIONS_KILL_AFTER_MS = 500;
   }
 });
 
@@ -32549,7 +32553,7 @@ var init_render_episode = __esm({
     filterValue = (v) => v.replace(/[\\':]/g, "\\$&").replace(/[\\'[\],;]/g, "\\$&");
     episodeDir = (project, n2) => join10(resolve5(project), "episodes", String(n2));
     noEpisode = (n2) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json does not exist`, "Ask Claude to write the episode timeline first.");
-    wrongNumber = (n2, found2) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json says it is episode ${found2}`, `Set "number" to ${n2} in episodes/${n2}/episode.json.`);
+    wrongNumber = (n2, found) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json says it is episode ${found}`, `Set "number" to ${n2} in episodes/${n2}/episode.json.`);
     COMMAND = { rough: "cut", guide: "guide", final: "render" };
   }
 });
@@ -34275,25 +34279,46 @@ function installerDirs(env, platform2, home) {
   }
   return ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin"];
 }
-function found(tool, o2, override, extra) {
+function kegDirsFor(platform2) {
+  if (platform2 === "win32") return [];
+  return ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin", "/home/linuxbrew/.linuxbrew/opt/ffmpeg-full/bin"];
+}
+function findAll(tool, o2, override, extra) {
   const p = o2.platform === "win32" ? path.win32 : path.posix;
   const name = o2.platform === "win32" ? `${tool}.exe` : tool;
   const dirs = override ? [override] : [...(o2.env.PATH ?? "").split(p.delimiter).filter(Boolean), ...extra];
-  return dirs.some((dir) => isExecutable(p.join(dir, name), o2.platform));
+  const files = [];
+  for (const dir of dirs) {
+    const file2 = p.join(dir, name);
+    if (!files.includes(file2) && isExecutable(file2, o2.platform)) files.push(file2);
+  }
+  return files;
+}
+function lacksCaptions(ffmpegs, dataDir) {
+  if (!dataDir || ffmpegs.length !== 1) return false;
+  const rec = readSetupState(dataDir).ffmpeg;
+  if (!rec || rec.captions || rec.path !== ffmpegs[0]) return false;
+  try {
+    return statSync(rec.path).mtimeMs === rec.mtimeMs;
+  } catch {
+    return false;
+  }
 }
 function missingTools(o2) {
   const p = o2.platform === "win32" ? path.win32 : path.posix;
   const missing = [];
-  for (const tool of ["ffmpeg", "ffprobe"]) {
-    if (!found(tool, o2, o2.env.WORDEDITS_FFMPEG_DIR, [])) missing.push(tool);
-  }
-  if (!found("whisper-cli", o2, o2.env.WORDEDITS_WHISPER_DIR, o2.whisperDirs ?? installerDirs(o2.env, o2.platform, o2.home))) missing.push("whisper-cli");
+  const keg = o2.kegDirs ?? kegDirsFor(o2.platform);
+  const ffmpegs = findAll("ffmpeg", o2, o2.env.WORDEDITS_FFMPEG_DIR, keg);
+  if (ffmpegs.length === 0) missing.push("ffmpeg");
+  else if (lacksCaptions(ffmpegs, o2.dataDir)) missing.push("ffmpeg-captions");
+  if (findAll("ffprobe", o2, o2.env.WORDEDITS_FFMPEG_DIR, keg).length === 0) missing.push("ffprobe");
+  if (findAll("whisper-cli", o2, o2.env.WORDEDITS_WHISPER_DIR, o2.whisperDirs ?? installerDirs(o2.env, o2.platform, o2.home)).length === 0) missing.push("whisper-cli");
   const model = o2.env.WORDEDITS_WHISPER_MODEL || p.join(o2.home, ".local", "share", "whisper-cpp", "models", DEFAULT_MODEL);
   if (!isFile(model)) missing.push("speech-model");
   return missing;
 }
 function describeMissing(missing) {
-  const ffmpeg = missing.includes("ffmpeg") ? "FFmpeg" : missing.includes("ffprobe") ? "FFmpeg (ffprobe)" : null;
+  const ffmpeg = missing.includes("ffmpeg") ? "FFmpeg" : missing.includes("ffmpeg-captions") ? "FFmpeg with caption support" : missing.includes("ffprobe") ? "FFmpeg (ffprobe)" : null;
   const whisper = missing.includes("whisper-cli");
   const model = missing.includes("speech-model");
   const names = [];
@@ -34353,7 +34378,7 @@ function sessionNotice(inProject) {
     version: pluginVersion(),
     inProject,
     now: /* @__PURE__ */ new Date(),
-    missing: missingTools({ env: process.env, platform: process.platform, home: homedir3() })
+    missing: missingTools({ env: process.env, platform: process.platform, home: homedir3(), dataDir: pluginData })
   });
 }
 async function main() {

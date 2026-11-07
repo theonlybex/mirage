@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readSetupState } from '@wordedits/shared/setup-state';
-import { captionsHint, ffmpegCaptions, locate, _resetLocateCache, _setCaptionsCheck } from './locate.js';
+import { captionsHint, ffmpegCaptions, installHint, locate, _resetLocateCache, _setCaptionsCheck } from './locate.js';
 import { SidecarError } from './errors.js';
 
 const saved = { path: process.env.PATH, dir: process.env.WORDEDITS_FFMPEG_DIR, data: process.env.MIRAGE_PLUGIN_DATA };
@@ -40,6 +40,16 @@ describe('locate', () => {
       code: 'NOT_FOUND',
       hint: expect.stringContaining('WORDEDITS_FFMPEG_DIR'),
     });
+  });
+});
+
+describe('installHint', () => {
+  it('names the complete Homebrew build for macOS, and the folder override', () => {
+    const hint = installHint('ffmpeg');
+    expect(hint).toContain('macOS: brew install ffmpeg-full;');
+    expect(hint).not.toMatch(/brew install ffmpeg(?!-full)/);
+    expect(hint).toContain('Windows: winget install ffmpeg');
+    expect(hint).toContain(`WORDEDITS_FFMPEG_DIR to a folder containing ${process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'}`);
   });
 });
 
@@ -125,6 +135,49 @@ sh('ffmpegCaptions', () => {
     const t0 = Date.now();
     expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(hang, 'ffmpeg') });
     expect(Date.now() - t0).toBeLessThan(5000);
+  });
+
+  it('does not remember a check that timed out: it returns no captions now, asks again next time, and writes no record', async () => {
+    const hang = await fake('hang', 'exec /bin/sleep 20');
+    process.env.PATH = hang;
+    process.env.MIRAGE_PLUGIN_DATA = join(root, 'data');
+    _setCaptionsCheck({ timeoutMs: 300 });
+    expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(hang, 'ffmpeg') });
+    expect(await runs(hang)).toBe(1);
+    expect(readSetupState(join(root, 'data')).ffmpeg).toBeUndefined();
+    expect(await ffmpegCaptions()).toMatchObject({ ok: false });
+    expect(await runs(hang)).toBe(2);
+    // a later healthy run is cached and recorded
+    await writeFile(join(hang, 'ffmpeg'), `#!/bin/sh\necho run >> "${hang}/runs"\n${withAss}\n`);
+    expect(await ffmpegCaptions()).toEqual({ ok: true, path: join(hang, 'ffmpeg') });
+    expect(readSetupState(join(root, 'data')).ffmpeg).toMatchObject({ path: join(hang, 'ffmpeg'), captions: true });
+  });
+
+  it('does not remember an FFmpeg that could not be started either', async () => {
+    const dir = await fake('nostart', withAss);
+    await writeFile(join(dir, 'ffmpeg'), 'not a program\n');
+    await chmod(join(dir, 'ffmpeg'), 0o755);
+    process.env.PATH = dir;
+    process.env.MIRAGE_PLUGIN_DATA = join(root, 'data');
+    expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(dir, 'ffmpeg') });
+    expect(readSetupState(join(root, 'data')).ffmpeg).toBeUndefined();
+  });
+
+  it('kills a check that ignores SIGTERM soon after the timeout', async () => {
+    const stubborn = await fake('stubborn', "trap '' TERM\nwhile :; do :; done");
+    process.env.PATH = stubborn;
+    _setCaptionsCheck({ timeoutMs: 300 });
+    const t0 = Date.now();
+    expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(stubborn, 'ffmpeg') });
+    expect(Date.now() - t0).toBeLessThan(3000);
+  });
+
+  it('records a check that ran and listed no ass filter', async () => {
+    const plain = await fake('plain', withoutAss);
+    process.env.PATH = plain;
+    process.env.MIRAGE_PLUGIN_DATA = join(root, 'data');
+    await ffmpegCaptions();
+    expect(readSetupState(join(root, 'data')).ffmpeg).toMatchObject({ path: join(plain, 'ffmpeg'), captions: false });
   });
 
   it('counts an FFmpeg that exits 1 as unable to draw captions, and moves on to the keg', async () => {

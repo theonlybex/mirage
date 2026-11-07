@@ -57,7 +57,7 @@ function sessionNotice(inProject: boolean): string | null {
     version: pluginVersion(),
     inProject,
     now: new Date(),
-    missing: missingTools({ env: process.env, platform: process.platform, home: homedir() }),
+    missing: missingTools({ env: process.env, platform: process.platform, home: homedir(), dataDir: pluginData }),
   });
 }
 

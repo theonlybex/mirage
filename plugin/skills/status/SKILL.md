@@ -18,6 +18,7 @@ Call `mcp__plugin_mirage_engine__status` (no input) and explain what it says in 
 - `Viewer: running at <url>`: offer to open it (in the Claude desktop app, the browser pane; in the terminal, `open "<url>"` with Bash). `Viewer: not running`: it starts the next time they open Claude Code in this folder.
 - The tool lines:
   - `ffmpeg: missing` or `ffprobe: missing`: Mirage can't read or render video. Suggest `/mirage:setup`.
+  - `ffmpeg: can't draw captions — <path> was built without libass. <hint>`: Mirage can read video, but it can't draw captions or text, so it can't render. Say so in plain words, give the hint's install (on a Mac, Homebrew's complete build, `brew install ffmpeg-full`), and suggest `/mirage:setup`.
   - `transcriber: missing — …`: Mirage can't hear the footage. The rest of the line says which part of speech recognition is missing: `whisper-cli` (the whisper.cpp program), the speech model file, or both. Say which, in plain words, and suggest `/mirage:setup` (its step 4 installs them).
   - `Node: … is too old`: Mirage needs Node 22 or newer. Suggest `/mirage:setup`.
   - `tts: ok`: AI narration (the Kokoro voice) is ready. `tts: not downloaded yet …`: fine; the first AI narration downloads it (the line says how much). `tts: missing — …`: AI narration can't be set up; say what the line says and suggest `/mirage:setup`.
