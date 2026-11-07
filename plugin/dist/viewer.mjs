@@ -28102,7 +28102,8 @@ function describeZodError(e) {
 function flatIssues(issues) {
   return issues.flatMap((i2) => {
     if (i2.code !== "invalid_union" || !("errors" in i2) || !i2.errors.length) return [i2];
-    const branch = i2.errors.find((b) => !b.some((x) => x.code === "unrecognized_keys" && x.path.length === 0)) ?? i2.errors[0];
+    const unknown2 = (b) => b.reduce((n2, x) => n2 + (x.code === "unrecognized_keys" && x.path.length === 0 ? x.keys.length : 0), 0);
+    const branch = i2.errors.reduce((best, b) => unknown2(b) < unknown2(best) ? b : best);
     return flatIssues(branch.map((x) => ({ ...x, path: [...i2.path, ...x.path] })));
   });
 }
@@ -28408,6 +28409,12 @@ var RECIPES = {
   click: { durationSec: 0.03, peakSec: 2e-3, fadeOutSec: 5e-3, graph: `${noise("white", 59, 0.03)},${band(1500, 5e3)}[n];${curve("if(lt(t,0.001),0,if(lt(t,0.002),(t-0.001)/0.001,exp(-(t-0.002)/0.0012)))", 0.03)}[e];[n][e]amultiply[s]` }
 };
 
+// packages/core/src/mirage/cards.ts
+function cardLabel(item) {
+  const text = item.card.text.trim().split("\n")[0].trim();
+  return text || (item.card.image ?? "").split(/[\\/]/).pop();
+}
+
 // packages/core/src/mirage/render-episode.ts
 var episodeDir = (project2, n2) => join6(resolve(project2), "episodes", String(n2));
 var noEpisode = (n2) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json does not exist`, "Ask Claude to write the episode timeline first.");
@@ -28423,12 +28430,6 @@ async function lockEpisode(project2, n2, command) {
 var NARRATION_GAPS = { lead: 0.3, sentence: 0.3, line: 0.8 };
 var MARGIN_SEC = 0.03;
 var MIN_PAUSE = NARRATION_GAPS.sentence + 2 * MARGIN_SEC;
-
-// packages/core/src/mirage/cards.ts
-function cardLabel(item) {
-  const text = item.card.text.trim().split("\n")[0].trim();
-  return text || (item.card.image ?? "").split(/[\\/]/).pop();
-}
 
 // packages/core/src/mirage/versions.ts
 import { randomBytes, randomUUID as randomUUID3 } from "node:crypto";

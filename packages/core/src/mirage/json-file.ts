@@ -30,13 +30,15 @@ type Issue = ZodError['issues'][number];
 
 /**
  * The issues with each failed union (a timeline item is a clip item or a card) replaced by those of the branch the
- * value was most likely meant for: the first whose keys all fit it (no unknown key at its top), else the first. Its
- * "Invalid input" says nothing; the branch's issues name the field.
+ * value was most likely meant for: the one with the fewest unknown keys at its top (a card with a misspelled key has
+ * one; as a clip item it has that and "card"), the first of those that tie. Its "Invalid input" says nothing; the
+ * branch's issues name the field.
  */
 function flatIssues(issues: readonly Issue[]): Issue[] {
   return issues.flatMap((i) => {
     if (i.code !== 'invalid_union' || !('errors' in i) || !i.errors.length) return [i];
-    const branch = i.errors.find((b) => !b.some((x) => x.code === 'unrecognized_keys' && x.path.length === 0)) ?? i.errors[0]!;
+    const unknown = (b: readonly Issue[]) => b.reduce((n, x) => n + (x.code === 'unrecognized_keys' && x.path.length === 0 ? x.keys.length : 0), 0);
+    const branch = i.errors.reduce((best, b) => (unknown(b) < unknown(best) ? b : best));
     return flatIssues(branch.map((x) => ({ ...x, path: [...i.path, ...x.path] })));
   });
 }

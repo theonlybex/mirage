@@ -37239,7 +37239,8 @@ function describeZodError(e) {
 function flatIssues(issues) {
   return issues.flatMap((i2) => {
     if (i2.code !== "invalid_union" || !("errors" in i2) || !i2.errors.length) return [i2];
-    const branch = i2.errors.find((b) => !b.some((x) => x.code === "unrecognized_keys" && x.path.length === 0)) ?? i2.errors[0];
+    const unknown2 = (b) => b.reduce((n2, x) => n2 + (x.code === "unrecognized_keys" && x.path.length === 0 ? x.keys.length : 0), 0);
+    const branch = i2.errors.reduce((best, b) => unknown2(b) < unknown2(best) ? b : best);
     return flatIssues(branch.map((x) => ({ ...x, path: [...i2.path, ...x.path] })));
   });
 }
@@ -38306,11 +38307,14 @@ import { dirname as dirname4, join as join9, resolve as resolve3 } from "node:pa
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var CAPTION_FONT = "Montserrat ExtraBold";
 var CAPTION_FONT_FILE = "Montserrat-ExtraBold.ttf";
+var MONO_FONT = "JetBrains Mono";
+var MONO_FONT_FILE = "JetBrainsMono-Regular.ttf";
 var SOURCE_LAYOUT = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
 function bundledFontsDir(from = import.meta.url) {
   const here = dirname4(from.startsWith("file:") ? fileURLToPath3(from) : resolve3(from));
   const dir = SOURCE_LAYOUT.test(here) ? resolve3(here, "..", "..", "..", "..", "plugin", "fonts", "files") : resolve3(here, "..", "fonts", "files");
   if (!existsSync5(join9(dir, CAPTION_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${dir}`, "Reinstall the Mirage plugin.");
+  if (!existsSync5(join9(dir, MONO_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's card font is missing from ${dir}`, "Reinstall the Mirage plugin.");
   return dir;
 }
 
@@ -38507,11 +38511,19 @@ function buildAss(o2) {
   ];
   if (o2.captionLines?.style === "pop") styles.push(["Pop", px(84), WHITE, BLACK, BLACK, 0, 1, px(7), 2, captionMv(px(120)), CAPTION_FONT]);
   if (o2.captionLines?.style === "karaoke") styles.push(["Karaoke", px(64), WHITE, BLACK, BLACK, 0, 1, px(5), 2, captionMv(px(120)), CAPTION_FONT]);
+  const cards = (o2.cards ?? []).filter((c3) => c3.card.text.trim());
+  const cardStyle = (c3) => c3.style === "mono" ? "CardMono" : "CardBold";
+  if (cards.some((c3) => cardStyle(c3.card) === "CardMono")) styles.push(["CardMono", px(72), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, MONO_FONT]);
+  if (cards.some((c3) => cardStyle(c3.card) === "CardBold")) styles.push(["CardBold", px(110), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, CAPTION_FONT, Math.round(o2.width * 0.1)]);
   const styleLines = styles.map(
-    ([name, size, primary, outline, back, bold2, border, outw, align, mv, face = font]) => `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold2},0,0,0,100,100,0,0,${border},${outw},0,${align},${side},${side},${mv},1`
+    ([name, size, primary, outline, back, bold2, border, outw, align, mv, face = font, margin = side]) => `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold2},0,0,0,100,100,0,0,${border},${outw},0,${align},${margin},${margin},${mv},1`
   );
   const events = [];
   const ev = (layer, start, end, style, text) => events.push(`Dialogue: ${layer},${assTime(start)},${assTime(end)},${style},,0,0,0,,${text}`);
+  for (const { start, end, card } of cards) {
+    const text = card.text.trim().split(/\r?\n/).map(draw).join("\\N");
+    ev(0, start, end, cardStyle(card), `{\\fad(150,150)${card.style === "image" ? `\\bord${px(8)}` : ""}}${text}`);
+  }
   for (const c3 of o2.captions) ev(2, c3.start, c3.end, "Caption", draw(c3.text));
   if (o2.captionLines) {
     const color = assColor(o2.highlightColor ?? HIGHLIGHT_COLOR);
@@ -38584,7 +38596,7 @@ function buildAss(o2) {
 import { randomUUID as randomUUID5 } from "node:crypto";
 import { existsSync as existsSync7 } from "node:fs";
 import { mkdir as mkdir4, rename as rename4, rm as rm7, writeFile as writeFile4 } from "node:fs/promises";
-import { join as join11, resolve as resolve4 } from "node:path";
+import { join as join11, resolve as resolve5 } from "node:path";
 
 // packages/core/src/mirage/sfx.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
@@ -38750,6 +38762,56 @@ var SFX_PEAK_CEILING_DB = -1;
 function sfxVolumeDb(level, targetLufs) {
   if (!(level.momentaryMaxLufs > SILENT_LUFS) || !Number.isFinite(level.peakDb)) return 0;
   return Math.min(targetLufs - level.momentaryMaxLufs, SFX_PEAK_CEILING_DB - level.peakDb);
+}
+
+// packages/core/src/mirage/cards.ts
+import { closeSync, openSync, readSync, statSync as statSync3 } from "node:fs";
+import { resolve as resolve4 } from "node:path";
+function cardLabel(item) {
+  const text = item.card.text.trim().split("\n")[0].trim();
+  return text || (item.card.image ?? "").split(/[\\/]/).pop();
+}
+var CARD_IMAGE_HINT = "Put the picture in the project folder, or change the card's image.";
+var PNG = [137, 80, 78, 71, 13, 10, 26, 10];
+var JPEG = [255, 216, 255];
+function imageFormat(file2) {
+  const head = Buffer.alloc(PNG.length);
+  let n2 = 0;
+  try {
+    const fd = openSync(file2, "r");
+    try {
+      n2 = readSync(fd, head, 0, head.length, 0);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+  const starts = (sig) => n2 >= sig.length && sig.every((b, i2) => head[i2] === b);
+  return starts(PNG) ? "png" : starts(JPEG) ? "jpeg" : null;
+}
+var cardImageFile = (project2, item) => resolve4(project2, item.card.image);
+function cardImagesFor(project2, ep) {
+  const out = /* @__PURE__ */ new Map();
+  for (const item of ep.items) {
+    if (!isCard(item) || item.card.style !== "image") continue;
+    const file2 = cardImageFile(project2, item);
+    const isFile2 = (() => {
+      try {
+        return statSync3(file2).isFile();
+      } catch {
+        return false;
+      }
+    })();
+    if (!isFile2) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} is missing`, CARD_IMAGE_HINT);
+    const format2 = imageFormat(file2);
+    if (!format2) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
+    out.set(item.id, { path: file2, format: format2 });
+  }
+  return out;
+}
+function checkCardImages(project2, ep) {
+  cardImagesFor(project2, ep);
 }
 
 // packages/core/src/mirage/slots.ts
@@ -39387,8 +39449,15 @@ function itemChunkArgs(laid, o2, sources, output2) {
     const dur = ffNum(l.frames / o2.fps);
     const silence = `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`;
     if (isCard(item)) {
-      inputs.push("-f", "lavfi", "-i", `color=c=black:s=${o2.width}x${o2.height}:r=${ffNum(o2.fps)}:d=${ffNum((l.frames + 1) / o2.fps)}`);
-      chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
+      if (item.card.style === "image") {
+        const pic = o2.cardImages?.get(item.id);
+        if (!pic) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} was not checked before rendering`, "Run check, then render again.");
+        inputs.push("-f", `${pic.format}_pipe`, "-framerate", ffNum(o2.fps), "-i", pic.path);
+        chains.push(`[${k}:v]${framed("fill", "", o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+      } else {
+        inputs.push("-f", "lavfi", "-i", `color=c=black:s=${o2.width}x${o2.height}:r=${ffNum(o2.fps)}:d=${ffNum((l.frames + 1) / o2.fps)}`);
+        chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
+      }
       labels.push(`[v${k}][a${k}]`);
       return;
     }
@@ -39581,7 +39650,7 @@ function episodeFinalArgs(o2) {
   }
   return [...inputs, "-filter_complex", chains.join(";"), "-map", "[vout]", "-map", "[aout]", ...encodeArgs(o2), "-t", D, o2.output];
 }
-var episodeDir = (project2, n2) => join11(resolve4(project2), "episodes", String(n2));
+var episodeDir = (project2, n2) => join11(resolve5(project2), "episodes", String(n2));
 var noEpisode = (n2) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json does not exist`, "Ask Claude to write the episode timeline first.");
 var wrongNumber = (n2, found) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json says it is episode ${found}`, `Set "number" to ${n2} in episodes/${n2}/episode.json.`);
 async function loadEpisode(project2, n2) {
@@ -39634,7 +39703,7 @@ async function lockEpisode(project2, n2, command) {
 }
 var COMMAND = { rough: "cut", guide: "guide", final: "render" };
 async function renderEpisode(o2) {
-  const lock = await lockEpisode(resolve4(o2.project), o2.episode, COMMAND[o2.mode]);
+  const lock = await lockEpisode(resolve5(o2.project), o2.episode, COMMAND[o2.mode]);
   try {
     o2.signal?.throwIfAborted();
     await o2.beforeRender?.();
@@ -39646,11 +39715,12 @@ async function renderEpisode(o2) {
   }
 }
 async function renderLocked(o2) {
-  const project2 = resolve4(o2.project);
+  const project2 = resolve5(o2.project);
   const ep = await loadEpisode(project2, o2.episode);
   const catalog = await loadCatalog(project2);
-  if (catalog.clips.length === 0) throw new MirageError("NO_CATALOG", "The project has no catalogued clips", "Run: pnpm mirage ingest <project> <clips folder>");
+  if (catalog.clips.length === 0 && !ep.items.every(isCard)) throw new MirageError("NO_CATALOG", "The project has no catalogued clips", "Run: pnpm mirage ingest <project> <clips folder>");
   const sources = sourcesFor(ep, catalog);
+  const cardImages = cardImagesFor(project2, ep);
   if (o2.mode === "final" && cutChanged(ep)) throw cutChangedError();
   const laid = layoutTimeline(ep);
   const D = laid[laid.length - 1].end;
@@ -39658,7 +39728,7 @@ async function renderLocked(o2) {
   const final = o2.mode === "final";
   const [W, H] = final ? [ep.output.width, ep.output.height] : previewSize(ep.output.width, ep.output.height);
   const dir = episodeDir(project2, o2.episode);
-  const musicDir = resolve4(o2.musicDir ?? join11(project2, "music"));
+  const musicDir = resolve5(o2.musicDir ?? join11(project2, "music"));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
   const sfxCues = o2.mode === "guide" ? [] : ep.sfx ?? [];
@@ -39666,7 +39736,7 @@ async function renderLocked(o2) {
   const voTranscripts = final && ep.voiceover ? await loadVoiceoverTranscripts(project2, ep) : null;
   const recordings = final ? voiceRecordings(ep) : [];
   for (const rec of recordings) {
-    const abs = resolve4(project2, rec);
+    const abs = resolve5(project2, rec);
     if (!existsSync7(abs)) throw new MirageError("BAD_ITEM", `voice-over recording ${abs} is missing`, "Reconnect the drive or put the recording back, then render again.");
     const was = fittedRecordingSha(ep.voiceover, rec);
     if (was && !(await sha256File(abs)).startsWith(was)) {
@@ -39674,7 +39744,8 @@ async function renderLocked(o2) {
     }
   }
   const style = o2.mode === "guide" ? "off" : ep.captions?.style ?? "phrase";
-  const fontsDir = style === "pop" || style === "karaoke" ? bundledFontsDir() : void 0;
+  const cards = laid.flatMap((l) => isCard(l.item) ? [{ start: l.start, end: l.end, card: l.item.card }] : []);
+  const fontsDir = style === "pop" || style === "karaoke" || cards.length ? bundledFontsDir() : void 0;
   const captions = await o2.tools.ffmpegCaptions?.();
   if (captions && !captions.ok) {
     throw new MirageError("NO_CAPTIONS", `FFmpeg can't draw captions or text: ${captions.path} was built without libass.`, captions.hint);
@@ -39687,12 +39758,13 @@ async function renderLocked(o2) {
   const report = (f) => o2.onProgress?.(Math.min(1, Math.max(0, f)));
   try {
     const sfx = await placeSfx(project2, sfxCues, D, ep.loudnessLufs, o2.tools, work, o2.signal);
-    const chunks = episodeChunks(laid, { width: W, height: H, fps }, sources, join11(work, `chunk-${pad3(0)}.mov`));
+    const shape = { width: W, height: H, fps, cardImages };
+    const chunks = episodeChunks(laid, shape, sources, join11(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i2, chunk] of chunks.entries()) {
       o2.signal?.throwIfAborted();
       const dur = chunk.reduce((s, l) => s + l.frames / fps, 0);
-      await o2.tools.runFfmpeg(itemChunkArgs(chunk, { width: W, height: H, fps }, sources, join11(work, `chunk-${pad3(i2)}.mov`)), {
+      await o2.tools.runFfmpeg(itemChunkArgs(chunk, shape, sources, join11(work, `chunk-${pad3(i2)}.mov`)), {
         expectedDurationSec: dur,
         timeoutMs: chunkTimeoutMs(chunk, fps),
         signal: o2.signal,
@@ -39723,7 +39795,7 @@ async function renderLocked(o2) {
     let voiceRaw;
     if (final && ep.voiceover) {
       const pcm = /* @__PURE__ */ new Map();
-      for (const [i2, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve4(project2, rec), join11(work, `rec-${i2}.f32`), o2.tools, { sampleRate: 48e3, clipTime: true, signal: o2.signal }));
+      for (const [i2, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve5(project2, rec), join11(work, `rec-${i2}.f32`), o2.tools, { sampleRate: 48e3, clipTime: true, signal: o2.signal }));
       const track = buildVoiceTrack({ recording: pcm, defaultRecording: ep.voiceover.recording, sampleRate: 48e3, lines: ep.voiceover.lines, durationSec: D });
       await writeFile4(join11(work, "vo.f32"), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
       voiceRaw = "vo.f32";
@@ -39743,7 +39815,8 @@ async function renderLocked(o2) {
         position: ep.captions?.position,
         highlightColor: ep.captions?.color,
         overlays: ep.overlays,
-        prompts: o2.mode === "guide" ? ep.slots : []
+        prompts: o2.mode === "guide" ? ep.slots : [],
+        cards
       })
     );
     o2.signal?.throwIfAborted();
@@ -39803,16 +39876,16 @@ async function renderLocked(o2) {
 
 // packages/core/src/mirage/voiceover-files.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
-import { existsSync as existsSync8, statSync as statSync3 } from "node:fs";
+import { existsSync as existsSync8, statSync as statSync4 } from "node:fs";
 import { mkdir as mkdir5, rm as rm8 } from "node:fs/promises";
-import { isAbsolute, join as join12, relative, resolve as resolve5 } from "node:path";
+import { isAbsolute, join as join12, relative, resolve as resolve6 } from "node:path";
 var voTranscriptFile = (sha256) => `voiceover.${sha256.slice(0, 16)}.transcript.json`;
 async function fitRecording(o2) {
-  const project2 = resolve5(o2.project);
+  const project2 = resolve6(o2.project);
   const n2 = o2.episode;
-  const rec = resolve5(o2.recording);
+  const rec = resolve6(o2.recording);
   if (!existsSync8(rec)) throw new MirageError("BAD_ITEM", `${rec} does not exist`, "Pass the path of your voice-over recording.");
-  if (statSync3(rec).isDirectory()) throw new MirageError("BAD_INPUT", `${rec} is a folder, not a recording`, "Pass the path of your voice-over recording file.");
+  if (statSync4(rec).isDirectory()) throw new MirageError("BAD_INPUT", `${rec} is a folder, not a recording`, "Pass the path of your voice-over recording file.");
   const lock = await lockEpisode(project2, n2, "vo");
   try {
     o2.signal?.throwIfAborted();
@@ -39898,7 +39971,7 @@ async function checkKeptRecordings(project2, ep, kept, recording, sha) {
   }
   for (const [r, slots] of byRecording) {
     const was = fittedRecordingSha(vo, r);
-    const abs = resolve5(project2, r);
+    const abs = resolve6(project2, r);
     if (!was || r !== recording && !existsSync8(abs)) continue;
     const now = r === recording ? sha : await sha256File(abs);
     if (now.startsWith(was)) continue;
@@ -39917,7 +39990,7 @@ async function checkKeptRecordings(project2, ep, kept, recording, sha) {
 // packages/core/src/mirage/narration.ts
 import { existsSync as existsSync9 } from "node:fs";
 import { readdir as readdir4, rm as rm9, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join13, resolve as resolve6 } from "node:path";
+import { join as join13, resolve as resolve7 } from "node:path";
 var r38 = (n2) => Math.round(n2 * 1e3) / 1e3;
 var NARRATION_GAPS = { lead: 0.3, sentence: 0.3, line: 0.8 };
 var MARGIN_SEC = 0.03;
@@ -40090,7 +40163,7 @@ function narrationTargets(ep, only) {
 }
 async function speakNarration(o2) {
   checkSpeakOptions(o2.voice, o2.speed);
-  const project2 = resolve6(o2.project);
+  const project2 = resolve7(o2.project);
   const n2 = o2.episode;
   const ep = await loadEpisode(project2, n2);
   const targets = narrationTargets(ep, o2.slots);
@@ -40182,46 +40255,6 @@ async function speakNarration(o2) {
 
 // packages/core/src/mirage/check.ts
 import { join as join14, resolve as resolve8 } from "node:path";
-
-// packages/core/src/mirage/cards.ts
-import { closeSync, openSync, readSync, statSync as statSync4 } from "node:fs";
-import { resolve as resolve7 } from "node:path";
-function cardLabel(item) {
-  const text = item.card.text.trim().split("\n")[0].trim();
-  return text || (item.card.image ?? "").split(/[\\/]/).pop();
-}
-var CARD_IMAGE_HINT = "Put the picture in the project folder, or change the card's image.";
-var PNG = [137, 80, 78, 71, 13, 10, 26, 10];
-var JPEG = [255, 216, 255];
-function pngOrJpeg(file2) {
-  const head = Buffer.alloc(PNG.length);
-  const fd = openSync(file2, "r");
-  try {
-    const n2 = readSync(fd, head, 0, head.length, 0);
-    const starts = (sig) => n2 >= sig.length && sig.every((b, i2) => head[i2] === b);
-    return starts(PNG) || starts(JPEG);
-  } finally {
-    closeSync(fd);
-  }
-}
-var cardImageFile = (project2, item) => resolve7(project2, item.card.image);
-function checkCardImages(project2, ep) {
-  for (const item of ep.items) {
-    if (!isCard(item) || item.card.style !== "image") continue;
-    const file2 = cardImageFile(project2, item);
-    const isFile2 = (() => {
-      try {
-        return statSync4(file2).isFile();
-      } catch {
-        return false;
-      }
-    })();
-    if (!isFile2) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} is missing`, CARD_IMAGE_HINT);
-    if (!pngOrJpeg(file2)) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
-  }
-}
-
-// packages/core/src/mirage/check.ts
 var OLD_DEFAULT_GAIN_DB = -18;
 var s12 = (n2) => n2.toFixed(1);
 var s2 = (n2) => n2.toFixed(2);

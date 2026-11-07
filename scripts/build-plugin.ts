@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Builds the generated half of plugin/: the engine, hook and viewer bundles (dist/*.mjs), the viewer page (dist/viewer-ui/),
-// the licence (LICENSE) and the notices of every bundled npm package and of the caption font in fonts/
+// the licence (LICENSE) and the notices of every bundled npm package and of the fonts in fonts/
 // (THIRD_PARTY_NOTICES.txt). The output is the same on every run (no dates, no absolute paths in the banner), so a test can
 // compare a rebuild with what is committed.
 import { readdirSync, readFileSync } from 'node:fs';
@@ -45,7 +45,10 @@ function packageNotice(dir: string): PackageNotice {
 const RULE = '='.repeat(80);
 
 /** The fonts in plugin/fonts/ (written by hand, not built): name and version, licence id, and the licence file beside them. */
-const FONTS = [{ name: 'Montserrat ExtraBold v7.222 (fonts/files/Montserrat-ExtraBold.ttf)', licence: 'OFL-1.1', file: 'OFL.txt' }];
+const FONTS = [
+  { name: 'Montserrat ExtraBold v7.222 (fonts/files/Montserrat-ExtraBold.ttf)', licence: 'OFL-1.1', file: 'OFL.txt' },
+  { name: 'JetBrains Mono Regular v2.304 (fonts/files/JetBrainsMono-Regular.ttf)', licence: 'OFL-1.1', file: 'OFL-JetBrainsMono.txt' },
+];
 
 function fontNotices(): string[] {
   return FONTS.map((f) => [RULE, f.name, `License: ${f.licence}`, '', `${f.file}:\n\n${readFileSync(join(PLUGIN_DIR, 'fonts', f.file), 'utf8').replace(/\r\n/g, '\n').trimEnd()}`].join('\n'));
@@ -74,7 +77,8 @@ export function thirdPartyNotices(inputs: Iterable<string>): string {
     '',
     'The files in dist/ also contain the third-party packages below, each under its own licence. Each is listed with its',
     'version, its licence and the licence text it ships with. The font and icons of the viewer page have their licences in',
-    'dist/viewer-ui/assets/licenses/ as well. The caption font in fonts/ comes last, with its licence (fonts/OFL.txt).',
+    'dist/viewer-ui/assets/licenses/ as well. The fonts in fonts/ come last, each with its licence: the caption font',
+    '(fonts/OFL.txt) and the cards\' monospace (fonts/OFL-JetBrainsMono.txt).',
     '',
     ...notices.map((n) => `${n}\n`),
     ...fontNotices().map((n) => `${n}\n`),

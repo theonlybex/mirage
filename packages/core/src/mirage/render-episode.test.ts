@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
@@ -8,7 +8,8 @@ import { run, SidecarError, wordsFromWhisperJson } from '@wordedits/sidecars';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog, sha256File } from './ingest.js';
-import { bundledFontsDir, CAPTION_FONT_FILE } from './fonts.js';
+import { cardImagesFor } from './cards.js';
+import { bundledFontsDir, CAPTION_FONT_FILE, MONO_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
@@ -120,6 +121,33 @@ describe('itemChunkArgs with cards', () => {
   });
   it('counts no source seconds for a card in the chunk time allowed', () => {
     expect(chunkTimeoutMs(layoutTimeline(ep([{ id: 'k', beat: 'title', card: { style: 'mono', text: 'x', sec: 6 } }])), 30)).toBe(180_000);
+  });
+});
+
+describe('itemChunkArgs with picture cards', () => {
+  const e = ep([
+    { id: 'p', beat: 'title', card: { style: 'image', image: 'pics/a b.jpg', sec: 2 } },
+    { id: 'k', beat: 'title', card: { style: 'mono', text: 'x', sec: 1 } },
+    { id: 'q', beat: 'title', card: { style: 'image', image: 'logo.png', text: 'Hi', sec: 0.5 }, hold: 0.5 },
+  ]);
+  const cardImages = new Map([
+    ['p', { path: '/proj/pics/a b.jpg', format: 'jpeg' as const }],
+    ['q', { path: '/proj/logo.png', format: 'png' as const }],
+  ]);
+  const args = itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30, cardImages }, new Map(), '/w/chunk-000.mov');
+  const graph = args[args.indexOf('-filter_complex') + 1];
+  it('reads the picture once (by what it is, not its name) and holds it, scaled to cover the frame and cropped centred', () => {
+    expect(args.slice(0, 6)).toEqual(['-f', 'jpeg_pipe', '-framerate', '30', '-i', '/proj/pics/a b.jpg']);
+    expect(graph).toContain('[0:v]scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,');
+    expect(args.slice(10, 16)).toEqual(['-f', 'png_pipe', '-framerate', '30', '-i', '/proj/logo.png']);
+    // Hold included.
+    expect(graph).toContain('[2:v]scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=30,setpts=PTS-STARTPTS[v2]');
+  });
+  it('keeps a text card black', () => {
+    expect(args.slice(6, 10)).toEqual(['-f', 'lavfi', '-i', 'color=c=black:s=960x540:r=30:d=1.033333']);
+  });
+  it('refuses a picture card whose picture was not looked at first', () => {
+    expect(() => itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30 }, new Map(), '/w/c.mov')).toThrow(/item p: card image pics\/a b\.jpg/);
   });
 });
 
@@ -1311,5 +1339,157 @@ describe('itemChunkArgs with a move (real ffmpeg)', () => {
     for (const p of c.slice(17)) expect(Math.abs(p.x - (960 + 459.5 * 1.5))).toBeLessThan(0.3);
     expect(c[16].x).toBeGreaterThan(1425);
     expect(c[16].x).toBeLessThan(1640);
+  }, 120_000);
+});
+
+describe('cards (real ffmpeg)', () => {
+  let tools: MediaTools;
+  let project: string;
+  const gen = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+  /** One frame at `t` s of `file` as rgb24 pixels. */
+  const frameAt = async (file: string, t: number) => {
+    const out = join(tmpdir(), `we-frame-${randomUUID()}.rgb`);
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(t), '-i', file, '-frames:v', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', out]);
+    const b = await readFile(out);
+    await rm(out, { force: true });
+    return b;
+  };
+  /** The pixels of a frame's outer rows and columns. */
+  const edges = (b: Buffer, w: number, h: number) => {
+    const px: [number, number, number][] = [];
+    const at = (x: number, y: number) => px.push([b[(y * w + x) * 3]!, b[(y * w + x) * 3 + 1]!, b[(y * w + x) * 3 + 2]!]);
+    for (let x = 0; x < w; x++) (at(x, 0), at(x, h - 1));
+    for (let y = 0; y < h; y++) (at(0, y), at(w - 1, y));
+    return px;
+  };
+  const all = (b: Buffer) => Array.from({ length: b.length / 3 }, (_, i) => [b[i * 3]!, b[i * 3 + 1]!, b[i * 3 + 2]!] as const);
+  const green = ([r, g, b]: readonly number[]) => g! > 100 && r! < 60 && b! < 60;
+  const frames = async (file: string) => Number((await run('ffprobe', ['-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', file])).stdout.trim());
+
+  beforeAll(async () => {
+    tools = { ...(await realMediaTools()), transcribe: async () => ({ words: [], segments: [], speech: [] }) };
+    project = await mkdtemp(join(tmpdir(), "we cards 'q' "));
+    const clips = join(project, 'raw clips');
+    await mkdir(clips, { recursive: true });
+    await mkdir(join(project, 'pics'), { recursive: true });
+    await gen(['-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=300:sample_rate=48000:duration=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', join(clips, 'a-talk.mp4')]);
+    await ingestClips({ project, clipsDir: clips, tools });
+    // Blue, and three pictures that are green where a centred cover crop of a 16:9 frame keeps them, red where it cuts.
+    await gen(['-f', 'lavfi', '-i', 'color=c=0x3080F0:s=800x600', '-frames:v', '1', join(project, 'pics', 'blue.png')]);
+    await gen(['-f', 'lavfi', '-i', 'color=c=0x00C000:s=600x1200,drawbox=y=0:h=360:color=red:t=fill,drawbox=y=840:h=360:color=red:t=fill', '-frames:v', '1', join(project, 'pics', 'portrait.png')]);
+    await gen(['-f', 'lavfi', '-i', 'color=c=0x00C000:s=100x100', '-frames:v', '1', '-q:v', '2', join(project, 'pics', 'tiny.jpg')]);
+    await gen(['-f', 'lavfi', '-i', 'color=c=0x00C000:s=6000x4000,drawbox=y=0:h=200:color=red:t=fill,drawbox=y=3800:h=200:color=red:t=fill', '-frames:v', '1', join(project, 'pics', 'huge.png')]);
+  }, 300_000);
+
+  it('draws mono, bold and picture cards in a 1920 × 1080 episode, at its exact length, in the bundled fonts', async () => {
+    const items = [
+      { id: 'title', beat: 'title', card: { style: 'mono', text: 'Sam\nVlog #3\n11-6-26', sec: 2 } },
+      { id: 'talk', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1 }, audio: 'keep' },
+      { id: 'day', beat: 'title', card: { style: 'bold', text: 'Day 3', sec: 1 } },
+      { id: 'city', beat: 'title', card: { style: 'image', image: 'pics/blue.png', text: 'Tokyo', sec: 1 } },
+      { id: 'end', beat: 'title', card: { style: 'image', image: 'pics/blue.png', sec: 0.5 } },
+    ];
+    const e = ep(items, { number: 1 });
+    await saveEpisode(project, e);
+    const logs: string[] = [];
+    const graphs: string[] = [];
+    const verbose: MediaTools = {
+      ...tools,
+      runFfmpeg: async (args, opts) => {
+        const graph = args[args.indexOf('-filter_complex') + 1] ?? '';
+        if (!graph.includes(']ass=')) return tools.runFfmpeg(args, opts);
+        graphs.push(graph);
+        logs.push((await run('ffmpeg', ['-hide_banner', '-v', 'verbose', '-nostats', '-y', ...args], { cwd: opts?.cwd, timeoutMs: opts?.timeoutMs })).stderr);
+      },
+    };
+    const r = await renderEpisode({ project, episode: 1, mode: 'final', tools: verbose });
+    const p = await tools.probe(r.outputPath);
+    expect([p.width, p.height]).toEqual([1920, 1080]);
+    expect(await frames(r.outputPath)).toBe(Math.round(timelineDuration(e) * 30));
+    expect(Math.abs(p.durationSec - 5.5)).toBeLessThanOrEqual(0.05);
+    // libass loads the monospace from the plugin's folder and picks it, and Montserrat for the bold text.
+    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout];`)).toBe(true);
+    expect(logs[0]).toMatch(loadedFont(bundledFontsDir(), MONO_FONT_FILE));
+    expect(logs[0]).toMatch(/fontselect: \(JetBrains Mono, 400, 0\) -> JetBrainsMono-Regular\b/);
+    expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, 400, 0\) -> Montserrat-ExtraBold\b/);
+    expect(logs[0]).not.toContain('Error opening memory font');
+
+    const W = 1920;
+    const H = 1080;
+    const isBlack = ([r, g, b]: readonly number[]) => Math.max(r!, g!, b!) <= 20;
+    const isBlue = ([r, g, b]: readonly number[]) => Math.abs(r! - 0x30) < 25 && Math.abs(g! - 0x80) < 25 && Math.abs(b! - 0xf0) < 25;
+    for (const t of [1, 3.5]) {
+      // A text card: black at its edges, white text in its middle.
+      const f = await frameAt(r.outputPath, t);
+      expect(edges(f, W, H).every(isBlack), `black edges at ${t} s`).toBe(true);
+      expect(all(f).filter(([r, g, b]) => r > 200 && g > 200 && b > 200).length, `white text at ${t} s`).toBeGreaterThan(1000);
+      // Nothing but black and grey-white (no colour).
+      expect(all(f).every(([r, g, b]) => Math.max(r, g, b) - Math.min(r, g, b) < 30)).toBe(true);
+    }
+    // The picture covers the frame; its text is white with a black outline; the last card is the picture alone.
+    const city = await frameAt(r.outputPath, 4.5);
+    expect(edges(city, W, H).every(isBlue)).toBe(true);
+    expect(all(city).filter(([r, g, b]) => r > 200 && g > 200 && b > 200).length).toBeGreaterThan(1000);
+    expect(all(city).filter(isBlack).length).toBeGreaterThan(1000);
+    expect(all(await frameAt(r.outputPath, 5.25)).every(isBlue)).toBe(true);
+  }, 300_000);
+
+  it('covers the frame with portrait, tiny and huge pictures (no black edges), cropped centred, across and down', async () => {
+    const pic = (id: string, image: string) => ({ id, beat: 'title', card: { style: 'image', image, sec: 0.5 } });
+    const e = ep([pic('portrait', 'pics/portrait.png'), pic('tiny', 'pics/tiny.jpg'), pic('huge', 'pics/huge.png')]);
+    const cardImages = cardImagesFor(project, e);
+    for (const [w, h] of [[640, 360], [360, 640]] as const) {
+      const out = join(project, `cover-${w}x${h}.mov`);
+      await tools.runFfmpeg(['-y', ...itemChunkArgs(layoutTimeline(e), { width: w, height: h, fps: 30, cardImages }, new Map(), out)], { expectedDurationSec: 1.5 });
+      expect(await frames(out)).toBe(45);
+      for (const [k, t] of [0.25, 0.75, 1.25].entries()) {
+        const f = await frameAt(out, t);
+        expect(f.length).toBe(w * h * 3);
+        expect(edges(f, w, h).every(([r, g, b]) => Math.max(r, g, b) > 60), `no black edge on card ${k} at ${w}x${h}`).toBe(true);
+        // Across, the crop keeps only each picture's green middle; down, the tiny one is all green.
+        if (w > h || k === 1) expect(all(f).every(green), `green card ${k} at ${w}x${h}`).toBe(true);
+        else expect(green(all(f)[(h / 2) * w + w / 2]!)).toBe(true);
+      }
+    }
+  }, 300_000);
+
+  it('renders an episode of only cards, in a project with no clips', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we only cards '));
+    await mkdir(join(dir, 'pics'));
+    await copyFile(join(project, 'pics', 'blue.png'), join(dir, 'pics', 'blue.png'));
+    const e = ep([
+      { id: 'a', beat: 'title', card: { style: 'mono', text: 'one', sec: 0.5 } },
+      { id: 'b', beat: 'title', card: { style: 'image', image: 'pics/blue.png', sec: 0.7 }, hold: 0.3 },
+      { id: 'c', beat: 'title', card: { style: 'bold', text: 'three', sec: 0.6 } },
+    ]);
+    await saveEpisode(dir, e);
+    for (const mode of ['rough', 'guide'] as const) {
+      const r = await renderEpisode({ project: dir, episode: 1, mode, tools });
+      expect(await frames(r.outputPath)).toBe(Math.round(timelineDuration(e) * 30));
+      expect((await tools.probe(r.outputPath)).hasAudio).toBe(true);
+    }
+  }, 120_000);
+
+  it('refuses before any work an image card whose picture is missing or cannot be read, as check does', async () => {
+    const hint = "Put the picture in the project folder, or change the card's image.";
+    const calls: string[][] = [];
+    const counted: MediaTools = { ...tools, runFfmpeg: async (args, opts) => { calls.push(args); return tools.runFfmpeg(args, opts); } };
+    const withPic = (image: string) => ep([{ id: 'talk', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1 } }, { id: 'k', beat: 'title', card: { style: 'image', image, sec: 1 } }], { number: 2 });
+    await saveEpisode(project, withPic('pics/gone.png'));
+    for (const mode of ['rough', 'guide', 'final'] as const) {
+      await expect(renderEpisode({ project, episode: 2, mode, tools: counted })).rejects.toMatchObject({ code: 'BAD_ITEM', message: 'item k: card image pics/gone.png is missing', hint });
+    }
+    await writeFile(join(project, 'pics', 'fake.png'), 'GIF89a');
+    await saveEpisode(project, withPic('pics/fake.png'));
+    await expect(renderEpisode({ project, episode: 2, mode: 'rough', tools: counted })).rejects.toMatchObject({ message: "item k: card image pics/fake.png isn't a PNG or JPEG", hint });
+    if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+      await copyFile(join(project, 'pics', 'blue.png'), join(project, 'pics', 'locked.png'));
+      await chmod(join(project, 'pics', 'locked.png'), 0o000);
+      await saveEpisode(project, withPic('pics/locked.png'));
+      await expect(renderEpisode({ project, episode: 2, mode: 'rough', tools: counted })).rejects.toMatchObject({ code: 'BAD_ITEM', message: "item k: card image pics/locked.png isn't a PNG or JPEG", hint });
+      await chmod(join(project, 'pics', 'locked.png'), 0o644);
+    }
+    expect(calls).toEqual([]);
+    expect((await readdir(join(project, 'episodes', '2'))).filter((f) => f.startsWith('.work-'))).toEqual([]);
   }, 120_000);
 });

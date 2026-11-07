@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, isCard, type Catalog, type ClipItem, type TimelineItem } from '@wordedits/shared';
@@ -369,6 +369,19 @@ describe('checkEpisode with cards', () => {
     for (const image of ['fake.png', 'empty.jpg']) {
       await saveEpisode(dir, withCard({ image }));
       await expect(checkEpisode(dir, 1)).rejects.toMatchObject({ message: `item k: card image ${image} isn't a PNG or JPEG`, hint });
+    }
+  });
+
+  // chmod does not stop reading on Windows, nor for root.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)("✖ isn't a PNG or JPEG (not a raw error) when the picture is there but can't be read", async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await writeFile(join(dir, 'locked.png'), PNG);
+    await chmod(join(dir, 'locked.png'), 0o000);
+    try {
+      await saveEpisode(dir, withCard({ image: 'locked.png' }));
+      await expect(checkEpisode(dir, 1)).rejects.toMatchObject({ code: 'BAD_ITEM', message: "item k: card image locked.png isn't a PNG or JPEG", hint });
+    } finally {
+      await chmod(join(dir, 'locked.png'), 0o644);
     }
   });
 });

@@ -82,4 +82,13 @@ describe('describeZodError with timeline items (a clip item or a card)', () => {
     expect(said({ id: 'a', beat: 'title', card: { style: 'bold', sec: 2, text: 'hi' }, speed: 2 })).toBe('items[0]: unknown key "speed" (valid keys: id, beat, card, hold, quiet)');
     expect(said({ id: 'a', beat: 'title' })).toMatch(/^items\[0\]\.clip: /);
   });
+
+  it('names the misspelled key of a card that has another error too, not "card" as an unknown key of a clip item', () => {
+    // Both kinds find unknown keys at the top: a clip item two ("card", "speeed"), a card one. The card is meant.
+    const e = EpisodeSchema.safeParse({ ...base, items: [{ id: 'a', beat: 'title', card: { style: 'bold', sec: 'x', text: 'hi' }, speeed: 2 }] });
+    expect(e.success).toBe(false);
+    expect(describeZodError(e.error!)).toBe('items[0]: unknown key "speeed" (valid keys: id, beat, card, hold, quiet)');
+    // And a clip item with a misspelled key stays a clip item.
+    expect(said({ id: 'a', beat: 'title', clip: 'c', src: { in: 0, out: 'x' }, speeed: 2 })).toMatch(/^items\[0\]: unknown key "speeed" \(valid keys: id, beat, clip, /);
+  });
 });

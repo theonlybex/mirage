@@ -67,6 +67,9 @@ describe('buildPlugin', () => {
     expect(notices).toMatch(/^Montserrat ExtraBold [^\n]+\nLicense: OFL-1\.1\n/m);
     expect(notices).toContain('SIL Open Font License');
     expect(notices).toContain(readFileSync(join(PLUGIN, 'fonts', 'OFL.txt'), 'utf8').replace(/\r\n/g, '\n').trimEnd());
+    // The cards' monospace, with the full text of its own licence.
+    expect(notices).toMatch(/^JetBrains Mono Regular v2\.304 \(fonts\/files\/JetBrainsMono-Regular\.ttf\)\nLicense: OFL-1\.1\n\nOFL-JetBrainsMono\.txt:\n\nCopyright 2020 The JetBrains Mono Project Authors/m);
+    expect(notices).toContain(readFileSync(join(PLUGIN, 'fonts', 'OFL-JetBrainsMono.txt'), 'utf8').replace(/\r\n/g, '\n').trimEnd());
     expect(notices).not.toContain(ROOT); // no absolute paths: the same on every machine
     expect(readFileSync(join(built, 'LICENSE'), 'utf8')).toBe(readFileSync(join(ROOT, 'LICENSE'), 'utf8'));
   });

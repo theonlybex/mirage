@@ -16,24 +16,40 @@ const CARD_IMAGE_HINT = "Put the picture in the project folder, or change the ca
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const JPEG = [0xff, 0xd8, 0xff];
 
-/** True when the file starts like a PNG or a JPEG: told by its content, whatever its name ends in. */
-function pngOrJpeg(file: string): boolean {
+/** What the file is by its first bytes, whatever its name ends in: a PNG, a JPEG, or neither (also when it can't be read). */
+function imageFormat(file: string): 'png' | 'jpeg' | null {
   const head = Buffer.alloc(PNG.length);
-  const fd = openSync(file, 'r');
+  let n = 0;
   try {
-    const n = readSync(fd, head, 0, head.length, 0);
-    const starts = (sig: number[]) => n >= sig.length && sig.every((b, i) => head[i] === b);
-    return starts(PNG) || starts(JPEG);
-  } finally {
-    closeSync(fd);
+    const fd = openSync(file, 'r');
+    try {
+      n = readSync(fd, head, 0, head.length, 0);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // There but unreadable (no permission, a file the system holds): it can't be drawn either.
+    return null;
   }
+  const starts = (sig: number[]) => n >= sig.length && sig.every((b, i) => head[i] === b);
+  return starts(PNG) ? 'png' : starts(JPEG) ? 'jpeg' : null;
 }
 
 /** Where an image card's picture is on disk (the schema keeps `image` a plain path inside the project). */
 export const cardImageFile = (project: string, item: CardItem): string => resolve(project, item.card.image!);
 
-/** Throws for the first image card whose picture is missing, or isn't a PNG or JPEG (by its content). */
-export function checkCardImages(project: string, ep: Episode): void {
+/** An image card's picture: its file, and what it is (FFmpeg reads it as that, whatever its name says). */
+export interface CardImage {
+  path: string;
+  format: 'png' | 'jpeg';
+}
+
+/**
+ * The picture of each image card, by item id. Throws for the first whose picture is missing (or a folder), or isn't a
+ * PNG or JPEG by its content (or can't be read).
+ */
+export function cardImagesFor(project: string, ep: Episode): Map<string, CardImage> {
+  const out = new Map<string, CardImage>();
   for (const item of ep.items) {
     if (!isCard(item) || item.card.style !== 'image') continue;
     const file = cardImageFile(project, item);
@@ -45,6 +61,14 @@ export function checkCardImages(project: string, ep: Episode): void {
       }
     })();
     if (!isFile) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} is missing`, CARD_IMAGE_HINT);
-    if (!pngOrJpeg(file)) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
+    const format = imageFormat(file);
+    if (!format) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
+    out.set(item.id, { path: file, format });
   }
+  return out;
+}
+
+/** Throws for the first image card whose picture is missing, or isn't a PNG or JPEG (by its content). */
+export function checkCardImages(project: string, ep: Episode): void {
+  cardImagesFor(project, ep);
 }

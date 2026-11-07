@@ -301,3 +301,55 @@ describe('buildAss text the fonts can draw', () => {
     expect(diff(boxes, reference)).toBeGreaterThan(0.05);
   }, 60_000);
 });
+
+describe('buildAss cards', () => {
+  const base = { cjkFont: null, captions: [], overlays: [], prompts: [] };
+  const style = (ass: string, name: string) => ass.split('\n').find((l) => l.startsWith(`Style: ${name},`))?.split(',');
+  const lines = (ass: string, name: string) => ass.split('\n').filter((l) => l.startsWith('Dialogue:') && l.split(',')[3] === name);
+  const mono = { text: 'Sam\nVlog #3\n11-6-26', style: 'mono' as const, sec: 2 };
+  const bold = { text: 'Day 3', style: 'bold' as const, sec: 1.5 };
+
+  it('draws a mono card in the bundled monospace, 72 px at 1080, centred, its lines as written, fading in and out over 150 ms', () => {
+    const ass = buildAss({ ...base, width: 1920, height: 1080, cards: [{ start: 0, end: 2, card: mono }] });
+    // White, no outline or faux bold, centred (5), the usual 5% side margins.
+    expect(style(ass, 'CardMono')).toEqual(['Style: CardMono', 'JetBrains Mono', '72', '&H00FFFFFF', '&H00FFFFFF', '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '0', '0', '5', '96', '96', '0', '1']);
+    expect(lines(ass, 'CardMono')).toEqual(['Dialogue: 0,0:00:00.00,0:00:02.00,CardMono,,0,0,0,,{\\fad(150,150)}Sam\\NVlog #3\\N11-6-26']);
+    expect(style(ass, 'CardBold')).toBeUndefined();
+  });
+
+  it('draws a bold card in Montserrat ExtraBold, 110 px at 1080, centred, wrapping inside 80% of the width', () => {
+    const ass = buildAss({ ...base, width: 1920, height: 1080, cards: [{ start: 3.5, end: 5, card: bold }] });
+    expect(style(ass, 'CardBold')).toEqual(['Style: CardBold', 'Montserrat ExtraBold', '110', '&H00FFFFFF', '&H00FFFFFF', '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '0', '0', '5', '192', '192', '0', '1']);
+    expect(lines(ass, 'CardBold')).toEqual(['Dialogue: 0,0:00:03.50,0:00:05.00,CardBold,,0,0,0,,{\\fad(150,150)}Day 3']);
+    expect(style(ass, 'CardMono')).toBeUndefined();
+  });
+
+  it("draws an image card's text like a bold card with an 8 px black outline, and nothing for one without text", () => {
+    const pic = (text: string) => ({ text, style: 'image' as const, sec: 2, image: 'pics/a.png' });
+    const ass = buildAss({ ...base, width: 1920, height: 1080, cards: [{ start: 0, end: 2, card: pic('Tokyo') }, { start: 2, end: 4, card: pic('') }] });
+    expect(lines(ass, 'CardBold')).toEqual(['Dialogue: 0,0:00:00.00,0:00:02.00,CardBold,,0,0,0,,{\\fad(150,150)\\bord8}Tokyo']);
+    expect(ass.split('\n').filter((l) => l.startsWith('Dialogue:'))).toHaveLength(1);
+    // A picture alone declares no card style.
+    expect(style(buildAss({ ...base, width: 1920, height: 1080, cards: [{ start: 0, end: 2, card: pic('') }] }), 'CardBold')).toBeUndefined();
+  });
+
+  it('scales with the frame (a vertical rough cut at 540 × 960)', () => {
+    const ass = buildAss({ ...base, width: 540, height: 960, cards: [{ start: 0, end: 2, card: mono }, { start: 2, end: 3.5, card: bold }, { start: 3.5, end: 5, card: { text: 'x', style: 'image', sec: 1.5, image: 'a.png' } }] });
+    expect(style(ass, 'CardMono')!.slice(2, 3)).toEqual(['36']);
+    expect(style(ass, 'CardMono')!.slice(19, 22)).toEqual(['27', '27', '0']);
+    expect(style(ass, 'CardBold')!.slice(2, 3)).toEqual(['55']);
+    expect(style(ass, 'CardBold')!.slice(19, 22)).toEqual(['54', '54', '0']);
+    expect(lines(ass, 'CardBold')[1]).toMatch(/\{\\fad\(150,150\)\\bord4\}x$/);
+  });
+
+  it('draws card text as other text is drawn: braces escaped, emoji left out, CJK in a font that has it, each line trimmed', () => {
+    const ass = buildAss({ ...base, cjkFont: 'Hiragino Sans GB', width: 1920, height: 1080, cards: [{ start: 0, end: 2, card: { text: ' {Day} 3 🚀 \n 東京 ', style: 'bold', sec: 2 } }] });
+    expect(lines(ass, 'CardBold')).toEqual(['Dialogue: 0,0:00:00.00,0:00:02.00,CardBold,,0,0,0,,{\\fad(150,150)}(Day) 3\\N{\\fnHiragino Sans GB}東京{\\fn}']);
+  });
+
+  it('writes exactly what it always has without cards', () => {
+    const o = { ...base, width: 1920, height: 1080, font: 'Helvetica Neue' };
+    expect(buildAss({ ...o, cards: [] })).toBe(buildAss(o));
+    expect(buildAss(o)).not.toContain('Card');
+  });
+});

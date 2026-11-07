@@ -11,6 +11,7 @@ import { captionWarnings, karaokeLines, popLines, type CaptionLine } from './cap
 import { MirageError } from './errors.js';
 import { measureSfxLevel, resolveSfx, sfxSource, sfxVolumeDb, type SfxLevel } from './sfx.js';
 import { bundledFontsDir } from './fonts.js';
+import { cardImagesFor, type CardImage } from './cards.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, clearLeftovers, type Lock } from './lock.js';
 import { moveExprs } from './move.js';
@@ -86,7 +87,7 @@ export const commandLength = (args: string[]) => args.reduce((n, a) => n + a.len
  * The episode's chunks: chunkSize's count of items each, cut early when a chunk's command (itemChunkArgs to `output`)
  * would pass MAX_COMMAND. An item alone is always a chunk.
  */
-export function episodeChunks(laid: LaidItem[], o: { width: number; height: number; fps: number }, sources: Map<string, ClipSource>, output: string): LaidItem[][] {
+export function episodeChunks(laid: LaidItem[], o: ChunkShape, sources: Map<string, ClipSource>, output: string): LaidItem[][] {
   const out: LaidItem[][] = [];
   for (const group of chunkItems(laid, chunkSize(sources))) {
     let chunk: LaidItem[] = [];
@@ -163,7 +164,15 @@ function moveFilters(l: LaidItem, item: ClipItem, k: number, o: { width: number;
   );
 }
 
-export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: number; fps: number }, sources: Map<string, ClipSource>, output: string): string[] {
+/** A chunk's output size and frame rate, and the pictures of its image cards (cardImagesFor), by item id. */
+export interface ChunkShape {
+  width: number;
+  height: number;
+  fps: number;
+  cardImages?: Map<string, CardImage>;
+}
+
+export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<string, ClipSource>, output: string): string[] {
   const inputs: string[] = [];
   const chains: string[] = [];
   const labels: string[] = [];
@@ -172,9 +181,19 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     const dur = ffNum(l.frames / o.fps);
     const silence = `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`;
     if (isCard(item)) {
-      // A card is black and silent for its length, at the chunk's size (its text and picture come later).
-      inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${o.width}x${o.height}:r=${ffNum(o.fps)}:d=${ffNum((l.frames + 1) / o.fps)}`);
-      chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
+      if (item.card.style === 'image') {
+        // A picture card is its picture, read once (by the demuxer for what it is, so neither its name nor a % or * in
+        // its path matters), scaled to cover the frame, cropped centred, then held for the card's length (equivalent to
+        // -loop 1, which decodes a 24-megapixel picture again for every frame). Its text comes in the final pass.
+        const pic = o.cardImages?.get(item.id);
+        if (!pic) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} was not checked before rendering`, 'Run check, then render again.');
+        inputs.push('-f', `${pic.format}_pipe`, '-framerate', ffNum(o.fps), '-i', pic.path);
+        chains.push(`[${k}:v]${framed('fill', '', o, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+      } else {
+        // A text card is black for its length, at the chunk's size (its text comes in the final pass); all cards are silent.
+        inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${o.width}x${o.height}:r=${ffNum(o.fps)}:d=${ffNum((l.frames + 1) / o.fps)}`);
+        chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
+      }
       labels.push(`[v${k}][a${k}]`);
       return;
     }
@@ -557,8 +576,11 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   const project = resolve(o.project);
   const ep = await loadEpisode(project, o.episode);
   const catalog = await loadCatalog(project);
-  if (catalog.clips.length === 0) throw new MirageError('NO_CATALOG', 'The project has no catalogued clips', 'Run: pnpm mirage ingest <project> <clips folder>');
+  // An episode of only cards needs no clips.
+  if (catalog.clips.length === 0 && !ep.items.every(isCard)) throw new MirageError('NO_CATALOG', 'The project has no catalogued clips', 'Run: pnpm mirage ingest <project> <clips folder>');
   const sources = sourcesFor(ep, catalog);
+  // A card's picture missing or unreadable stops here, as check does, before any work.
+  const cardImages = cardImagesFor(project, ep);
   // A voice-over fitted to another cut would play out of step with the picture.
   if (o.mode === 'final' && cutChanged(ep)) throw cutChangedError();
   const laid = layoutTimeline(ep);
@@ -585,9 +607,11 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
       throw new MirageError('BAD_ITEM', `voice-over recording ${abs} changed since vo fitted it`, `Put back the recording you fitted, or run vo again with the new one: pnpm mirage vo <project> ${o.episode} <recording> (then --add for lines from other recordings).`);
     }
   }
-  // Pop and karaoke captions are drawn in the bundled font: a broken install stops here, not with libass's fallback font.
+  // Pop and karaoke captions and cards are drawn in the bundled fonts: a broken install stops here, not with libass's
+  // fallback font.
   const style = o.mode === 'guide' ? 'off' : (ep.captions?.style ?? 'phrase');
-  const fontsDir = style === 'pop' || style === 'karaoke' ? bundledFontsDir() : undefined;
+  const cards = laid.flatMap((l) => (isCard(l.item) ? [{ start: l.start, end: l.end, card: l.item.card }] : []));
+  const fontsDir = style === 'pop' || style === 'karaoke' || cards.length ? bundledFontsDir() : undefined;
   // Every render's last pass draws overlays.ass with FFmpeg's ass filter: an FFmpeg without libass fails there, after all the work.
   const captions = await o.tools.ffmpegCaptions?.();
   if (captions && !captions.ok) {
@@ -603,12 +627,13 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   try {
     // Before the chunks: a sound file FFmpeg can't read stops the render here.
     const sfx = await placeSfx(project, sfxCues, D, ep.loudnessLufs, o.tools, work, o.signal);
-    const chunks = episodeChunks(laid, { width: W, height: H, fps }, sources, join(work, `chunk-${pad3(0)}.mov`));
+    const shape: ChunkShape = { width: W, height: H, fps, cardImages };
+    const chunks = episodeChunks(laid, shape, sources, join(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i, chunk] of chunks.entries()) {
       o.signal?.throwIfAborted();
       const dur = chunk.reduce((s, l) => s + l.frames / fps, 0);
-      await o.tools.runFfmpeg(itemChunkArgs(chunk, { width: W, height: H, fps }, sources, join(work, `chunk-${pad3(i)}.mov`)), {
+      await o.tools.runFfmpeg(itemChunkArgs(chunk, shape, sources, join(work, `chunk-${pad3(i)}.mov`)), {
         expectedDurationSec: dur,
         timeoutMs: chunkTimeoutMs(chunk, fps),
         signal: o.signal,
@@ -657,7 +682,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
       join(work, 'overlays.ass'),
       buildAss({
         width: W, height: H, captions: style === 'phrase' ? cues : [], captionLines, position: ep.captions?.position, highlightColor: ep.captions?.color,
-        overlays: ep.overlays, prompts: o.mode === 'guide' ? ep.slots : [],
+        overlays: ep.overlays, prompts: o.mode === 'guide' ? ep.slots : [], cards,
       }),
     );
 

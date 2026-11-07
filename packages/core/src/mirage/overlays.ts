@@ -1,7 +1,7 @@
-import { isCard, type Catalog, type Episode, type Overlay, type Slot, type Transcript, type VoiceLine, type Word } from '@wordedits/shared';
+import { isCard, type CardItem, type Catalog, type Episode, type Overlay, type Slot, type Transcript, type VoiceLine, type Word } from '@wordedits/shared';
 import { isFiller, normalizeWord } from '../autoedit/takes.js';
 import { HIGHLIGHT_COLOR, type CaptionLine, type CaptionPart } from './captions.js';
-import { CAPTION_FONT } from './fonts.js';
+import { CAPTION_FONT, MONO_FONT } from './fonts.js';
 import { layoutTimeline } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -249,6 +249,8 @@ export function buildAss(o: {
   highlightColor?: string;
   overlays: Overlay[];
   prompts: Slot[];
+  /** The cards on the timeline (their times, hold included): their text, drawn over the black or the picture of the chunks. */
+  cards?: { start: number; end: number; card: CardItem['card'] }[];
 }): string {
   const cjk = o.cjkFont === undefined ? defaultCjkFont() : o.cjkFont;
   // Emoji left out; CJK runs switch to a font that has them and back to the style's font (\fn alone).
@@ -262,8 +264,8 @@ export function buildAss(o: {
   const side = Math.round(o.width * 0.05);
   // Middle: the captions' bottom edge a little below the centre, for every caption style.
   const captionMv = (bottom: number) => (o.position === 'middle' ? Math.round(o.height * 0.38) : bottom);
-  // Name, Fontsize, Primary, Outline, Back, Bold, BorderStyle, Outline, Alignment, MarginV[, Fontname]
-  const styles: [string, number, string, string, string, number, number, number, number, number, string?][] = [
+  // Name, Fontsize, Primary, Outline, Back, Bold, BorderStyle, Outline, Alignment, MarginV[, Fontname[, MarginL and R]]
+  const styles: [string, number, string, string, string, number, number, number, number, number, string?, number?][] = [
     ['Caption', px(64), WHITE, BOX, BOX, -1, 3, px(18), 2, captionMv(px(90))],
     ['Callout', px(150), WHITE, BLACK, BLACK, -1, 1, px(6), 5, 0],
     ['BadgeFail', px(48), WHITE, '&H002A2AE0', '&H002A2AE0', -1, 3, px(14), 9, px(60)],
@@ -280,15 +282,27 @@ export function buildAss(o: {
   // The bundled face is already heavy: no faux bold on it.
   if (o.captionLines?.style === 'pop') styles.push(['Pop', px(84), WHITE, BLACK, BLACK, 0, 1, px(7), 2, captionMv(px(120)), CAPTION_FONT]);
   if (o.captionLines?.style === 'karaoke') styles.push(['Karaoke', px(64), WHITE, BLACK, BLACK, 0, 1, px(5), 2, captionMv(px(120)), CAPTION_FONT]);
+  // Cards: centred on the frame. Mono keeps the usual side margins; bold (and a picture's text) wraps inside 80% of the
+  // width. Declared only when a card draws text in them.
+  const cards = (o.cards ?? []).filter((c) => c.card.text.trim());
+  const cardStyle = (c: CardItem['card']) => (c.style === 'mono' ? 'CardMono' : 'CardBold');
+  if (cards.some((c) => cardStyle(c.card) === 'CardMono')) styles.push(['CardMono', px(72), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, MONO_FONT]);
+  if (cards.some((c) => cardStyle(c.card) === 'CardBold')) styles.push(['CardBold', px(110), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, CAPTION_FONT, Math.round(o.width * 0.1)]);
   const styleLines = styles.map(
-    ([name, size, primary, outline, back, bold, border, outw, align, mv, face = font]) =>
-      `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold},0,0,0,100,100,0,0,${border},${outw},0,${align},${side},${side},${mv},1`,
+    ([name, size, primary, outline, back, bold, border, outw, align, mv, face = font, margin = side]) =>
+      `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold},0,0,0,100,100,0,0,${border},${outw},0,${align},${margin},${margin},${mv},1`,
   );
 
   const events: string[] = [];
   const ev = (layer: number, start: number, end: number, style: string, text: string) =>
     events.push(`Dialogue: ${layer},${assTime(start)},${assTime(end)},${style},,0,0,0,,${text}`);
 
+  // Under everything else (layer 0): captions, overlays and prompts can draw over a card. Each line as written, drawn
+  // as other text is; a picture's text gets a black outline so it reads on any picture.
+  for (const { start, end, card } of cards) {
+    const text = card.text.trim().split(/\r?\n/).map(draw).join('\\N');
+    ev(0, start, end, cardStyle(card), `{\\fad(150,150)${card.style === 'image' ? `\\bord${px(8)}` : ''}}${text}`);
+  }
   for (const c of o.captions) ev(2, c.start, c.end, 'Caption', draw(c.text));
   if (o.captionLines) {
     const color = assColor(o.highlightColor ?? HIGHLIGHT_COLOR);
