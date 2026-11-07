@@ -111,6 +111,15 @@ describe('the plugin skills', () => {
     expect(edit).toContain('For every new short or vertical video, write "captions": { "style": "pop", "position": "middle" } into episode.json.');
   });
 
+  it('edit teaches the move field: its keys, and the punch-in sentence', () => {
+    const edit = read('edit');
+    expect(edit).toContain('`move`');
+    for (const key of ['zoom', 'focus', 'ease', 'start', 'end']) expect(edit, `edit never names move's ${key}`).toContain(`\`${key}\``);
+    expect(edit).toContain('A punch-in is a move whose start is 0.15 s or less before its end, on the line just before the laugh.');
+    expect(edit).toContain("move ends at");
+    expect(edit).toContain("move starts at");
+  });
+
   it('the copy the plan fixes word for word is there', () => {
     const edit = read('edit');
     expect(edit).toContain("Here's the rough cut in Mirage's viewer. Click on the video to leave notes, then press Send notes.");
