@@ -32258,7 +32258,7 @@ function moveFilters(l, k, o2, src) {
   const [w, h2] = fill ? [`min(W,H*${W}/${H})`, `min(H,W*${H}/${W})`] : ["W", "H"];
   const left = `${e};st(1,${w}/(${zoom}));(W-ld(1))*(${x})`;
   const top = `${e};st(1,${h2}/(${zoom}));(H-ld(1))*(${y})`;
-  return `${pre}perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=linear:eval=frame,${fill ? `scale=${W}:${H}` : framed(item.frame, cropAt(item.focus), o2, k)}`;
+  return `${pre}perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=cubic:eval=frame,${fill ? `scale=${W}:${H}` : framed(item.frame, cropAt(item.focus), o2, k)}`;
 }
 function itemChunkArgs(laid, o2, sources, output2) {
   const inputs = [];

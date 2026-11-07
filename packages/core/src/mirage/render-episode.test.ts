@@ -112,7 +112,7 @@ describe('itemChunkArgs with a move', () => {
   const persp = (e: string, zoom: string, x: string, y: string, w = 'W', h = 'H') => {
     const left = `${e};st(1,${w}/(${zoom}));(W-ld(1))*(${x})`;
     const top = `${e};st(1,${h}/(${zoom}));(H-ld(1))*(${y})`;
-    return `perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=linear:eval=frame`;
+    return `perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=cubic:eval=frame`;
   };
 
   it('holds first (so held frames keep moving), then moves the source picture, then frames it', () => {
@@ -139,7 +139,7 @@ describe('itemChunkArgs with a move', () => {
   });
   it('moves the picture before blur splits it, so the blurred background follows the move', () => {
     const g = graphOf([{ id: 'b', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, frame: 'blur', move: { zoom: 1.2 } }], { width: 1080, height: 1920 });
-    expect(g).toContain(`:interpolation=linear:eval=frame,split[fg0][bg0];[bg0]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,gblur=sigma=12,`);
+    expect(g).toContain(`:interpolation=cubic:eval=frame,split[fg0][bg0];[bg0]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,gblur=sigma=12,`);
     expect(g).toContain('[bb0][ff0]overlay=(W-w)/2:(H-h)/2,setsar=1,setpts=PTS-STARTPTS[v0]');
   });
   it("fill: the moving window is cut to the output's shape, so focus pans it, and the picture is only scaled after", () => {
@@ -754,6 +754,8 @@ describe('itemChunkArgs with a move (real ffmpeg)', () => {
     await make('odd', 1081, 607, 2, `color=gray:s=1081x607:r=30:d=2,format=yuv444p,${box(700, 150, 30)}`, ['-pix_fmt', 'yuv444p']);
     await make('long', 640, 360, 40, `color=black:s=640x360:r=30:d=40,${box(480, 60, 20)}`, ['-pix_fmt', 'yuv420p']);
     await make('ts', 1920, 1080, 6, 'testsrc2=size=1920x1080:rate=30:duration=6', ['-pix_fmt', 'yuv420p']);
+    // Fine detail everywhere, to see how sharp a zoomed picture stays.
+    await make('mb', 1920, 1080, 1, 'mandelbrot=size=1920x1080:rate=30,trim=duration=1', ['-pix_fmt', 'yuv420p', '-crf', '12']);
   }, 300_000);
 
   /** Renders one item as a chunk; gives its frames as grey pictures and how long FFmpeg took. */
@@ -821,6 +823,22 @@ describe('itemChunkArgs with a move (real ffmpeg)', () => {
     console.log(`1920×1080 6 s: fixed zoom ${fixed.toFixed(2)} s, move ${moving.toFixed(2)} s (${(moving / fixed).toFixed(2)}×)`);
     expect(moving / fixed).toBeLessThanOrEqual(3);
   }, 180_000);
+
+  it('ends a push-in to 1.3 as sharp as a fixed zoom of 1.3', async () => {
+    /** The mean absolute difference between neighbouring pixels, across and down: higher is sharper. */
+    const gradient = (f: Buffer, width: number, height: number) => {
+      let s = 0;
+      for (let y = 0; y + 1 < height; y++) for (let x = 0; x + 1 < width; x++) { const i = y * width + x; s += Math.abs(f[i + 1] - f[i]) + Math.abs(f[i + width] - f[i]); }
+      return s / ((width - 1) * (height - 1));
+    };
+    const o = { width: 1920, height: 1080 };
+    const fixed = (await render({ clip: 'mb', src: { in: 0, out: 1 }, zoom: 1.3 }, o)).frames;
+    const moving = (await render({ clip: 'mb', src: { in: 0, out: 1 }, move: { zoom: 1.3 } }, o)).frames;
+    expect(moving).toHaveLength(30);
+    const [g0, g1] = [gradient(fixed[29], 1920, 1080), gradient(moving[29], 1920, 1080)];
+    console.log(`last frame at 1.3×: fixed zoom ${g0.toFixed(3)}, move ${g1.toFixed(3)} (${((g1 / g0 - 1) * 100).toFixed(1)}%)`);
+    expect(Math.abs(g1 / g0 - 1)).toBeLessThanOrEqual(0.05);
+  }, 120_000);
 
   it('moves smoothly on a sped-up item (20×)', async () => {
     const { frames } = await render({ clip: 'long', src: { in: 0, out: 40 }, speed: 20, move: { zoom: 1.2 } }, { width: 640, height: 360 });
