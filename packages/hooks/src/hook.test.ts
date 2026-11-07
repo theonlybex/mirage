@@ -526,6 +526,20 @@ describe.skipIf(!existsSync(DIST))('session start through the bundled script', (
     expect((await sessionStart(env)).out).toBe('');
   });
 
+  it('shows the notice in a Mirage project without a data folder, and leaves a setup.json in the project alone', async () => {
+    const { dir } = await project('Lamp series');
+    await writeFile(join(dir, 'setup.json'), JSON.stringify({ laterUntil: '2999-01-01T00:00:00.000Z' }));
+    const out = execFileSync(process.execPath, [DIST, 'session-start'], {
+      input: JSON.stringify(input(dir, { hook_event_name: 'SessionStart' })),
+      encoding: 'utf8',
+      cwd: dir,
+      env: { PATH: '', CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: await tmp('mirage-home-') },
+    });
+    expect(contextOf(out)).toContain("This Mirage project can't edit videos until ");
+    // a setup.json in the project is neither read as the state (the notice shows despite its laterUntil) nor changed
+    expect(JSON.parse(await readFile(join(dir, 'setup.json'), 'utf8'))).toEqual({ laterUntil: '2999-01-01T00:00:00.000Z' });
+  });
+
   it('adds the notice to the project line inside a Mirage project', async () => {
     const { dir } = await project('Lamp series');
     const data = await tmp('mirage-data-');

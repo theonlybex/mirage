@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -132,10 +132,34 @@ describe('setupNotice', () => {
     expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
   });
 
-  it('remembers nothing without a data folder, but still shows the notice in a project', () => {
-    const o = { dataDir: '', version: 'v', now, missing: ['ffmpeg'] as MissingTool[] };
-    expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
-    expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
+  it('remembers and reads nothing without a data folder, so the current folder (a person\'s project) is left alone', () => {
+    const cwd = process.cwd();
+    const folder = join(root, 'project');
+    mkdirSync(folder);
+    // a setup.json that happens to sit in the folder must not be read as the state ...
+    writeFileSync(join(folder, SETUP_FILE), JSON.stringify({ laterUntil: new Date(now.getTime() + 86_400_000).toISOString() }));
+    const before = readFileSync(join(folder, SETUP_FILE), 'utf8');
+    process.chdir(folder);
+    try {
+      const o = { dataDir: '', version: 'v', now, missing: ['ffmpeg'] as MissingTool[] };
+      expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
+      expect(setupNotice({ ...o, inProject: true })).not.toBeNull();
+    } finally {
+      process.chdir(cwd);
+    }
+    // ... and nothing may be written there
+    expect(readFileSync(join(folder, SETUP_FILE), 'utf8')).toBe(before);
+    expect(readdirSync(folder)).toEqual([SETUP_FILE]);
+    // with no setup.json to begin with, none appears
+    const clean = join(root, 'clean');
+    mkdirSync(clean);
+    process.chdir(clean);
+    try {
+      setupNotice({ dataDir: '', version: 'v', inProject: true, now, missing: ['ffmpeg'] });
+    } finally {
+      process.chdir(cwd);
+    }
+    expect(readdirSync(clean)).toEqual([]);
   });
 
   it('builds the notice from fixed text only', () => {
