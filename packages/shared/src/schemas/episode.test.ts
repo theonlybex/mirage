@@ -34,6 +34,31 @@ describe('EpisodeSchema', () => {
   });
 });
 
+describe('EpisodeSchema move', () => {
+  const withMove = (move: object) => ({ ...base, items: [{ ...item, move }] });
+  it('stays absent when absent, and a move keeps only what was written', () => {
+    const ep = EpisodeSchema.parse(base);
+    expect('move' in ep.items[0]!).toBe(false);
+    expect(JSON.stringify(ep)).not.toContain('move');
+    const m = EpisodeSchema.parse(withMove({ zoom: 1.2, start: 1 })).items[0]!.move;
+    expect(m).toEqual({ zoom: 1.2, ease: 'inOut', start: 1 });
+  });
+  it('takes a focus, an ease and times', () => {
+    const m = EpisodeSchema.parse(withMove({ zoom: 1, focus: { x: 0.8, y: 0.3 }, ease: 'out', start: 0.5, end: 2 })).items[0]!.move;
+    expect(m).toEqual({ zoom: 1, focus: { x: 0.8, y: 0.3 }, ease: 'out', start: 0.5, end: 2 });
+  });
+  it('refuses end <= start, a zoom outside 1–2, a missing zoom, a bad focus or ease and an unknown key', () => {
+    expect(EpisodeSchema.safeParse(withMove({ zoom: 1.2, start: 2, end: 2 })).success).toBe(false);
+    expect(EpisodeSchema.safeParse(withMove({ zoom: 1.2, start: 3, end: 2 })).success).toBe(false);
+    expect(EpisodeSchema.safeParse(withMove({ zoom: 2.5 })).success).toBe(false);
+    expect(EpisodeSchema.safeParse(withMove({ zoom: 0.9 })).success).toBe(false);
+    expect(EpisodeSchema.safeParse(withMove({ ease: 'out' })).success).toBe(false);
+    expect(EpisodeSchema.safeParse(withMove({ zoom: 1.2, focus: { x: 1.2 } })).success).toBe(false);
+    expect(EpisodeSchema.safeParse(withMove({ zoom: 1.2, ease: 'bounce' })).success).toBe(false);
+    expect(EpisodeSchema.safeParse(withMove({ zoom: 1.2, speed: 2 })).success).toBe(false);
+  });
+});
+
 describe('EpisodeSchema captions', () => {
   it('stays absent when absent: parses undefined and stringifies without the key', () => {
     const ep = EpisodeSchema.parse(base);
@@ -59,7 +84,7 @@ describe('EpisodeSchema unknown keys', () => {
   it('rejects a misspelled key anywhere, naming it and the valid keys', () => {
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [item, { ...item, id: 'i2', speeed: 2 }] }))).toEqual({
       path: ['items', 1],
-      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, frame, focus, hold, quiet, onBeat)',
+      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, frame, focus, move, hold, quiet, onBeat)',
     });
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, extra: 1 }))?.message).toMatch(/^unknown key "extra" \(valid keys: version, number, title, /);
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [{ ...item, src: { in: 0, out: 2, end: 3 } }] }))?.path).toEqual(['items', 0, 'src']);

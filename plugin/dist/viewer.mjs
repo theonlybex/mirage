@@ -27334,6 +27334,15 @@ var CatalogSchema = strictObject2({ version: external_exports.literal(1), clips:
 // packages/shared/src/schemas/episode.ts
 var range = (shape, what) => strictObject2({ start: external_exports.number().min(0), end: external_exports.number().positive(), ...shape }).refine((r) => r.end > r.start, { message: `${what}: end must be after start` });
 var BeatSchema = external_exports.enum(["cold-open", "title", "recap", "new-toy", "problem", "montage", "twist", "truth", "outro", "blooper"]);
+var MoveSchema = strictObject2({
+  /** The zoom at the end of the move. */
+  zoom: external_exports.number().min(1).max(2),
+  /** The focus at the end of the move, 0–1 from the left and from the top; an axis left out stays the item's. */
+  focus: strictObject2({ x: external_exports.number().min(0).max(1).optional(), y: external_exports.number().min(0).max(1).optional() }).optional(),
+  ease: external_exports.enum(["linear", "in", "out", "inOut"]).default("inOut"),
+  start: external_exports.number().min(0).optional(),
+  end: external_exports.number().positive().optional()
+}).refine((m) => m.start === void 0 || m.end === void 0 || m.end > m.start, { message: "move: end must be after start" });
 var TimelineItemSchema = strictObject2({
   id: external_exports.string().min(1),
   beat: BeatSchema,
@@ -27352,6 +27361,8 @@ var TimelineItemSchema = strictObject2({
   frame: external_exports.enum(["fit", "fill", "blur"]).default("fit"),
   /** The point of the picture kept in view when it is cropped (zoom, fill): 0–1 from the left and from the top. */
   focus: strictObject2({ x: external_exports.number().min(0).max(1).default(0.5), y: external_exports.number().min(0).max(1).default(0.5) }).default({ x: 0.5, y: 0.5 }),
+  /** A camera move from `zoom` and `focus` to the frame the move names; absent = the picture holds still. */
+  move: MoveSchema.optional(),
   /** Seconds of frozen last frame appended (set by voice-over fitting). */
   hold: external_exports.number().min(0).max(10).default(0),
   /** No narration over this item (reveals, silences). */

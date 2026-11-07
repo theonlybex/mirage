@@ -10,6 +10,23 @@ const range = <T extends z.ZodRawShape>(shape: T, what: string) =>
 export const BeatSchema = z.enum(['cold-open', 'title', 'recap', 'new-toy', 'problem', 'montage', 'twist', 'truth', 'outro', 'blooper']);
 export type Beat = z.infer<typeof BeatSchema>;
 
+/**
+ * A camera move over an item: zoom and focus travel from the item's own `zoom` and `focus` to these. What is left out
+ * is filled in when the move is played, not here, so the file keeps what was written: `focus` (or one axis of it)
+ * stays the item's, `start` is 0 and `end` is the end of the shot. `start` and `end` are seconds into the item on the
+ * output timeline, held frames included.
+ */
+export const MoveSchema = strictObject({
+  /** The zoom at the end of the move. */
+  zoom: z.number().min(1).max(2),
+  /** The focus at the end of the move, 0–1 from the left and from the top; an axis left out stays the item's. */
+  focus: strictObject({ x: z.number().min(0).max(1).optional(), y: z.number().min(0).max(1).optional() }).optional(),
+  ease: z.enum(['linear', 'in', 'out', 'inOut']).default('inOut'),
+  start: z.number().min(0).optional(),
+  end: z.number().positive().optional(),
+}).refine((m) => m.start === undefined || m.end === undefined || m.end > m.start, { message: 'move: end must be after start' });
+export type Move = z.infer<typeof MoveSchema>;
+
 export const TimelineItemSchema = strictObject({
   id: z.string().min(1),
   beat: BeatSchema,
@@ -28,6 +45,8 @@ export const TimelineItemSchema = strictObject({
   frame: z.enum(['fit', 'fill', 'blur']).default('fit'),
   /** The point of the picture kept in view when it is cropped (zoom, fill): 0–1 from the left and from the top. */
   focus: strictObject({ x: z.number().min(0).max(1).default(0.5), y: z.number().min(0).max(1).default(0.5) }).default({ x: 0.5, y: 0.5 }),
+  /** A camera move from `zoom` and `focus` to the frame the move names; absent = the picture holds still. */
+  move: MoveSchema.optional(),
   /** Seconds of frozen last frame appended (set by voice-over fitting). */
   hold: z.number().min(0).max(10).default(0),
   /** No narration over this item (reveals, silences). */

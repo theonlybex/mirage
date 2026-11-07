@@ -29200,7 +29200,7 @@ var init_catalog = __esm({
 });
 
 // packages/shared/src/schemas/episode.ts
-var range, BeatSchema, TimelineItemSchema, OverlaySchema, MusicCueSchema, SlotSchema, VoiceLineSchema, CaptionsSchema, even, EpisodeSchema;
+var range, BeatSchema, MoveSchema, TimelineItemSchema, OverlaySchema, MusicCueSchema, SlotSchema, VoiceLineSchema, CaptionsSchema, even, EpisodeSchema;
 var init_episode = __esm({
   "packages/shared/src/schemas/episode.ts"() {
     "use strict";
@@ -29208,6 +29208,15 @@ var init_episode = __esm({
     init_strict2();
     range = (shape, what) => strictObject2({ start: external_exports.number().min(0), end: external_exports.number().positive(), ...shape }).refine((r) => r.end > r.start, { message: `${what}: end must be after start` });
     BeatSchema = external_exports.enum(["cold-open", "title", "recap", "new-toy", "problem", "montage", "twist", "truth", "outro", "blooper"]);
+    MoveSchema = strictObject2({
+      /** The zoom at the end of the move. */
+      zoom: external_exports.number().min(1).max(2),
+      /** The focus at the end of the move, 0–1 from the left and from the top; an axis left out stays the item's. */
+      focus: strictObject2({ x: external_exports.number().min(0).max(1).optional(), y: external_exports.number().min(0).max(1).optional() }).optional(),
+      ease: external_exports.enum(["linear", "in", "out", "inOut"]).default("inOut"),
+      start: external_exports.number().min(0).optional(),
+      end: external_exports.number().positive().optional()
+    }).refine((m) => m.start === void 0 || m.end === void 0 || m.end > m.start, { message: "move: end must be after start" });
     TimelineItemSchema = strictObject2({
       id: external_exports.string().min(1),
       beat: BeatSchema,
@@ -29226,6 +29235,8 @@ var init_episode = __esm({
       frame: external_exports.enum(["fit", "fill", "blur"]).default("fit"),
       /** The point of the picture kept in view when it is cropped (zoom, fill): 0–1 from the left and from the top. */
       focus: strictObject2({ x: external_exports.number().min(0).max(1).default(0.5), y: external_exports.number().min(0).max(1).default(0.5) }).default({ x: 0.5, y: 0.5 }),
+      /** A camera move from `zoom` and `focus` to the frame the move names; absent = the picture holds still. */
+      move: MoveSchema.optional(),
       /** Seconds of frozen last frame appended (set by voice-over fitting). */
       hold: external_exports.number().min(0).max(10).default(0),
       /** No narration over this item (reveals, silences). */
@@ -32976,6 +32987,13 @@ function timelineWarnings(ep, lib, snapped) {
     if (o2.start >= D - 1e-6) out.push(`overlay ${i2 + 1} ("${o2.text}") starts at ${s2(o2.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never show`);
     if (undrawable(o2.text)) out.push(`overlay ${i2 + 1} ("${o2.text}") has emoji, which can't be drawn \u2014 they are left out`);
   });
+  for (const l of layoutTimeline(ep)) {
+    const m = l.item.move;
+    if (!m) continue;
+    const len = l.frames / ep.output.fps;
+    if (m.start !== void 0 && m.start >= len - 1e-6) out.push(`item ${l.item.id}'s move starts at ${s2(m.start)} s, after the shot ends (${s2(len)} s) \u2014 it never plays`);
+    else if (m.end !== void 0 && m.end > len + 0.5 / ep.output.fps) out.push(`item ${l.item.id}'s move ends at ${s2(m.end)} s, after the shot ends (${s2(len)} s) \u2014 it stops at the end of the shot`);
+  }
   ep.music.forEach((c3, i2) => {
     if (c3.start >= D - 1e-6) out.push(`music cue ${i2 + 1} (${c3.track}) starts at ${s2(c3.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never play`);
   });

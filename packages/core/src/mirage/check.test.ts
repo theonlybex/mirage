@@ -171,6 +171,26 @@ describe('checkEpisode', () => {
     ]);
   });
 
+  it('warns when a move ends after the shot, or starts after it', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base({
+      items: [
+        { id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 4 }, move: { zoom: 1.2, end: 6 } },
+        { id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 8 }, hold: 1, move: { zoom: 1.2, start: 3.5 } },
+        { id: 'c', beat: 'problem', clip: 'c001', src: { in: 9, out: 12 }, move: { zoom: 1.2, start: 3 } },
+        { id: 'd', beat: 'problem', clip: 'c001', src: { in: 13, out: 16 }, move: { zoom: 1.2, start: 1, end: 4 } },
+        { id: 'e', beat: 'problem', clip: 'c001', src: { in: 17, out: 20 }, move: { zoom: 1.2 } },
+      ],
+      music: [],
+    }));
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual([
+      "item a's move ends at 6.00 s, after the shot ends (4.00 s) — it stops at the end of the shot",
+      "item c's move starts at 3.00 s, after the shot ends (3.00 s) — it never plays",
+      "item d's move ends at 4.00 s, after the shot ends (3.00 s) — it stops at the end of the shot",
+    ]);
+  });
+
   it('warns when an onBeat item could not reach a beat, saying why for an item that keeps its audio', async () => {
     const { dir } = await project({ words: [], segments: [], speech: [] });
     await saveEpisode(dir, base({

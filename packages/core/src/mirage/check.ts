@@ -21,6 +21,14 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
     if (o.start >= D - 1e-6) out.push(`overlay ${i + 1} ("${o.text}") starts at ${s2(o.start)} s, after the episode ends (${s2(D)} s) — it will never show`);
     if (undrawable(o.text)) out.push(`overlay ${i + 1} ("${o.text}") has emoji, which can't be drawn — they are left out`);
   });
+  // A move's times are seconds of the shot's output length, held frames included.
+  for (const l of layoutTimeline(ep)) {
+    const m = l.item.move;
+    if (!m) continue;
+    const len = l.frames / ep.output.fps;
+    if (m.start !== undefined && m.start >= len - 1e-6) out.push(`item ${l.item.id}'s move starts at ${s2(m.start)} s, after the shot ends (${s2(len)} s) — it never plays`);
+    else if (m.end !== undefined && m.end > len + 0.5 / ep.output.fps) out.push(`item ${l.item.id}'s move ends at ${s2(m.end)} s, after the shot ends (${s2(len)} s) — it stops at the end of the shot`);
+  }
   ep.music.forEach((c, i) => {
     if (c.start >= D - 1e-6) out.push(`music cue ${i + 1} (${c.track}) starts at ${s2(c.start)} s, after the episode ends (${s2(D)} s) — it will never play`);
   });
