@@ -665,7 +665,7 @@ describe('thumbnail', () => {
     return dir;
   }
 
-  it('writes the candidate frames and lists each with its time and reason', async () => {
+  it('writes the candidate frames and lists each with its time, the at that writes it, and its reason', async () => {
     const dir = await withCut('rough.mp4');
     const { call } = await connect(dir, { tools: await realMediaTools() });
     const r = await call('thumbnail', { video: 1 });
@@ -673,17 +673,17 @@ describe('thumbnail', () => {
       isError: false,
       text: [
         'wrote 11 candidate frames to episodes/1/thumbs/ (from rough.mp4)',
-        'cand-01.jpg  0:02.5  moment: big laugh',
-        'cand-02.jpg  0:12.0  reveal beat (item b)',
-        'cand-03.jpg  0:00.6  even spacing',
-        'cand-04.jpg  0:04.1  even spacing',
-        'cand-05.jpg  0:05.3  even spacing',
-        'cand-06.jpg  0:06.4  even spacing',
-        'cand-07.jpg  0:07.6  even spacing',
-        'cand-08.jpg  0:08.8  even spacing',
-        'cand-09.jpg  0:09.9  even spacing',
-        'cand-10.jpg  0:13.4  even spacing',
-        'cand-11.jpg  0:10.9  even spacing',
+        'cand-01.jpg  0:02.5  at 2.517  moment: big laugh',
+        'cand-02.jpg  0:12.0  at 12.017  reveal beat (item b)',
+        'cand-03.jpg  0:00.6  at 0.583  even spacing',
+        'cand-04.jpg  0:04.1  at 4.083  even spacing',
+        'cand-05.jpg  0:05.3  at 5.25  even spacing',
+        'cand-06.jpg  0:06.4  at 6.417  even spacing',
+        'cand-07.jpg  0:07.6  at 7.583  even spacing',
+        'cand-08.jpg  0:08.8  at 8.75  even spacing',
+        'cand-09.jpg  0:09.9  at 9.917  even spacing',
+        'cand-10.jpg  0:13.4  at 13.417  even spacing',
+        'cand-11.jpg  0:11.0  at 10.95  even spacing',
       ].join('\n'),
     });
     expect((await readdir(join(dir, 'episodes', '1', 'thumbs'))).sort()).toEqual(Array.from({ length: 11 }, (_, i) => `cand-${String(i + 1).padStart(2, '0')}.jpg`));

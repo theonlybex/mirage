@@ -60,6 +60,9 @@ describe('the plugin\'s format files', () => {
   it('the build story points to the edit skill, whose build-story rules are pinned there', () => {
     const story = loadFormats().formats.find((f) => f.id === 'build-story')!;
     expect(story.rules).toContain('mirage:edit');
+    // It has a Packaging part, so it can't say it adds nothing.
+    expect(story.rules).not.toContain('This file adds nothing to them.');
+    expect(story.rules).toContain("its Packaging part below only points to the edit skill's");
   });
 
   it('the short keeps the payoff in the big video, and says how the two kinds end', () => {
@@ -88,9 +91,12 @@ describe('packaging in the format files', () => {
     expect(body('build-story')).toContain('all caps with a number');
   });
   it('each says what its thumbnail shows', () => {
-    expect(body('vlog')).toContain('no text, no arrows');
+    expect(body('vlog')).toContain('no text, no arrows, unless the person asks for words');
     expect(body('short')).toContain('cover (1080×1920)');
     expect(body('build-story')).toContain('before/after');
+    // Descriptions: the licence lines come from the music library.
+    expect(body('short')).toContain('with facts from the person, the catalog or the music library only');
+    expect(body('vlog')).toContain('but the person, the catalog and the music library');
   });
 });
 

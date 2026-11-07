@@ -33,7 +33,7 @@ Instagram's buttons and caption cover more of the picture than YouTube's, so kee
 ## Packaging
 The short's title asks the big video's question, never the answer ("Did he actually say yes?"). A standalone short's title asks the hook's question.
 
-The cover (1080×1920) is the hook's strongest frame: call `thumbnail` for candidates and pick the one nearest the hook, with a face in the clear part of the frame, no text unless the person asks. The title and description are written as the edit skill says, from the person and the catalog only.
+The cover (1080×1920) is the hook's strongest frame: call `thumbnail` for candidates and pick the one nearest the hook, with a face in the clear part of the frame, no text unless the person asks. The title and description are written as the edit skill says, with facts from the person, the catalog or the music library only.
 
 ## When it's finished
 The short's `summary.md` says what to set when posting it:

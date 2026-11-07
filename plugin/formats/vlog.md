@@ -43,9 +43,9 @@ Suggest titles in either style and let the person pick (3 options in `summary.md
 
 A title never claims what the vlog doesn't show.
 
-Thumbnail: no text, no arrows. Pick a frame with a wide-open laughing or shocked face and the cause in frame, as the edit skill says (`thumbnail`, candidates first); call it without `text`.
+Thumbnail: no text, no arrows, unless the person asks for words. Pick a frame with a wide-open laughing or shocked face and the cause in frame, as the edit skill says (`thumbnail`, candidates first); call it without `text` unless they asked for some.
 
-The description follows the edit skill's order: schedule line, sponsor code, plugs, socials, "People in the video" with the handles the person gave, credits. Take nothing from anywhere but the person and the catalog.
+The description follows the edit skill's order: schedule line, sponsor code, plugs, socials, "People in the video" with the handles the person gave, credits. Take nothing from anywhere but the person, the catalog and the music library (the licence lines).
 
 ## Guardrails
 - Only people who agreed to be on camera. Leave out bystanders and anyone who didn't agree to be shown; if they matter to a bit, ask the person.

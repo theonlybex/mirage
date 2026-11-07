@@ -30509,6 +30509,34 @@ var init_encode = __esm({
 });
 
 // packages/core/src/mirage/move.ts
+function ease(kind, p) {
+  const q = Math.min(1, Math.max(0, p));
+  switch (kind) {
+    case "linear":
+      return q;
+    case "in":
+      return q * q;
+    case "out":
+      return 1 - (1 - q) * (1 - q);
+    case "inOut":
+      return q < 0.5 ? 2 * q * q : 1 - 2 * (1 - q) * (1 - q);
+  }
+}
+function moveFrames(item, frames, fps, clock) {
+  const m = item.move;
+  const { z0, z1, x0, x1, y0, y1, a: a2, b } = moveSpan(item, frames, fps, clock);
+  const at2 = (p) => {
+    const e = ease(m?.ease ?? "inOut", p);
+    if (e === 0) return { zoom: z0, x: x0, y: y0 };
+    if (e === 1) return { zoom: z1, x: x1, y: y1 };
+    return { zoom: z0 * (z1 / z0) ** e, x: x0 + (x1 - x0) * e, y: y0 + (y1 - y0) * e };
+  };
+  return Array.from({ length: Math.max(0, frames) }, (_, i2) => {
+    if (!m || i2 < a2) return at2(0);
+    if (i2 >= b - 1) return at2(1);
+    return at2((i2 - a2) / (b - a2 - 1));
+  });
+}
 function moveSpan(item, frames, fps, clock) {
   const m = item.move;
   return {
@@ -35117,12 +35145,15 @@ import { tmpdir as tmpdir3 } from "node:os";
 import { join as join21 } from "node:path";
 function thumbCandidates(ep, catalog, loudness, max = MAX_CANDIDATES) {
   const laid = layoutTimeline(ep);
+  const fps = ep.output.fps;
   const duration3 = laid.length ? laid[laid.length - 1].end : 0;
+  const frames = laid.reduce((n2, l) => n2 + l.frames, 0);
   const clips = new Map(catalog.clips.map((c3) => [c3.id, c3]));
   const picks = [];
-  const add = (t, reason) => {
-    t = ms(t);
-    if (picks.length >= max || t < 0 || t >= duration3 - EPS5) return;
+  const add = (at2, reason) => {
+    const f = outputFrame(at2, fps);
+    if (picks.length >= max || at2 < -EPS5 || f < 0 || f >= frames) return;
+    const t = frameTime(f, fps);
     if (picks.some((p) => Math.abs(p.t - t) < MIN_GAP_SEC - EPS5)) return;
     picks.push({ t, reason });
   };
@@ -35175,6 +35206,15 @@ async function cutLoudness(file2, tools, o2 = {}) {
     await rm12(work, { recursive: true, force: true });
   }
 }
+async function openElsewhere(op, shown2) {
+  try {
+    return await op;
+  } catch (e) {
+    const code = e.code;
+    if (code === "EBUSY" || code === "EPERM") throw new MirageError("BUSY", `${shown2} is open in another app`, "Close it there, then run thumbnail again.");
+    throw e;
+  }
+}
 async function sweep(dir, pattern) {
   const names = await readdir9(dir).catch(() => []);
   for (const f of names) if (pattern.test(f)) await rm12(join21(dir, f), { recursive: true, force: true }).catch(() => {
@@ -35204,15 +35244,16 @@ async function writeCandidates(project, n2, tools, o2 = {}) {
     const frames = [];
     for (const [i2, p] of picks.entries()) {
       const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
-      await tools.runFfmpeg(["-accurate_seek", "-ss", p.t.toFixed(3), "-i", cut, "-frames:v", "1", "-q:v", "2", join21(work, file2)], { signal: o2.signal });
+      const seek = Math.max(0, p.t - 1 / ep.output.fps);
+      await tools.runFfmpeg(["-accurate_seek", "-ss", ffNum(seek), "-i", cut, "-vf", JPEG_COLOUR, "-frames:v", "1", "-q:v", "2", join21(work, file2)], { signal: o2.signal });
       if (!existsSync11(join21(work, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
       frames.push({ ...p, file: file2 });
     }
     o2.signal?.throwIfAborted();
     const thumbs = join21(dir, "thumbs");
     await mkdir10(thumbs, { recursive: true });
-    for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
-    for (const f of frames) await rename7(join21(work, f.file), join21(thumbs, f.file));
+    for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await openElsewhere(rm12(join21(thumbs, f), { force: true }), `episodes/${n2}/thumbs/${f}`);
+    for (const f of frames) await openElsewhere(rename7(join21(work, f.file), join21(thumbs, f.file)), `episodes/${n2}/thumbs/${f.file}`);
     return { source, timelineChanged, frames };
   } finally {
     await rm12(work, { recursive: true, force: true });
@@ -35225,7 +35266,7 @@ function formatThumbTime(t) {
 function candidatesReport(n2, r) {
   return [
     `wrote ${r.frames.length} candidate frames to episodes/${n2}/thumbs/ (from ${r.source})`,
-    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`),
+    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  at ${secs(f.t)}  ${f.reason}`),
     ...r.timelineChanged ? [`\u26A0 the timeline changed after ${r.source} was made \u2014 run cut again for frames that match`] : []
   ];
 }
@@ -35238,17 +35279,28 @@ function thumbSource(ep, at2) {
   const total = laid.reduce((f, l) => f + l.frames, 0);
   const outside = () => new MirageError("BAD_INPUT", `${at2} s is outside the video (0\u2013${secs(total / fps)} s)`, "");
   if (!Number.isFinite(at2) || at2 < 0) throw outside();
-  const frame = Math.floor(at2 * fps + 1e-6);
+  const frame = outputFrame(at2, fps);
   let first = 0;
   for (const l of laid) {
     if (frame < first + l.frames) {
       if (isCard(l.item)) return { laid: l, card: true };
       const { src, speed } = l.item;
-      return { laid: l, src: src.in + Math.min(frame - first, l.srcFrames) * speed / fps };
+      return { laid: l, src: src.in + Math.min(frame - first, l.srcFrames) * speed / fps, frame: frame - first };
     }
     first += l.frames;
   }
   throw outside();
+}
+function thumbFraming(l, frame, fps) {
+  const item = l.item;
+  const at2 = moveFrames(item, l.frames, fps, l.clock)[Math.min(Math.max(0, frame), l.frames - 1)] ?? { zoom: item.zoom, x: item.focus.x, y: item.focus.y };
+  return { zoom: at2.zoom, focus: { x: at2.x, y: at2.y } };
+}
+function thumbCrop(o2) {
+  const { width: W, height: H } = o2.thumb;
+  const z2 = ffNum(o2.zoom);
+  const [vw, vh] = o2.frame === "fill" ? [`min(iw,ih*${o2.output.width}/${o2.output.height})/${z2}`, `min(ih,iw*${o2.output.height}/${o2.output.width})/${z2}`] : [`iw/${z2}`, `ih/${z2}`];
+  return `crop=w='min(${vw},${vh}*${W}/${H})':h='min(${vh},${vw}*${H}/${W})':x='(iw-ow)*${ffNum(o2.focus.x)}':y='(ih-oh)*${ffNum(o2.focus.y)}'`;
 }
 function thumbWordCount(text) {
   return tidy(text).split(/\s+/).filter((w) => HAS_WORD2.test(w)).length;
@@ -35271,7 +35323,7 @@ function thumbnailAss(width, height, text) {
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(height * 5 / 6)})}${assDraw(text.toUpperCase())}`,
+    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(width > height ? height * 5 / 6 : height * 0.6)})}${assDraw(text.toUpperCase())}`,
     ""
   ].join("\n");
 }
@@ -35286,7 +35338,6 @@ async function writeThumbnail(project, n2, o2, tools, run2 = {}) {
   const fps = ep.output.fps;
   const shown2 = thumbSource(ep, o2.at);
   const { width: W, height: H } = thumbSize(ep.output);
-  const focusAt = (f) => `(iw-ow)*${ffNum(f.x)}:(ih-oh)*${ffNum(f.y)}`;
   const look = "unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08";
   const fontsDir = filterValue(bundledFontsDir());
   const scripts = [];
@@ -35322,12 +35373,14 @@ async function writeThumbnail(project, n2, o2, tools, run2 = {}) {
     const back = shown2.src - from0;
     const k = Math.max(0, Math.ceil(back * fps / item.speed - 1e-6));
     input2 = readFrom(src, from0);
-    picture = `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:${focusAt(o2.focus ?? item.focus)},setsar=1,${look}`;
+    const framing = thumbFraming(shown2.laid, shown2.frame, fps);
+    const crop = thumbCrop({ frame: item.frame, zoom: framing.zoom, focus: o2.focus ?? framing.focus, output: ep.output, thumb: { width: W, height: H } });
+    picture = `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',${crop},scale=${W}:${H}:flags=lanczos,setsar=1,${look}`;
     from = { clip: item.clip, src: ms(shown2.src) };
     where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
   }
   if (o2.text !== void 0 && tidy(o2.text) !== "") scripts.push(["thumbnail.ass", thumbnailAss(W, H, o2.text)]);
-  const vf = [picture, ...scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : [], ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`)].join(",");
+  const vf = [picture, ...scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : [], ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`), JPEG_COLOUR].join(",");
   const file2 = join21(dir, "thumbnail.jpg");
   await sweep(dir, LEFT_THUMBNAIL);
   const part = join21(dir, `.thumbnail-${randomUUID9().slice(0, 8)}.jpg`);
@@ -35337,7 +35390,7 @@ async function writeThumbnail(project, n2, o2, tools, run2 = {}) {
     await tools.runFfmpeg([...input2, "-vf", vf, "-frames:v", "1", "-q:v", "2", part], { cwd: work, signal: run2.signal });
     if (!existsSync11(part)) throw new MirageError("BAD_INPUT", `${"card" in shown2 ? where.name : `${where.name} at ${secs(shown2.src)} s`} gave no picture`, where.hint);
     run2.signal?.throwIfAborted();
-    await rename7(part, file2);
+    await openElsewhere(rename7(part, file2), `episodes/${n2}/thumbnail.jpg`);
   } finally {
     await rm12(part, { force: true });
     await rm12(work, { recursive: true, force: true });
@@ -35348,7 +35401,7 @@ function thumbnailReport(n2, r) {
   const from = r.from === "card" ? "the card" : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
   return `wrote episodes/${n2}/thumbnail.jpg (${r.width}\xD7${r.height}, from ${from})`;
 }
-var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, CAND_FILE, LEFT_CANDIDATES, LEFT_THUMBNAIL, CARD_SEC, MAX_THUMB_WORDS, secs, HAS_WORD2;
+var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, secs, outputFrame, frameTime, CAND_FILE, JPEG_COLOUR, LEFT_CANDIDATES, LEFT_THUMBNAIL, CARD_SEC, MAX_THUMB_WORDS, HAS_WORD2;
 var init_thumbnail = __esm({
   "packages/core/src/mirage/thumbnail.ts"() {
     "use strict";
@@ -35360,6 +35413,7 @@ var init_thumbnail = __esm({
     init_cards();
     init_overlays();
     init_render_episode();
+    init_move();
     init_timeline();
     MAX_CANDIDATES = 12;
     MIN_GAP_SEC = 1;
@@ -35369,12 +35423,15 @@ var init_thumbnail = __esm({
     STEP_SEC = 0.1;
     EPS5 = 1e-9;
     ms = (t) => Math.round(t * 1e3) / 1e3;
+    secs = (n2) => String(ms(n2));
+    outputFrame = (t, fps) => Math.floor(t * fps + 1e-6);
+    frameTime = (f, fps) => (f + 0.5) / fps;
     CAND_FILE = /^cand-\d+\.jpg$/;
+    JPEG_COLOUR = "scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p";
     LEFT_CANDIDATES = /^\.thumbs-/;
     LEFT_THUMBNAIL = /^\.thumbnail-[^/\\]*\.jpg$/;
     CARD_SEC = 10;
     MAX_THUMB_WORDS = 4;
-    secs = (n2) => String(ms(n2));
     HAS_WORD2 = /[\p{L}\p{N}]/u;
   }
 });
@@ -35425,6 +35482,7 @@ __export(src_exports2, {
   DELIVERY_LABEL: () => DELIVERY_LABEL,
   FILLERS: () => FILLERS,
   FormatSchema: () => FormatSchema,
+  JPEG_COLOUR: () => JPEG_COLOUR,
   JsonFileError: () => JsonFileError,
   MAX_BACKUPS: () => MAX_BACKUPS,
   MAX_CANDIDATES: () => MAX_CANDIDATES,
@@ -35509,6 +35567,7 @@ __export(src_exports2, {
   formatTime: () => formatTime,
   formatsDir: () => formatsDir,
   frameInterval: () => frameInterval,
+  frameTime: () => frameTime,
   frameTolerance: () => frameTolerance,
   groupCaptions: () => groupCaptions,
   groupSpans: () => groupSpans,
@@ -35554,6 +35613,7 @@ __export(src_exports2, {
   numberWords: () => numberWords,
   oneLine: () => oneLine,
   onsetEnvelope: () => onsetEnvelope,
+  outputFrame: () => outputFrame,
   placedStatus: () => placedStatus,
   planVideo: () => planVideo,
   previewSize: () => previewSize,
@@ -35616,6 +35676,8 @@ __export(src_exports2, {
   takeCorrection: () => takeCorrection,
   textTokens: () => textTokens,
   thumbCandidates: () => thumbCandidates,
+  thumbCrop: () => thumbCrop,
+  thumbFraming: () => thumbFraming,
   thumbSize: () => thumbSize,
   thumbSource: () => thumbSource,
   thumbWordCount: () => thumbWordCount,

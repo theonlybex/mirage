@@ -295,13 +295,13 @@ export function createEngineServer(ctx: EngineContext): McpServer {
 
   tool(
     'thumbnail',
-    'Thumbnails for a video. Without at: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from. ' +
-      'With at: writes episodes/<n>/thumbnail.jpg at full quality from the source frame the video shows at that second (1280×720, or the 1080×1920 cover for a vertical video), with optional text.',
+    'Thumbnails for a video. Without at: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from, each listed with the at that writes it. ' +
+      'With at: writes episodes/<n>/thumbnail.jpg at full quality from the source frame the video shows at that second, framed as the video frames it there (1280×720, or the 1080×1920 cover for a vertical video), with optional text.',
     {
       video,
-      at: z.number().optional().describe('The second of the video the thumbnail shows (e.g. a candidate frame\'s time)'),
+      at: z.number().optional().describe('The second of the video the thumbnail shows: a candidate frame\'s `at` gives that frame'),
       text: z.string().optional().describe('With at: up to 4 words drawn on the thumbnail in capitals'),
-      focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional().describe('With at: the point kept in view when the picture is cropped, 0–1 from the left and from the top (default the item\'s own focus)'),
+      focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional().describe('With at: the point kept in view when the picture is cropped, 0–1 from the left and from the top (default the focus the video shows there); footage the thumbnail\'s shape at zoom 1 has no room to move'),
     },
     async ({ video: n, at, text, focus }, { signal }) => {
       if (at === undefined) {

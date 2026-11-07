@@ -13,9 +13,13 @@ import { loadCatalog } from './ingest.js';
 import { cardImagesFor } from './cards.js';
 import { assDraw, buildAss, scaler, tidy } from './overlays.js';
 import { cardPicture, cardPictureInput, episodeDir, filterValue, frameTolerance, loadEpisode, readFrom, sourcesFor } from './render-episode.js';
+import { moveFrames } from './move.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
 
-/** A frame of the cut worth considering as a thumbnail: where it is (output seconds) and why it was picked. */
+/**
+ * A frame of the cut worth considering as a thumbnail: where it is and why it was picked. `t` is the middle of the
+ * output frame (frameTime), the time to pass to `thumbnail` as `at` for a thumbnail of that same frame.
+ */
 export interface ThumbCandidate {
   t: number;
   reason: string;
@@ -34,6 +38,13 @@ const WINDOW_SEC = 0.4;
 const STEP_SEC = 0.1;
 const EPS = 1e-9;
 const ms = (t: number) => Math.round(t * 1000) / 1000;
+/** Seconds as written in a reply: up to 3 decimals, no trailing zeros. */
+const secs = (n: number) => String(ms(n));
+
+/** The output frame showing time `t` (allowing for rounding: 4.6 × 30 is 137.99999…). */
+export const outputFrame = (t: number, fps: number) => Math.floor(t * fps + 1e-6);
+/** The middle of output frame `f`: a time that lands on that frame however it is rounded to the millisecond. */
+export const frameTime = (f: number, fps: number) => (f + 0.5) / fps;
 
 /**
  * The times worth a thumbnail, in this order, none within MIN_GAP_SEC of an earlier pick and at most `max`:
@@ -42,16 +53,21 @@ const ms = (t: number) => Math.round(t * 1000) / 1000;
  *    audio, `t` the middle of the 400 ms each covers; silent readings are ignored);
  * 3. the middle of each item whose beat makes the point (THUMB_BEATS), a card as well;
  * 4. even spacing over the video until `max`.
- * Pure: a video of cards, or without sound, still gets its beats and even spacing.
+ * Each time is snapped to the output frame showing it, and given as that frame's middle (frameTime): a moment on an
+ * item's first frame stays on that item's frame, not the frame before. Pure: a video of cards, or without sound, still
+ * gets its beats and even spacing.
  */
 export function thumbCandidates(ep: Episode, catalog: Catalog, loudness: { t: number; lufs: number }[], max: number = MAX_CANDIDATES): ThumbCandidate[] {
   const laid = layoutTimeline(ep);
+  const fps = ep.output.fps;
   const duration = laid.length ? laid[laid.length - 1]!.end : 0;
+  const frames = laid.reduce((n, l) => n + l.frames, 0);
   const clips = new Map(catalog.clips.map((c) => [c.id, c]));
   const picks: ThumbCandidate[] = [];
-  const add = (t: number, reason: string) => {
-    t = ms(t);
-    if (picks.length >= max || t < 0 || t >= duration - EPS) return;
+  const add = (at: number, reason: string) => {
+    const f = outputFrame(at, fps);
+    if (picks.length >= max || at < -EPS || f < 0 || f >= frames) return;
+    const t = frameTime(f, fps);
     if (picks.some((p) => Math.abs(p.t - t) < MIN_GAP_SEC - EPS)) return;
     picks.push({ t, reason });
   };
@@ -129,6 +145,27 @@ export interface CandidateFrames {
 
 const CAND_FILE = /^cand-\d+\.jpg$/;
 
+/**
+ * The last filter of every JPEG Mirage writes from a frame: clips and cuts are BT.709 at limited range, and a JPEG is
+ * read as BT.601 at full range. Without converting, FFmpeg writes the BT.709 numbers as they are and skin comes out
+ * duller and cooler.
+ */
+export const JPEG_COLOUR = 'scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p';
+
+/**
+ * Waits for `op` (a rename or removal of a file the person may have open); a file another app holds open (EBUSY, or EPERM
+ * on Windows) is said in plain words.
+ */
+async function openElsewhere<T>(op: Promise<T>, shown: string): Promise<T> {
+  try {
+    return await op;
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'EBUSY' || code === 'EPERM') throw new MirageError('BUSY', `${shown} is open in another app`, 'Close it there, then run thumbnail again.');
+    throw e;
+  }
+}
+
 /** What writeCandidates and writeThumbnail write before swapping it in: left behind only by a run that was killed. */
 const LEFT_CANDIDATES = /^\.thumbs-/;
 const LEFT_THUMBNAIL = /^\.thumbnail-[^/\\]*\.jpg$/;
@@ -177,16 +214,18 @@ export async function writeCandidates(project: string, n: number, tools: MediaTo
     const frames: CandidateFrames['frames'] = [];
     for (const [i, p] of picks.entries()) {
       const file = `cand-${String(i + 1).padStart(2, '0')}.jpg`;
-      // -accurate_seek (FFmpeg's default when transcoding) decodes from the keyframe before to the frame at p.t exactly.
-      await tools.runFfmpeg(['-accurate_seek', '-ss', p.t.toFixed(3), '-i', cut, '-frames:v', '1', '-q:v', '2', join(work, file)], { signal: o.signal });
+      // -accurate_seek (FFmpeg's default when transcoding) decodes from the keyframe before and keeps the first frame
+      // at or after the seek time: half a frame before frame f (p.t is its middle), so it is frame f exactly.
+      const seek = Math.max(0, p.t - 1 / ep.output.fps);
+      await tools.runFfmpeg(['-accurate_seek', '-ss', ffNum(seek), '-i', cut, '-vf', JPEG_COLOUR, '-frames:v', '1', '-q:v', '2', join(work, file)], { signal: o.signal });
       if (!existsSync(join(work, file))) throw new MirageError('BAD_INPUT', `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n} again (cut or render), then pick frames.`);
       frames.push({ ...p, file });
     }
     o.signal?.throwIfAborted();
     const thumbs = join(dir, 'thumbs');
     await mkdir(thumbs, { recursive: true });
-    for (const f of await readdir(thumbs)) if (CAND_FILE.test(f)) await rm(join(thumbs, f), { force: true });
-    for (const f of frames) await rename(join(work, f.file), join(thumbs, f.file));
+    for (const f of await readdir(thumbs)) if (CAND_FILE.test(f)) await openElsewhere(rm(join(thumbs, f), { force: true }), `episodes/${n}/thumbs/${f}`);
+    for (const f of frames) await openElsewhere(rename(join(work, f.file), join(thumbs, f.file)), `episodes/${n}/thumbs/${f.file}`);
     return { source, timelineChanged, frames };
   } finally {
     await rm(work, { recursive: true, force: true });
@@ -199,11 +238,14 @@ export function formatThumbTime(t: number): string {
   return `${Math.floor(tenths / 600)}:${((tenths % 600) / 10).toFixed(1).padStart(4, '0')}`;
 }
 
-/** The tool's reply: how many frames and from which cut, then a line per frame (file, time, why). */
+/**
+ * The tool's reply: how many frames and from which cut, then a line per frame: file, time (m:ss.s), the `at` that writes a
+ * thumbnail of that frame (seconds), and why it was picked.
+ */
 export function candidatesReport(n: number, r: CandidateFrames): string[] {
   return [
     `wrote ${r.frames.length} candidate frames to episodes/${n}/thumbs/ (from ${r.source})`,
-    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`),
+    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  at ${secs(f.t)}  ${f.reason}`),
     ...(r.timelineChanged ? [`⚠ the timeline changed after ${r.source} was made — run cut again for frames that match`] : []),
   ];
 }
@@ -219,18 +261,19 @@ export function thumbSize(output: { width: number; height: number }): { width: n
   return output.width > output.height ? { width: 1280, height: 720 } : { width: 1080, height: 1920 };
 }
 
-/** Seconds as written in a reply: up to 3 decimals, no trailing zeros. */
-const secs = (n: number) => String(ms(n));
-
-/** What the video shows at an output time: a clip item's picture at `src` seconds into its clip, or a card. */
-export type ThumbSource = { laid: LaidItem; src: number } | { laid: LaidItem; card: true };
+/**
+ * What the video shows at an output time: a clip item's picture at `src` seconds into its clip, on the item's output
+ * frame `frame` (0 = its first, held frames counted), or a card.
+ */
+export type ThumbSource = { laid: LaidItem; src: number; frame: number } | { laid: LaidItem; card: true };
 
 /**
  * What video `ep` shows at output time `at`: the item of the frame showing it, and for a clip item the time in its clip
  * the render looks for: `src.in` + the frame's place in the item × speed / fps. During a hold, the held frame: the render
  * clones its frame `srcFrames`, at `src.in + srcFrames × speed / fps` (which can be a little past src.out, and past the
  * clip's last frame; the render, and writeThumbnail, then show the last frame there is). Under a move it is still the
- * clip's own frame: the thumbnail makes its own crop. Throws when `at` is outside the video.
+ * clip's own frame; `frame` says where in the item it is, for the move's zoom and focus there (thumbFraming). Throws
+ * when `at` is outside the video.
  */
 export function thumbSource(ep: Episode, at: number): ThumbSource {
   const fps = ep.output.fps;
@@ -238,18 +281,43 @@ export function thumbSource(ep: Episode, at: number): ThumbSource {
   const total = laid.reduce((f, l) => f + l.frames, 0);
   const outside = () => new MirageError('BAD_INPUT', `${at} s is outside the video (0–${secs(total / fps)} s)`, '');
   if (!Number.isFinite(at) || at < 0) throw outside();
-  // The frame showing `at` (allowing for rounding: 4.6 × 30 is 137.99999…).
-  const frame = Math.floor(at * fps + 1e-6);
+  const frame = outputFrame(at, fps);
   let first = 0;
   for (const l of laid) {
     if (frame < first + l.frames) {
       if (isCard(l.item)) return { laid: l, card: true };
       const { src, speed } = l.item;
-      return { laid: l, src: src.in + (Math.min(frame - first, l.srcFrames) * speed) / fps };
+      return { laid: l, src: src.in + (Math.min(frame - first, l.srcFrames) * speed) / fps, frame: frame - first };
     }
     first += l.frames;
   }
   throw outside();
+}
+
+/**
+ * The zoom and focus a clip item shows on its output frame `frame` (moveFrames: an animated `move` at that frame, else
+ * the item's own `zoom` and `focus`).
+ */
+export function thumbFraming(l: LaidItem, frame: number, fps: number): { zoom: number; focus: { x: number; y: number } } {
+  const item = l.item as ClipItem;
+  const at = moveFrames(item, l.frames, fps, l.clock)[Math.min(Math.max(0, frame), l.frames - 1)] ?? { zoom: item.zoom, x: item.focus.x, y: item.focus.y };
+  return { zoom: at.zoom, focus: { x: at.x, y: at.y } };
+}
+
+/**
+ * The crop that frames a source picture for a W×H thumbnail as the video frames it (FFmpeg expressions of the picture's
+ * own iw×ih, so a turned clip is measured upright): the part of the picture the video shows is, for `fill`, the largest
+ * window of the output's shape, and for `fit` and `blur` the whole picture, either one over `zoom`; the crop is the
+ * largest window of the thumbnail's shape inside that, at (iw−ow)·x, (ih−oh)·y as Mirage's crops are. Placed this way,
+ * zooming in then cropping the output's shape and then the thumbnail's shape, each around the same focus, comes to the
+ * one window. With `zoom` 1 and footage the shape of the thumbnail the window is the whole picture, so the focus has no
+ * room to move it.
+ */
+export function thumbCrop(o: { frame: ClipItem['frame']; zoom: number; focus: { x: number; y: number }; output: { width: number; height: number }; thumb: { width: number; height: number } }): string {
+  const { width: W, height: H } = o.thumb;
+  const z = ffNum(o.zoom);
+  const [vw, vh] = o.frame === 'fill' ? [`min(iw,ih*${o.output.width}/${o.output.height})/${z}`, `min(ih,iw*${o.output.height}/${o.output.width})/${z}`] : [`iw/${z}`, `ih/${z}`];
+  return `crop=w='min(${vw},${vh}*${W}/${H})':h='min(${vh},${vw}*${H}/${W})':x='(iw-ow)*${ffNum(o.focus.x)}':y='(ih-oh)*${ffNum(o.focus.y)}'`;
 }
 
 const HAS_WORD = /[\p{L}\p{N}]/u;
@@ -262,8 +330,9 @@ export function thumbWordCount(text: string): number {
 /**
  * The subtitle script drawing a thumbnail's text on a width×height picture: capitals in the bundled Montserrat
  * ExtraBold, white with a black outline px(10), size px(150) (pixels for a 1080-px short side, scaled by the picture's
- * short side), centred on the middle of the lower third and wrapping inside 5% side margins. The text goes through
- * assDraw as captions and overlays do (emoji left out, braces harmless).
+ * short side), wrapping inside 5% side margins. Centred on the middle of the lower third (5/6 of the height) of a
+ * landscape thumbnail; on a vertical cover at 60% of the height, clear of the bottom 20% the Shorts and Reels buttons
+ * and caption cover. The text goes through assDraw as captions and overlays do (emoji left out, braces harmless).
  */
 export function thumbnailAss(width: number, height: number, text: string): string {
   const px = scaler(width, height);
@@ -283,7 +352,7 @@ export function thumbnailAss(width: number, height: number, text: string): strin
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round((height * 5) / 6)})}${assDraw(text.toUpperCase())}`,
+    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(width > height ? (height * 5) / 6 : height * 0.6)})}${assDraw(text.toUpperCase())}`,
     '',
   ].join('\n');
 }
@@ -298,12 +367,14 @@ export interface Thumbnail {
 
 /**
  * Writes episodes/<n>/thumbnail.jpg from what video `n` shows at output second `at` (thumbSource), needing no cut:
- * - a clip item: its frame read from the clip file itself (not the compressed cut), scaled to cover the thumbnail size
- *   (thumbSize) and cropped around `focus` (default the item's own) the way Mirage crops, sharpened and brightened a little;
+ * - a clip item: its frame read from the clip file itself (not the compressed cut), framed as the video frames it there
+ *   (thumbCrop: the item's `frame`, and the zoom and focus it shows on that frame, a `move`'s included; `focus` given
+ *   moves the window instead), scaled to the thumbnail size (thumbSize), sharpened and brightened a little;
  * - a card: drawn at the thumbnail size as the render draws it, its background (black, or its picture covering the frame
  *   around `focus`, default the centre, sharpened and brightened as a clip's frame is) and its text in the card styles.
- * Then `text` (at most MAX_THUMB_WORDS words) drawn on it (thumbnailAss). Written beside the old one and then renamed
- * over it, so a stop or failure leaves an earlier thumbnail as it was.
+ * Then `text` (at most MAX_THUMB_WORDS words) drawn on it (thumbnailAss), and the colours turned into a JPEG's own
+ * (JPEG_COLOUR). Written beside the old one and then renamed over it, so a stop or failure leaves an earlier thumbnail as
+ * it was; a thumbnail.jpg open in another app is said so.
  */
 export async function writeThumbnail(
   project: string,
@@ -323,7 +394,6 @@ export async function writeThumbnail(
   const shown = thumbSource(ep, o.at);
   const { width: W, height: H } = thumbSize(ep.output);
 
-  const focusAt = (f: { x: number; y: number }) => `(iw-ow)*${ffNum(f.x)}:(ih-oh)*${ffNum(f.y)}`;
   const look = 'unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08';
   const fontsDir = filterValue(bundledFontsDir());
   const scripts: [string, string][] = [];
@@ -369,18 +439,20 @@ export async function writeThumbnail(
     const back = shown.src - from0;
     const k = Math.max(0, Math.ceil((back * fps) / item.speed - 1e-6));
     input = readFrom(src, from0);
-    // Mirage's crop: the window at (iw−ow)·x, (ih−oh)·y.
+    // What the video shows on that frame: the item's framing, at the move's zoom and focus there.
+    const framing = thumbFraming(shown.laid, shown.frame, fps);
+    const crop = thumbCrop({ frame: item.frame, zoom: framing.zoom, focus: o.focus ?? framing.focus, output: ep.output, thumb: { width: W, height: H } });
     picture =
       `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,` +
       `trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',` +
-      `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:${focusAt(o.focus ?? item.focus)},setsar=1,${look}`;
+      `${crop},scale=${W}:${H}:flags=lanczos,setsar=1,${look}`;
     from = { clip: item.clip, src: ms(shown.src) };
     where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
   }
   if (o.text !== undefined && tidy(o.text) !== '') scripts.push(['thumbnail.ass', thumbnailAss(W, H, o.text)]);
   // The picture is stamped CARD_SEC/2 into the scripts: past a card's fade in, before its fade out. Scripts are named
   // relative to the folder FFmpeg runs in, so their paths need no escaping in the graph.
-  const vf = [picture, ...(scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : []), ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`)].join(',');
+  const vf = [picture, ...(scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : []), ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`), JPEG_COLOUR].join(',');
   const file = join(dir, 'thumbnail.jpg');
   await sweep(dir, LEFT_THUMBNAIL);
   const part = join(dir, `.thumbnail-${randomUUID().slice(0, 8)}.jpg`);
@@ -390,7 +462,7 @@ export async function writeThumbnail(
     await tools.runFfmpeg([...input, '-vf', vf, '-frames:v', '1', '-q:v', '2', part], { cwd: work, signal: run.signal });
     if (!existsSync(part)) throw new MirageError('BAD_INPUT', `${'card' in shown ? where.name : `${where.name} at ${secs(shown.src)} s`} gave no picture`, where.hint);
     run.signal?.throwIfAborted();
-    await rename(part, file);
+    await openElsewhere(rename(part, file), `episodes/${n}/thumbnail.jpg`);
   } finally {
     await rm(part, { force: true });
     await rm(work, { recursive: true, force: true });

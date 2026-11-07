@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: MIT
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog } from '@wordedits/shared';
 import { run } from '@wordedits/sidecars';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { saveCatalog } from './ingest.js';
 import { bundledFontsDir } from './fonts.js';
-import { saveEpisode } from './render-episode.js';
+import { renderEpisode, saveEpisode } from './render-episode.js';
 import {
   candidatesReport, cutLoudness, formatThumbTime, thumbCandidates, thumbnailAss, thumbnailReport, thumbSize, thumbSource, thumbWordCount, writeCandidates, writeThumbnail,
 } from './thumbnail.js';
+
+// Renames and removals go through as usual; a test makes one fail as a file held open by another app would.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, rename: vi.fn(actual.rename), rm: vi.fn(actual.rm) };
+});
 
 const clip = (id: string, moments: { t: number; label: string }[] = []): Catalog['clips'][number] => ({
   id, path: `/x/${id}.mp4`, sha256: 'a'.repeat(64), kind: 'screen', transcript: null, frames: [], notes: '', moments,
@@ -22,6 +28,8 @@ const catalog = (...clips: Catalog['clips']): Catalog => ({ version: 1, clips })
 const ep = (items: object[]) => EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items });
 const item = (id: string, src: [number, number], extra: object = {}) => ({ id, beat: 'problem', clip: 'c001', src: { in: src[0], out: src[1] }, ...extra });
 const card = (id: string, sec: number, extra: object = {}) => ({ id, beat: 'title', card: { text: 'hi', style: 'bold', sec }, ...extra });
+/** The middle of the 30 fps output frame showing `t`: where a candidate at `t` is given. */
+const fc = (t: number) => (Math.floor(t * 30 + 1e-6) + 0.5) / 30;
 const flat = (from: number, to: number, lufs = -40) => Array.from({ length: Math.round((to - from) / 0.1) }, (_, i) => ({ t: from + i * 0.1, lufs }));
 
 describe('thumbCandidates', () => {
@@ -35,10 +43,10 @@ describe('thumbCandidates', () => {
     const loud = [...flat(0, 10), { t: 6, lufs: -12 }];
     const r = thumbCandidates(e, cat, loud);
     expect(r.slice(0, 4)).toEqual([
-      { t: 2, reason: 'moment: laughs' },
-      { t: 6, reason: 'loudest moment of item a' },
-      { t: 15, reason: 'truth beat (item b)' },
-      { t: 3.75, reason: 'even spacing' },
+      { t: fc(2), reason: 'moment: laughs' },
+      { t: fc(6), reason: 'loudest moment of item a' },
+      { t: fc(15), reason: 'truth beat (item b)' },
+      { t: fc(3.75), reason: 'even spacing' },
     ]);
     expect(r).toHaveLength(12);
     expect(r.slice(3).every((c) => c.reason === 'even spacing')).toBe(true);
@@ -52,9 +60,9 @@ describe('thumbCandidates', () => {
     expect(near.map((c) => c.reason)).toEqual(['moment: m', 'reveal beat (item a)', 'even spacing']);
     const apart = thumbCandidates(e, cat, [{ t: 11, lufs: -10 }], 3);
     expect(apart).toEqual([
-      { t: 10, reason: 'moment: m' },
-      { t: 11, reason: 'loudest moment of item a' },
-      { t: 15, reason: 'reveal beat (item a)' },
+      { t: fc(10), reason: 'moment: m' },
+      { t: fc(11), reason: 'loudest moment of item a' },
+      { t: fc(15), reason: 'reveal beat (item a)' },
     ]);
   });
 
@@ -77,20 +85,32 @@ describe('thumbCandidates', () => {
     // a: 20 s; b: 5 s (starts at 20); c is a window of the clip without the moment; d starts at 35.
     const r = thumbCandidates(e, catalog(clip('c001', [{ t: 8, label: 'oops' }, { t: 90, label: 'elsewhere' }])), []);
     const moments = r.filter((c) => c.reason === 'moment: oops');
-    expect(moments.map((c) => c.t)).toEqual([8, 21]);
+    expect(moments.map((c) => c.t)).toEqual([fc(8), fc(21)]);
     expect(r.some((c) => c.reason === 'moment: elsewhere')).toBe(false);
   });
 
   it('maps a moment of a clip that appears twice, each counted against the cap', () => {
     const e = ep([item('a', [0, 10]), item('b', [0, 10]), item('c', [0, 10])]);
     const r = thumbCandidates(e, catalog(clip('c001', [{ t: 5, label: 'x' }])), [], 2);
-    expect(r).toEqual([{ t: 5, reason: 'moment: x' }, { t: 15, reason: 'moment: x' }]);
+    expect(r).toEqual([{ t: fc(5), reason: 'moment: x' }, { t: fc(15), reason: 'moment: x' }]);
   });
 
   it('leaves out a moment at or after the end of the piece, and one before its start', () => {
     const e = ep([item('a', [5, 10])]);
     const r = thumbCandidates(e, catalog(clip('c001', [{ t: 4.99, label: 'before' }, { t: 10, label: 'end' }, { t: 5, label: 'start' }])), [], 1);
-    expect(r).toEqual([{ t: 0, reason: 'moment: start' }]);
+    expect(r).toEqual([{ t: fc(0), reason: 'moment: start' }]);
+  });
+
+  it('gives each time as the middle of the output frame showing it, so a moment on an item\'s first frame stays on that item', () => {
+    // a is 37 frames (1.2333… s, not a whole millisecond); b starts on frame 37 and shows its moment there.
+    const e = ep([item('a', [0, 37 / 30]), item('b', [50, 52], { clip: 'c002' })]);
+    const [m] = thumbCandidates(e, catalog(clip('c001'), clip('c002', [{ t: 50, label: 'start' }])), [], 1);
+    expect(m).toEqual({ t: 37.5 / 30, reason: 'moment: start' });
+    // Rounded to the millisecond as the reply writes it, it is still frame 37: item b's first frame.
+    const shown = thumbSource(e, Math.round(m!.t * 1000) / 1000);
+    expect([shown.laid.item.id, 'src' in shown && shown.src]).toEqual(['b', 50]);
+    // Every pick is a frame's middle.
+    for (const c of thumbCandidates(e, catalog(clip('c001')), [{ t: 0.4567, lufs: -10 }])) expect(c.t * 30 - Math.floor(c.t * 30)).toBeCloseTo(0.5, 6);
   });
 
   it('picks the loudest reading inside each item with its own sound at real time, and only there', () => {
@@ -103,7 +123,7 @@ describe('thumbCandidates', () => {
     // a: 0–10, b: 10–15, c: 15–25, d: 25–35. Loud readings in b and c are ignored; a gets 3.5, d gets 30.
     const loud = [...flat(0, 35), { t: 3.5, lufs: -15 }, { t: 12, lufs: -5 }, { t: 20, lufs: -5 }, { t: 30, lufs: -20 }, { t: 9.95, lufs: -16 }];
     const r = thumbCandidates(e, catalog(clip('c001')), loud, 2);
-    expect(r).toEqual([{ t: 3.5, reason: 'loudest moment of item a' }, { t: 30, reason: 'loudest moment of item d' }]);
+    expect(r).toEqual([{ t: fc(3.5), reason: 'loudest moment of item a' }, { t: fc(30), reason: 'loudest moment of item d' }]);
   });
 
   it('ignores silent readings, and a reading outside the picture of an item (its held frames)', () => {
@@ -126,18 +146,18 @@ describe('thumbCandidates', () => {
     ]);
     const r = thumbCandidates(e, catalog(clip('c001')), [], 5);
     expect(r).toEqual([
-      { t: 7, reason: 'truth beat (item b)' },
-      { t: 11, reason: 'headline beat (item c)' },
-      { t: 14, reason: 'payoff beat (item d)' },
-      { t: 18, reason: 'twist beat (item e)' },
-      { t: 22, reason: 'reveal beat (item f)' },
+      { t: fc(7), reason: 'truth beat (item b)' },
+      { t: fc(11), reason: 'headline beat (item c)' },
+      { t: fc(14), reason: 'payoff beat (item d)' },
+      { t: fc(18), reason: 'twist beat (item e)' },
+      { t: fc(22), reason: 'reveal beat (item f)' },
     ]);
   });
 
   it('spaces the rest evenly over the video, and gives fewer than 12 for a short one', () => {
     const e = ep([item('a', [0, 24])]);
     const r = thumbCandidates(e, catalog(clip('c001')), []);
-    expect(r.map((c) => c.t)).toEqual(Array.from({ length: 12 }, (_, i) => 1 + 2 * i));
+    expect(r.map((c) => c.t)).toEqual(Array.from({ length: 12 }, (_, i) => fc(1 + 2 * i)));
     expect(r.every((c) => c.reason === 'even spacing')).toBe(true);
     const short = thumbCandidates(ep([item('a', [0, 5])]), catalog(clip('c001')), []);
     expect(short).toHaveLength(5);
@@ -149,14 +169,14 @@ describe('thumbCandidates', () => {
     const e = ep([item('a', [0, 24])]);
     const r = thumbCandidates(e, catalog(clip('c001', [{ t: 1.5, label: 'm' }])), []);
     expect(r).toHaveLength(12);
-    expect(r[0]).toEqual({ t: 1.5, reason: 'moment: m' });
+    expect(r[0]).toEqual({ t: fc(1.5), reason: 'moment: m' });
     for (const a of r) for (const b of r) if (a !== b) expect(Math.abs(a.t - b.t)).toBeGreaterThanOrEqual(1 - 1e-9);
   });
 
   it('gives beats and even spacing for a video of only cards', () => {
     const e = ep([card('a', 6), card('b', 6, { beat: 'reveal' }), card('c', 6)]);
     const r = thumbCandidates(e, catalog(), []);
-    expect(r[0]).toEqual({ t: 9, reason: 'reveal beat (item b)' });
+    expect(r[0]).toEqual({ t: fc(9), reason: 'reveal beat (item b)' });
     expect(r.slice(1).every((c) => c.reason === 'even spacing')).toBe(true);
     expect(r).toHaveLength(12);
   });
@@ -164,7 +184,7 @@ describe('thumbCandidates', () => {
   it('gives candidates for a video without sound, and for clips missing from the catalog', () => {
     const e = ep([item('a', [0, 10], { audio: 'keep' }), item('b', [0, 10], { beat: 'twist', clip: 'c404' })]);
     const r = thumbCandidates(e, catalog(), []);
-    expect(r[0]).toEqual({ t: 15, reason: 'twist beat (item b)' });
+    expect(r[0]).toEqual({ t: fc(15), reason: 'twist beat (item b)' });
     expect(r).toHaveLength(12);
   });
 });
@@ -176,17 +196,18 @@ describe('formatThumbTime', () => {
 });
 
 describe('candidatesReport', () => {
-  it('names the cut and lists a line per frame', () => {
-    const frames = [{ t: 1.74, reason: 'moment: x', file: 'cand-01.jpg' }, { t: 65, reason: 'even spacing', file: 'cand-02.jpg' }];
+  it('names the cut and lists a line per frame: its time, the at that writes it, and why', () => {
+    const frames = [{ t: 1.74, reason: 'moment: x', file: 'cand-01.jpg' }, { t: 65, reason: 'even spacing', file: 'cand-02.jpg' }, { t: 371.5 / 30, reason: 'moment: y', file: 'cand-03.jpg' }];
     expect(candidatesReport(2, { source: 'rough.mp4', timelineChanged: false, frames })).toEqual([
-      'wrote 2 candidate frames to episodes/2/thumbs/ (from rough.mp4)',
-      'cand-01.jpg  0:01.7  moment: x',
-      'cand-02.jpg  1:05.0  even spacing',
+      'wrote 3 candidate frames to episodes/2/thumbs/ (from rough.mp4)',
+      'cand-01.jpg  0:01.7  at 1.74  moment: x',
+      'cand-02.jpg  1:05.0  at 65  even spacing',
+      'cand-03.jpg  0:12.4  at 12.383  moment: y',
     ]);
   });
   it('ends with a warning when the timeline changed after the cut', () => {
     expect(candidatesReport(2, { source: 'final.mp4', timelineChanged: true, frames: [{ t: 1, reason: 'even spacing', file: 'cand-01.jpg' }] }).slice(1)).toEqual([
-      'cand-01.jpg  0:01.0  even spacing',
+      'cand-01.jpg  0:01.0  at 1  even spacing',
       '⚠ the timeline changed after final.mp4 was made — run cut again for frames that match',
     ]);
   });
@@ -253,7 +274,7 @@ describe('thumbWordCount', () => {
 });
 
 describe('thumbnailAss', () => {
-  it('writes the text in capitals, white with a black outline in the bundled face, centred in the lower third', () => {
+  it('writes the text in capitals, white with a black outline in the bundled face: in the lower third, or at 60% on a vertical cover', () => {
     const ass = thumbnailAss(1280, 720, 'Big {win} 🚀 now\\');
     expect(ass).toContain('PlayResX: 1280\nPlayResY: 720\n');
     // Size px(150) and outline px(10) for a 720-px short side (k = 2/3): 100 and 7.
@@ -261,7 +282,8 @@ describe('thumbnailAss', () => {
     expect(ass).toContain('Dialogue: 0,0:00:00.00,0:00:10.00,Thumb,,0,0,0,,{\\pos(640,600)}BIG (WIN) NOW/\n');
     const tall = thumbnailAss(1080, 1920, 'Wow');
     expect(tall).toContain('Style: Thumb,Montserrat ExtraBold,150,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,10,0,5,54,54,0,1\n');
-    expect(tall).toContain(',{\\pos(540,1600)}WOW\n');
+    // Clear of the bottom 20% the Shorts and Reels buttons cover.
+    expect(tall).toContain(',{\\pos(540,1152)}WOW\n');
   });
 });
 
@@ -338,9 +360,9 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
     expect(r.source).toBe('rough.mp4');
     expect(r.timelineChanged).toBe(false);
     expect(r.frames.slice(0, 3)).toEqual([
-      { t: 0.95, reason: 'moment: one', file: 'cand-01.jpg' },
-      { t: 2.05, reason: 'moment: two', file: 'cand-02.jpg' },
-      { t: 4.5, reason: 'moment: three', file: 'cand-03.jpg' },
+      { t: fc(0.95), reason: 'moment: one', file: 'cand-01.jpg' },
+      { t: fc(2.05), reason: 'moment: two', file: 'cand-02.jpg' },
+      { t: fc(4.5), reason: 'moment: three', file: 'cand-03.jpg' },
     ]);
     expect(r.frames[3]!.reason).toBe('loudest moment of item a');
     expect(r.frames[3]!.t).toBeGreaterThan(3.0);
@@ -353,7 +375,7 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
     expect(near(await colour(join(thumbs, 'cand-03.jpg')), 'green')).toBe(true);
     // The truth beat's middle (6 s) is red again.
     const beat = r.frames.find((f) => f.reason === 'truth beat (item b)')!;
-    expect(beat.t).toBe(6);
+    expect(beat.t).toBe(fc(6));
     expect(near(await colour(join(thumbs, beat.file)), 'red')).toBe(true);
   });
 
@@ -482,13 +504,17 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
     const H = 360;
     // c001: the colour changes every second (red, green, blue …), one keyframe; c002: left half red, right half blue;
     // c003: portrait, top half red, bottom half blue; c004: 4K green.
-    const clips: Record<string, { file: string; args: string; w: number; h: number; sec: number; fps?: number }> = {
+    const clips: Record<string, { file: string; args: string; w: number; h: number; sec: number; fps?: number; out?: string[] }> = {
       c001: { file: "clip 'one'.mp4", w: W, h: H, sec: 12, args: `geq=r='255*eq(mod(floor(T),3),0)':g='255*eq(mod(floor(T),3),1)':b='255*eq(mod(floor(T),3),2)'` },
       c002: { file: "halves 'two'.mp4", w: W, h: H, sec: 2, args: `geq=r='255*lt(X,W/2)':g=0:b='255*gte(X,W/2)'` },
       c003: { file: 'tall.mp4', w: 360, h: 640, sec: 2, args: `geq=r='255*lt(Y,H/2)':g=0:b='255*gte(Y,H/2)'` },
       c004: { file: 'green 4k.mp4', w: 3840, h: 2160, sec: 1, args: `geq=r=0:g=255:b=0` },
       // 10 frames a second, each a colour: red, green, blue …
       c005: { file: 'ten fps.mp4', w: W, h: H, sec: 2, fps: 10, args: `geq=r='255*eq(mod(N,3),0)':g='255*eq(mod(N,3),1)':b='255*eq(mod(N,3),2)'` },
+      // Red right of a quarter of the width, green below a quarter of the height: where the edges land shows the framing.
+      c006: { file: 'edges.mp4', w: W, h: H, sec: 2, args: `geq=r='255*gte(X,W/4)':g='255*gte(Y,H/4)':b=0` },
+      // One skin colour all over, stored as cameras and Mirage's cuts store it: BT.709 at limited range, tagged so.
+      c007: { file: 'skin 709.mp4', w: 320, h: 180, sec: 1, args: `geq=r=208:g=128:b=96,scale=out_color_matrix=bt709:out_range=tv`, out: ['-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv'] },
     };
     const realClip = (id: string): Catalog['clips'][number] => {
       const c = clips[id]!;
@@ -536,11 +562,11 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       footage = join(root, "footage 'q'");
       await mkdir(footage, { recursive: true });
       for (const c of Object.values(clips)) {
-        await ff(['-f', 'lavfi', '-i', `nullsrc=s=${c.w}x${c.h}:r=${c.fps ?? 30}:d=${c.sec},${c.args},format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-g', '1000', join(footage, c.file)]);
+        await ff(['-f', 'lavfi', '-i', `nullsrc=s=${c.w}x${c.h}:r=${c.fps ?? 30}:d=${c.sec},${c.args},format=yuv420p`, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-g', '1000', ...(c.out ?? []), join(footage, c.file)]);
       }
     });
 
-    it('takes the clip frame an output time shows, exactly: through speed, the held frame, a card drawn, the source under a move', async () => {
+    it('takes the clip frame an output time shows, exactly: through speed, the held frame, a card drawn, framed as the move frames it', async () => {
       const dir = await thumbProject('mapped', mapped, { cut: true });
       const r = await writeThumbnail(dir, 1, { at: 4.6 }, tools);
       expect(r).toEqual({ file: thumbFile(dir), width: 1280, height: 720, from: { clip: 'c001', src: 2.4 } });
@@ -557,11 +583,10 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       let lit = 0;
       for (let y = 300; y < 420; y += 2) for (let x = 400; x < 880; x += 2) if (Math.min(...drawn.at(x, y)) > 200) lit++;
       expect(lit).toBeGreaterThan(100);
-      // Under the move (fully on the left, red, half): the whole source frame, red left and blue right.
+      // Under the move (by then at zoom 2 on the left edge: the red half): the source frame, framed as the video shows it.
       expect((await writeThumbnail(dir, 1, { at: 12 }, tools)).from).toEqual({ clip: 'c002', src: 0.5 });
       const px = await pixels(thumbFile(dir));
-      expect(near(px.avg(0, 0, 560, 720), 'red')).toBe(true);
-      expect(near(px.avg(720, 0, 1280, 720), 'blue')).toBe(true);
+      expect(near(px.avg(0, 0, 1280, 720), 'red')).toBe(true);
     });
 
     it('freezes on a clip\'s last frame, and shows the last frame of a shot that runs past the video', async () => {
@@ -716,7 +741,7 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
         expect(count(mono, 0, h * 0.3, (p) => !black(p)) + count(mono, h * 0.7, h, (p) => !black(p))).toBe(0);
 
         // Picture: it covers the frame, its text white with a black outline in Montserrat ExtraBold in the middle; the
-        // thumbnail's own text in the lower third.
+        // thumbnail's own text in the lower third, or on a vertical cover at 60%, none in the bottom 20%.
         await writeThumbnail(dir, 1, { at: 3, text: 'Go' }, verbose);
         expect(logs[1]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
         const pic = await pixels(thumbFile(dir));
@@ -728,7 +753,11 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
         }
         expect(count(pic, h * 0.4, h * 0.6, white)).toBeGreaterThan(200);
         expect(count(pic, h * 0.4, h * 0.6, black)).toBeGreaterThan(100);
-        expect(count(pic, h * 0.75, h * 0.92, white)).toBeGreaterThan(200);
+        if (w > h) expect(count(pic, h * 0.75, h * 0.92, white)).toBeGreaterThan(200);
+        else {
+          expect(count(pic, h * 0.58, h * 0.64, white)).toBeGreaterThan(200);
+          expect(count(pic, h * 0.8, h, (p) => white(p) || black(p))).toBe(0);
+        }
         expect(count(pic, 0, h * 0.3, (p) => white(p) || black(p))).toBe(0);
       }
     });
@@ -750,5 +779,146 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       expect(await readFile(join(ep1, 'thumbs', 'cand-01.jpg'), 'utf8')).toBe('cand');
       expect((await readdir(footage)).sort()).toEqual(Object.values(clips).map((c) => c.file).sort());
     });
+
+    it('writes the frame a candidate shows when given the at its line names, also on an item\'s first frame', async () => {
+      // a: 37 frames of c001 from 0.1 s (red, then green from 1.0 s); b starts on frame 37 (1.2333… s) at c001's
+      // moment at 2.0 s (blue).
+      const dir = await thumbProject('first frame', [item('a', [0.1, 0.1 + 37 / 30]), item('b', [2, 3])]);
+      await saveCatalog(dir, catalog(...Object.keys(clips).map((id) => (id === 'c001' ? { ...realClip(id), moments: [{ t: 2, label: 'blue' }] } : realClip(id)))));
+      await renderEpisode({ project: dir, episode: 1, mode: 'rough', tools });
+      const lines = candidatesReport(1, await writeCandidates(dir, 1, tools));
+      expect(lines[1]).toBe('cand-01.jpg  0:01.3  at 1.25  moment: blue');
+      const at = Number(/  at (\S+)  /.exec(lines[1]!)![1]);
+      expect((await writeThumbnail(dir, 1, { at }, tools)).from).toEqual({ clip: 'c001', src: 2 });
+      const cand = await colour(join(dir, 'episodes', '1', 'thumbs', 'cand-01.jpg'));
+      const thumb = await colour(thumbFile(dir));
+      expect(near(cand, 'blue')).toBe(true);
+      expect(near(thumb, 'blue')).toBe(true);
+      // 1.2 s, the moment's own time (1.233 s) to a tenth, as the reply gave it before, is item a's last frame: green.
+      await writeThumbnail(dir, 1, { at: 1.2 }, tools);
+      expect(near(await colour(thumbFile(dir)), 'green')).toBe(true);
+    });
+
+    it('keeps the colours: a BT.709 clip or cut comes out of the JPEG as it decodes', async () => {
+      const src = join(footage, clips.c007!.file);
+      // The clip decoded on its own matrix and range, and through the thumbnail's sharpening and brightening.
+      const decode = (file: string, look = '') => {
+        const raw = join(root, `px-${Math.random().toString(36).slice(2)}.rgb`);
+        return ff(['-i', file, '-vf', `${look}scale=in_color_matrix=bt709:in_range=tv,format=rgb24,scale=1:1:flags=area`, '-frames:v', '1', '-f', 'rawvideo', raw]).then(async () => [...(await readFile(raw))]);
+      };
+      const plain = await decode(src);
+      expect(Math.abs(plain[0]! - 208) + Math.abs(plain[1]! - 128) + Math.abs(plain[2]! - 96)).toBeLessThan(12);
+      const within = (got: number[], want: number[]) => got.forEach((v, i) => expect(Math.abs(v - want[i]!), `channel ${i}: ${got} against ${want}`).toBeLessThanOrEqual(3));
+
+      // A candidate frame: the cut's own colour.
+      const dir = await thumbProject('colour', [item('s', [0, 1], { clip: 'c007' })]);
+      await copyFile(src, join(dir, 'episodes', '1', 'rough.mp4'));
+      const r = await writeCandidates(dir, 1, tools);
+      within(await colour(join(dir, 'episodes', '1', 'thumbs', r.frames[0]!.file)), plain);
+      // The thumbnail: the clip's colour, sharpened and brightened as every thumbnail is.
+      await writeThumbnail(dir, 1, { at: 0.5 }, tools);
+      within(await colour(thumbFile(dir)), await decode(src, 'unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08,'));
+    });
+
+    /** Where c006's edges land in a picture, as fractions of its width and height (0 when the edge is out of view). */
+    async function edges(file: string): Promise<{ x: number; y: number }> {
+      const px = await pixels(file);
+      let x = 0;
+      while (x < px.w && px.at(x, px.h >> 1)[0]! < 128) x++;
+      let y = 0;
+      while (y < px.h && px.at(px.w >> 1, y)[1]! < 128) y++;
+      return { x: x / px.w, y: y / px.h };
+    }
+    /** Within `px` pixels of the source, for a window `w`×`h` source pixels (a crop lands on whole, even pixels). */
+    const closeTo = (got: { x: number; y: number }, want: { x: number; y: number }, w = 427, h = 240, px = 2.5) => {
+      expect(Math.abs(got.x - want.x) * w, `x ${got.x} against ${want.x}`).toBeLessThan(px);
+      expect(Math.abs(got.y - want.y) * h, `y ${got.y} against ${want.y}`).toBeLessThan(px);
+    };
+
+    it('frames the picture as the video does: a zoom punches in around the focus, and a focus given moves it', async () => {
+      // z: zoom 1.5, 0–1 s; o: zoom 1, 1–2 s. Both the thumbnail's shape (640×360 for 1280×720).
+      const dir = await thumbProject('zoom', [item('z', [0, 1], { clip: 'c006', zoom: 1.5 }), item('o', [0, 1], { clip: 'c006' })]);
+      // 1.5× around the centre: x 106.7–533.3 of 640, y 60–300 of 360; the edges at 160 and 90 land an eighth in.
+      await writeThumbnail(dir, 1, { at: 0.5 }, tools);
+      closeTo(await edges(thumbFile(dir)), { x: (160 - 320 / 3) / (1280 / 3), y: (90 - 60) / 240 });
+      // The focus given moves the window: at the top left corner, x 0–426.7 and y 0–240.
+      await writeThumbnail(dir, 1, { at: 0.5, focus: { x: 0, y: 0 } }, tools);
+      closeTo(await edges(thumbFile(dir)), { x: 160 / (1280 / 3), y: 90 / 240 });
+      // At zoom 1, footage the thumbnail's shape is shown whole: the focus has no room to move it.
+      for (const focus of [undefined, { x: 0, y: 0 }, { x: 1, y: 1 }]) {
+        await writeThumbnail(dir, 1, { at: 1.5, focus }, tools);
+        closeTo(await edges(thumbFile(dir)), { x: 0.25, y: 0.25 }, 640, 360);
+      }
+
+      // A vertical video, fill at 1.5× around x 0.2: the 9:16 window (202.5×360) over 1.5 is 135×240, at x (640−135)·0.2.
+      const tall = await thumbProject('zoom tall', [item('f', [0, 1], { clip: 'c006', frame: 'fill', zoom: 1.5, focus: { x: 0.2, y: 0.5 } })], { output: { width: 1080, height: 1920 } });
+      await writeThumbnail(tall, 1, { at: 0.5 }, tools);
+      closeTo(await edges(thumbFile(tall)), { x: (160 - 505 * 0.2) / 135, y: (90 - 60) / 240 }, 135, 240);
+    });
+
+    it('frames the picture as a move has it on that frame', async () => {
+      // From zoom 1 at the centre to zoom 2 at the top left corner, linearly over the first second (frames 0–29).
+      const dir = await thumbProject('move', [item('m', [0, 2], { clip: 'c006', move: { zoom: 2, focus: { x: 0, y: 0 }, ease: 'linear', start: 0, end: 1 } })]);
+      const expected = (i: number) => {
+        const p = Math.min(1, i / 29);
+        const z = 2 ** p;
+        const f = 0.5 * (1 - p);
+        const [w, h] = [640 / z, 360 / z];
+        return { x: (160 - (640 - w) * f) / w, y: (90 - (360 - h) * f) / h };
+      };
+      for (const i of [15, 45]) {
+        await writeThumbnail(dir, 1, { at: (i + 0.5) / 30 }, tools);
+        closeTo(await edges(thumbFile(dir)), expected(i), 640 / 2 ** Math.min(1, i / 29), 360 / 2 ** Math.min(1, i / 29));
+      }
+    });
+
+    it('says a thumbnail.jpg or candidate frame open in another app is open there, and passes other errors on', async () => {
+      const fs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+      const held = (code: string, test: (path: string) => boolean) => (path: unknown) => {
+        if (test(String(path))) throw Object.assign(new Error(`${code}: held open`), { code });
+      };
+      const dir = await thumbProject('busy', [item('a', [0, 4])]);
+      const ep1 = join(dir, 'episodes', '1');
+      const isThumb = (p: string) => p.endsWith('thumbnail.jpg');
+      try {
+        vi.mocked(rename).mockImplementation(async (from, to) => { held('EBUSY', isThumb)(to); return fs.rename(from, to); });
+        await expect(writeThumbnail(dir, 1, { at: 1 }, tools)).rejects.toMatchObject({ name: 'MirageError', code: 'BUSY', message: 'episodes/1/thumbnail.jpg is open in another app', hint: 'Close it there, then run thumbnail again.' });
+        expect((await readdir(ep1)).filter((f) => f.startsWith('.thumbnail-'))).toEqual([]);
+        vi.mocked(rename).mockImplementation(async (from, to) => { held('EPERM', isThumb)(to); return fs.rename(from, to); });
+        await expect(writeThumbnail(dir, 1, { at: 1 }, tools)).rejects.toMatchObject({ code: 'BUSY', message: 'episodes/1/thumbnail.jpg is open in another app' });
+        vi.mocked(rename).mockImplementation(async (from, to) => { held('ENOSPC', isThumb)(to); return fs.rename(from, to); });
+        await expect(writeThumbnail(dir, 1, { at: 1 }, tools)).rejects.toMatchObject({ code: 'ENOSPC' });
+        vi.mocked(rename).mockImplementation(fs.rename);
+
+        await ff(cutArgs(join(ep1, 'rough.mp4'), { sec: 4 }));
+        vi.mocked(rename).mockImplementation(async (from, to) => { held('EPERM', (p) => p.endsWith('cand-02.jpg'))(to); return fs.rename(from, to); });
+        await expect(writeCandidates(dir, 1, tools)).rejects.toMatchObject({ code: 'BUSY', message: 'episodes/1/thumbs/cand-02.jpg is open in another app', hint: 'Close it there, then run thumbnail again.' });
+        vi.mocked(rename).mockImplementation(fs.rename);
+        await writeCandidates(dir, 1, tools);
+        // An earlier candidate held open when the old ones are removed.
+        vi.mocked(rm).mockImplementation(async (path, o) => { held('EBUSY', (p) => p.endsWith(join('thumbs', 'cand-01.jpg')))(path); return fs.rm(path, o); });
+        await expect(writeCandidates(dir, 1, tools)).rejects.toMatchObject({ code: 'BUSY', message: 'episodes/1/thumbs/cand-01.jpg is open in another app' });
+        expect((await readdir(ep1)).filter((f) => f.startsWith('.thumbs-'))).toEqual([]);
+      } finally {
+        vi.mocked(rename).mockImplementation(fs.rename);
+        vi.mocked(rm).mockImplementation(fs.rm);
+      }
+    });
+  });
+
+  it('extracts each candidate\'s own frame exactly, for every frame', async () => {
+    // Each frame a colour in turn: red, green, blue …, so a frame early or late is the wrong colour.
+    const dir = join(root, 'every frame');
+    await mkdir(join(dir, 'episodes', '1'), { recursive: true });
+    await writeFile(join(dir, 'mirage.json'), JSON.stringify({ version: 1, title: 'p', createdAt: new Date().toISOString() }));
+    await saveCatalog(dir, catalog(clip('c001', [{ t: 37 / 30, label: 'on frame 37' }, { t: 3.034, label: 'just past frame 91' }])));
+    await saveEpisode(dir, episode());
+    await ff(['-f', 'lavfi', '-i', `nullsrc=s=320x180:r=30:d=8,geq=r='255*eq(mod(N,3),0)':g='255*eq(mod(N,3),1)':b='255*eq(mod(N,3),2)',format=yuv420p`, '-c:v', 'libx264', '-crf', '12', '-pix_fmt', 'yuv420p', '-g', '1000', join(dir, 'episodes', '1', 'rough.mp4')]);
+    const r = await writeCandidates(dir, 1, tools);
+    expect(r.frames.slice(0, 2).map((f) => Math.floor(f.t * 30))).toEqual([37, 91]);
+    for (const f of r.frames) {
+      const want = (['red', 'green', 'blue'] as const)[Math.floor(f.t * 30) % 3]!;
+      expect(near(await colour(join(dir, 'episodes', '1', 'thumbs', f.file)), want), `${f.file} at ${f.t}`).toBe(true);
+    }
   });
 });

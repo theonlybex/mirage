@@ -215,15 +215,34 @@ describe('the plugin skills', () => {
       expect(edit, `edit never says ${words}`).toContain(words);
     }
     // The tool's ✖ and ⚠ lines are passed on in plain words.
-    for (const message of ['`video <n> has no cut yet`', '`thumbnail text is <k> words — keep it to 4 or fewer`', '`<at> s is outside the video (0–<D> s)`']) {
+    for (const message of ['`video <n> has no cut yet`', '`thumbnail text is <k> words — keep it to 4 or fewer`', '`<at> s is outside the video (0–<D> s)`', '`text and focus go with at (…)`']) {
       expect(edit, `edit never explains ${message}`).toContain(message);
     }
+  });
+
+  it('edit passes the at a candidate names, shows the person the thumbnail\'s path, and says what focus can move', () => {
+    const edit = read('edit');
+    for (const words of [
+      'passing the `at` value shown on that frame\'s line',
+      "don't rule out a frame because a caption covers the face",
+      'give them the full path to `thumbnail.jpg`',
+      'describe the frame in a line, since reading the JPEG shows it only to you',
+      "Footage the thumbnail's shape at `zoom` 1 is shown whole, and `focus` doesn't move it.",
+      'named after the title as `<title>.jpg` (not `thumbnail.jpg`)',
+      'with facts from the person, the catalog or the music library only',
+    ]) expect(edit, `edit never says ${words}`).toContain(words);
+    expect(edit).not.toContain('(Read the JPEG)');
+    expect(edit).not.toContain('`thumbnail.jpg` is copied together with the finished video');
   });
 
   it('overnight makes candidates and a thumbnail after the final render and logs them for the person to confirm', () => {
     const overnight = read('overnight');
     expect(toolsNamed(overnight)).toContain('thumbnail');
     expect(overnight).toContain('After the final render, call `mcp__plugin_mirage_engine__thumbnail` for candidates and once with `at` for the best one, and log it with kind `guess` for the person to confirm.');
+    // The guess names the file; the titles and description are written too, from what Mirage holds, gaps asked about.
+    for (const words of ["Name the thumbnail's path in that guess", 'write the 3 title options and the description into `episodes/<n>/summary.md`', 'with facts from the catalog and the music library only', 'logged with kind `question`']) {
+      expect(overnight, `overnight never says ${words}`).toContain(words);
+    }
   });
 
   it('status explains the Formats line and a broken format file', () => {
