@@ -242,8 +242,18 @@ function assTime(sec: number): string {
 
 const assText = (t: string) => t.replace(/\\/g, '/').replace(/\{/g, '(').replace(/\}/g, ')').replace(/\r?\n/g, '\\N');
 
-function defaultCjkFont(): string | null {
+/** The font buildAss names for Chinese and Japanese runs on this platform (null: libass's own fallback opens). */
+export function defaultCjkFont(): string | null {
   return process.platform === 'darwin' ? 'Hiragino Sans GB' : null;
+}
+
+/**
+ * Text as an ASS event draws it: emoji left out (libass has no colour glyphs), backslashes and braces made harmless (no
+ * override tags from what was written), line breaks as \N, and CJK runs switched to `cjk` and back to the style's font.
+ */
+export function assDraw(t: string, cjk: string | null = defaultCjkFont()): string {
+  const s = assText(t.replace(EMOJI, '').replace(/ {2,}/g, ' ').trim());
+  return cjk ? s.replace(CJK, (run) => `{\\fn${cjk}}${run}{\\fn}`) : s;
 }
 
 function defaultFont(): string {
@@ -265,7 +275,7 @@ const assColor = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex
 const POP_IN = (scale: number) => `\\fscx${Math.round(scale * 1.15)}\\fscy${Math.round(scale * 1.15)}\\t(0,120,\\fscx${scale}\\fscy${scale})`;
 
 /** Pixel sizes are written for a 1080-px short side and scale with the frame's short side (never below 1 px). */
-const scaler = (width: number, height: number) => {
+export const scaler = (width: number, height: number) => {
   const k = Math.min(width, height) / 1080;
   return (n: number) => Math.max(1, Math.round(n * k));
 };
@@ -345,10 +355,7 @@ export function buildAss(o: {
 }): string {
   const cjk = o.cjkFont === undefined ? defaultCjkFont() : o.cjkFont;
   // Emoji left out; CJK runs switch to a font that has them and back to the style's font (\fn alone).
-  const draw = (t: string) => {
-    const s = assText(t.replace(EMOJI, '').replace(/ {2,}/g, ' ').trim());
-    return cjk ? s.replace(CJK, (run) => `{\\fn${cjk}}${run}{\\fn}`) : s;
-  };
+  const draw = (t: string) => assDraw(t, cjk);
   const px = scaler(o.width, o.height);
   const font = o.font ?? defaultFont();
   const g = styleGeometry(o.width, o.height, o.position);

@@ -38613,6 +38613,10 @@ var assText = (t) => t.replace(/\\/g, "/").replace(/\{/g, "(").replace(/\}/g, ")
 function defaultCjkFont() {
   return process.platform === "darwin" ? "Hiragino Sans GB" : null;
 }
+function assDraw(t, cjk = defaultCjkFont()) {
+  const s = assText(t.replace(EMOJI, "").replace(/ {2,}/g, " ").trim());
+  return cjk ? s.replace(CJK, (run2) => `{\\fn${cjk}}${run2}{\\fn}`) : s;
+}
 function defaultFont() {
   if (process.platform === "darwin") return "Helvetica Neue";
   if (process.platform === "win32") return "Segoe UI";
@@ -38671,10 +38675,7 @@ var OVERLAY_STYLE = {
 };
 function buildAss(o2) {
   const cjk = o2.cjkFont === void 0 ? defaultCjkFont() : o2.cjkFont;
-  const draw = (t) => {
-    const s = assText(t.replace(EMOJI, "").replace(/ {2,}/g, " ").trim());
-    return cjk ? s.replace(CJK, (run2) => `{\\fn${cjk}}${run2}{\\fn}`) : s;
-  };
+  const draw = (t) => assDraw(t, cjk);
   const px = scaler(o2.width, o2.height);
   const font = o2.font ?? defaultFont();
   const g = styleGeometry(o2.width, o2.height, o2.position);
@@ -41484,8 +41485,9 @@ function speakReport(r, n2, voice) {
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
 // packages/core/src/mirage/thumbnail.ts
+import { randomUUID as randomUUID8 } from "node:crypto";
 import { existsSync as existsSync11, statSync as statSync5 } from "node:fs";
-import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir8, readFile as readFile9, rm as rm12 } from "node:fs/promises";
+import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir8, readFile as readFile9, rename as rename7, rm as rm12, writeFile as writeFile9 } from "node:fs/promises";
 import { tmpdir as tmpdir3 } from "node:os";
 import { join as join21 } from "node:path";
 var MAX_CANDIDATES = 12;
@@ -41557,11 +41559,14 @@ async function cutLoudness(file2, tools, o2 = {}) {
   }
 }
 var CAND_FILE = /^cand-\d+\.jpg$/;
+function latestCut(dir, n2) {
+  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync5(join21(dir, f)).mtimeMs }] : []);
+  if (!made.length) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
+  return made.reduce((a2, b) => b.at > a2.at ? b : a2).f;
+}
 async function writeCandidates(project2, n2, tools, o2 = {}) {
   const dir = episodeDir(project2, n2);
-  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync5(join21(dir, f)).mtimeMs }] : []);
-  const source = made.length ? made.reduce((a2, b) => b.at > a2.at ? b : a2).f : void 0;
-  if (!source) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
+  const source = latestCut(dir, n2);
   const cut = join21(dir, source);
   const ep = await loadEpisode(project2, n2);
   const catalog = await loadCatalog(project2);
@@ -41570,19 +41575,26 @@ async function writeCandidates(project2, n2, tools, o2 = {}) {
   const loudness = ownSound2 && probe2.hasAudio ? await cutLoudness(cut, tools, o2) : [];
   const laid = layoutTimeline(ep);
   const cutSec = probe2.videoDurationSec ?? probe2.durationSec;
-  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > 1 / ep.output.fps + EPS5;
+  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > Math.max(0.1, 1 / ep.output.fps) + EPS5;
   const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
-  const thumbs = join21(dir, "thumbs");
-  await mkdir10(thumbs, { recursive: true });
-  for (const f of await readdir8(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
-  const frames = [];
-  for (const [i2, p] of picks.entries()) {
-    const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
-    await tools.runFfmpeg(["-accurate_seek", "-ss", p.t.toFixed(3), "-i", cut, "-frames:v", "1", "-q:v", "2", join21(thumbs, file2)], { signal: o2.signal });
-    if (!existsSync11(join21(thumbs, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
-    frames.push({ ...p, file: file2 });
+  const work = await mkdtemp2(join21(dir, ".thumbs-"));
+  try {
+    const frames = [];
+    for (const [i2, p] of picks.entries()) {
+      const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
+      await tools.runFfmpeg(["-accurate_seek", "-ss", p.t.toFixed(3), "-i", cut, "-frames:v", "1", "-q:v", "2", join21(work, file2)], { signal: o2.signal });
+      if (!existsSync11(join21(work, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
+      frames.push({ ...p, file: file2 });
+    }
+    o2.signal?.throwIfAborted();
+    const thumbs = join21(dir, "thumbs");
+    await mkdir10(thumbs, { recursive: true });
+    for (const f of await readdir8(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
+    for (const f of frames) await rename7(join21(work, f.file), join21(thumbs, f.file));
+    return { source, timelineChanged, frames };
+  } finally {
+    await rm12(work, { recursive: true, force: true });
   }
-  return { source, timelineChanged, frames };
 }
 function formatThumbTime(t) {
   const tenths = Math.round(t * 10);
@@ -41594,6 +41606,108 @@ function candidatesReport(n2, r) {
     ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`),
     ...r.timelineChanged ? [`\u26A0 the timeline changed after ${r.source} was made \u2014 run cut again for frames that match`] : []
   ];
+}
+var MAX_THUMB_WORDS = 4;
+function thumbSize(output2) {
+  return output2.width > output2.height ? { width: 1280, height: 720 } : { width: 1080, height: 1920 };
+}
+var secs = (n2) => String(ms(n2));
+function thumbSource(ep, at2) {
+  const fps = ep.output.fps;
+  const laid = layoutTimeline(ep);
+  const total = laid.reduce((f, l) => f + l.frames, 0);
+  const outside = () => new MirageError("BAD_INPUT", `${at2} s is outside the video (0\u2013${secs(total / fps)} s)`, "");
+  if (!Number.isFinite(at2) || at2 < 0) throw outside();
+  const frame = Math.floor(at2 * fps + 1e-6);
+  let first = 0;
+  for (const l of laid) {
+    if (frame < first + l.frames) {
+      if (isCard(l.item)) return { laid: l, card: true };
+      const { src, speed } = l.item;
+      return { laid: l, src: Math.min(src.out, src.in + Math.min(frame - first, l.srcFrames) * speed / fps) };
+    }
+    first += l.frames;
+  }
+  throw outside();
+}
+var HAS_WORD2 = /[\p{L}\p{N}]/u;
+function thumbWordCount(text) {
+  return tidy(text).split(/\s+/).filter((w) => HAS_WORD2.test(w)).length;
+}
+function thumbnailAss(width, height, text) {
+  const px = scaler(width, height);
+  const side = Math.round(width * 0.05);
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    "WrapStyle: 0",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    // The bundled face is heavy already: no faux bold.
+    `Style: Thumb,${CAPTION_FONT},${px(150)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${px(10)},0,5,${side},${side},0,1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    `Dialogue: 0,0:00:00.00,0:00:10.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(height * 5 / 6)})}${assDraw(text.toUpperCase())}`,
+    ""
+  ].join("\n");
+}
+async function writeThumbnail(project2, n2, o2, tools, run2 = {}) {
+  const words = o2.text === void 0 ? 0 : thumbWordCount(o2.text);
+  if (words > MAX_THUMB_WORDS) throw new MirageError("BAD_INPUT", `thumbnail text is ${words} words \u2014 keep it to ${MAX_THUMB_WORDS} or fewer`, "");
+  if (o2.focus && ![o2.focus.x, o2.focus.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
+    throw new MirageError("BAD_INPUT", "focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)", "");
+  }
+  const dir = episodeDir(project2, n2);
+  const ep = await loadEpisode(project2, n2);
+  const fps = ep.output.fps;
+  const shown2 = thumbSource(ep, o2.at);
+  const { width: W, height: H } = thumbSize(ep.output);
+  let input2;
+  let pick2 = "";
+  let focus;
+  let from;
+  let where;
+  if ("card" in shown2) {
+    const cut = latestCut(dir, n2);
+    const t = Math.floor(o2.at * fps + 1e-6) / fps;
+    input2 = ["-accurate_seek", "-ss", ffNum(Math.max(0, t - 1 / (4 * fps))), "-i", join21(dir, cut)];
+    focus = o2.focus ?? { x: 0.5, y: 0.5 };
+    from = "card";
+    where = { name: cut, hint: `Render video ${n2} again (cut or render), then write the thumbnail.` };
+  } else {
+    const item = shown2.laid.item;
+    const src = sourcesFor({ ...ep, items: [item] }, await loadCatalog(project2)).get(item.clip);
+    input2 = readFrom(src, shown2.src);
+    pick2 = `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,`;
+    focus = o2.focus ?? item.focus;
+    from = { clip: item.clip, src: ms(shown2.src) };
+    where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
+  }
+  const text = o2.text !== void 0 && tidy(o2.text) !== "";
+  const vf = `${pick2}scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)},setsar=1,unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08${text ? `,ass=thumbnail.ass:fontsdir=${filterValue(bundledFontsDir())}` : ""}`;
+  const file2 = join21(dir, "thumbnail.jpg");
+  const part = join21(dir, `.thumbnail-${randomUUID8().slice(0, 8)}.jpg`);
+  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
+  try {
+    if (text) await writeFile9(join21(work, "thumbnail.ass"), thumbnailAss(W, H, o2.text));
+    await tools.runFfmpeg([...input2, "-vf", vf, "-frames:v", "1", "-q:v", "2", part], { cwd: work, signal: run2.signal });
+    if (!existsSync11(part)) throw new MirageError("BAD_INPUT", `${where.name} has no picture at ${secs("card" in shown2 ? o2.at : shown2.src)} s`, where.hint);
+    run2.signal?.throwIfAborted();
+    await rename7(part, file2);
+  } finally {
+    await rm12(part, { force: true });
+    await rm12(work, { recursive: true, force: true });
+  }
+  return { file: file2, width: W, height: H, from };
+}
+function thumbnailReport(n2, r) {
+  const from = r.from === "card" ? "the card" : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
+  return `wrote episodes/${n2}/thumbnail.jpg (${r.width}\xD7${r.height}, from ${from})`;
 }
 
 // packages/mcp/src/fallback-viewer.ts
@@ -50005,11 +50119,23 @@ function createEngineServer(ctx) {
   );
   tool(
     "thumbnail",
-    "Pick thumbnail frames for a video: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from.",
-    { video },
-    async ({ video: n2 }, { signal }) => {
-      const r = await long("thumbnail", n2, signal, (h2) => writeCandidates(project2, n2, tools, { signal: h2.signal }));
-      return report(n2, candidatesReport(n2, r));
+    "Thumbnails for a video. Without at: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from. With at: writes episodes/<n>/thumbnail.jpg at full quality from the source frame the video shows at that second (1280\xD7720, or the 1080\xD71920 cover for a vertical video), with optional text.",
+    {
+      video,
+      at: external_exports.number().optional().describe("The second of the video the thumbnail shows (e.g. a candidate frame's time)"),
+      text: external_exports.string().optional().describe("With at: up to 4 words drawn on the thumbnail in capitals"),
+      focus: external_exports.object({ x: external_exports.number().min(0).max(1), y: external_exports.number().min(0).max(1) }).optional().describe("With at: the point kept in view when the picture is cropped, 0\u20131 from the left and from the top (default the item's own focus)")
+    },
+    async ({ video: n2, at: at2, text, focus }, { signal }) => {
+      if (at2 === void 0) {
+        if (text !== void 0 || focus !== void 0) {
+          throw new MirageError("BAD_INPUT", "text and focus go with at (the second of the video the thumbnail shows)", "Run thumbnail without them to pick a frame, then again with at.");
+        }
+        const r2 = await long("thumbnail", n2, signal, (h2) => writeCandidates(project2, n2, tools, { signal: h2.signal }));
+        return report(n2, candidatesReport(n2, r2));
+      }
+      const r = await long("thumbnail", n2, signal, (h2) => writeThumbnail(project2, n2, { at: at2, text, focus }, tools, { signal: h2.signal }));
+      return report(n2, [thumbnailReport(n2, r)]);
     }
   );
   tool("versions", "List the saved versions of a video: deliveries as V1, V2 \u2026 and the other saves, each with its id.", { video }, async ({ video: n2 }) => {

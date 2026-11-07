@@ -152,6 +152,7 @@ function projectRelative(input2, project) {
 function stepLabel(tool, input2) {
   const engine = engineTool(tool);
   if (engine !== null) {
+    if (engine === "thumbnail" && typeof record(input2).at === "number") return { label: "Writing the thumbnail", doneLabel: "Thumbnail written" };
     const [label, doneLabel] = ENGINE_LABELS[engine] ?? ["Working", "Done"];
     return { label, doneLabel };
   }
@@ -31813,6 +31814,10 @@ function assTime(sec) {
 function defaultCjkFont() {
   return process.platform === "darwin" ? "Hiragino Sans GB" : null;
 }
+function assDraw(t, cjk = defaultCjkFont()) {
+  const s = assText(t.replace(EMOJI, "").replace(/ {2,}/g, " ").trim());
+  return cjk ? s.replace(CJK, (run2) => `{\\fn${cjk}}${run2}{\\fn}`) : s;
+}
 function defaultFont() {
   if (process.platform === "darwin") return "Helvetica Neue";
   if (process.platform === "win32") return "Segoe UI";
@@ -31849,10 +31854,7 @@ function styleGeometry(width, height, position) {
 }
 function buildAss(o2) {
   const cjk = o2.cjkFont === void 0 ? defaultCjkFont() : o2.cjkFont;
-  const draw = (t) => {
-    const s = assText(t.replace(EMOJI, "").replace(/ {2,}/g, " ").trim());
-    return cjk ? s.replace(CJK, (run2) => `{\\fn${cjk}}${run2}{\\fn}`) : s;
-  };
+  const draw = (t) => assDraw(t, cjk);
   const px = scaler(o2.width, o2.height);
   const font = o2.font ?? defaultFont();
   const g = styleGeometry(o2.width, o2.height, o2.position);
@@ -35102,8 +35104,9 @@ var init_one_line = __esm({
 });
 
 // packages/core/src/mirage/thumbnail.ts
+import { randomUUID as randomUUID9 } from "node:crypto";
 import { existsSync as existsSync11, statSync as statSync6 } from "node:fs";
-import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir9, readFile as readFile9, rm as rm12 } from "node:fs/promises";
+import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir9, readFile as readFile9, rename as rename7, rm as rm12, writeFile as writeFile8 } from "node:fs/promises";
 import { tmpdir as tmpdir3 } from "node:os";
 import { join as join21 } from "node:path";
 function thumbCandidates(ep, catalog, loudness, max = MAX_CANDIDATES) {
@@ -35166,11 +35169,14 @@ async function cutLoudness(file2, tools, o2 = {}) {
     await rm12(work, { recursive: true, force: true });
   }
 }
+function latestCut(dir, n2) {
+  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync6(join21(dir, f)).mtimeMs }] : []);
+  if (!made.length) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
+  return made.reduce((a2, b) => b.at > a2.at ? b : a2).f;
+}
 async function writeCandidates(project, n2, tools, o2 = {}) {
   const dir = episodeDir(project, n2);
-  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync6(join21(dir, f)).mtimeMs }] : []);
-  const source = made.length ? made.reduce((a2, b) => b.at > a2.at ? b : a2).f : void 0;
-  if (!source) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
+  const source = latestCut(dir, n2);
   const cut = join21(dir, source);
   const ep = await loadEpisode(project, n2);
   const catalog = await loadCatalog(project);
@@ -35179,19 +35185,26 @@ async function writeCandidates(project, n2, tools, o2 = {}) {
   const loudness = ownSound2 && probe2.hasAudio ? await cutLoudness(cut, tools, o2) : [];
   const laid = layoutTimeline(ep);
   const cutSec = probe2.videoDurationSec ?? probe2.durationSec;
-  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > 1 / ep.output.fps + EPS5;
+  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > Math.max(0.1, 1 / ep.output.fps) + EPS5;
   const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
-  const thumbs = join21(dir, "thumbs");
-  await mkdir10(thumbs, { recursive: true });
-  for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
-  const frames = [];
-  for (const [i2, p] of picks.entries()) {
-    const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
-    await tools.runFfmpeg(["-accurate_seek", "-ss", p.t.toFixed(3), "-i", cut, "-frames:v", "1", "-q:v", "2", join21(thumbs, file2)], { signal: o2.signal });
-    if (!existsSync11(join21(thumbs, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
-    frames.push({ ...p, file: file2 });
+  const work = await mkdtemp2(join21(dir, ".thumbs-"));
+  try {
+    const frames = [];
+    for (const [i2, p] of picks.entries()) {
+      const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
+      await tools.runFfmpeg(["-accurate_seek", "-ss", p.t.toFixed(3), "-i", cut, "-frames:v", "1", "-q:v", "2", join21(work, file2)], { signal: o2.signal });
+      if (!existsSync11(join21(work, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
+      frames.push({ ...p, file: file2 });
+    }
+    o2.signal?.throwIfAborted();
+    const thumbs = join21(dir, "thumbs");
+    await mkdir10(thumbs, { recursive: true });
+    for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await rm12(join21(thumbs, f), { force: true });
+    for (const f of frames) await rename7(join21(work, f.file), join21(thumbs, f.file));
+    return { source, timelineChanged, frames };
+  } finally {
+    await rm12(work, { recursive: true, force: true });
   }
-  return { source, timelineChanged, frames };
 }
 function formatThumbTime(t) {
   const tenths = Math.round(t * 10);
@@ -35204,13 +35217,115 @@ function candidatesReport(n2, r) {
     ...r.timelineChanged ? [`\u26A0 the timeline changed after ${r.source} was made \u2014 run cut again for frames that match`] : []
   ];
 }
-var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, CAND_FILE;
+function thumbSize(output2) {
+  return output2.width > output2.height ? { width: 1280, height: 720 } : { width: 1080, height: 1920 };
+}
+function thumbSource(ep, at2) {
+  const fps = ep.output.fps;
+  const laid = layoutTimeline(ep);
+  const total = laid.reduce((f, l) => f + l.frames, 0);
+  const outside = () => new MirageError("BAD_INPUT", `${at2} s is outside the video (0\u2013${secs(total / fps)} s)`, "");
+  if (!Number.isFinite(at2) || at2 < 0) throw outside();
+  const frame = Math.floor(at2 * fps + 1e-6);
+  let first = 0;
+  for (const l of laid) {
+    if (frame < first + l.frames) {
+      if (isCard(l.item)) return { laid: l, card: true };
+      const { src, speed } = l.item;
+      return { laid: l, src: Math.min(src.out, src.in + Math.min(frame - first, l.srcFrames) * speed / fps) };
+    }
+    first += l.frames;
+  }
+  throw outside();
+}
+function thumbWordCount(text) {
+  return tidy(text).split(/\s+/).filter((w) => HAS_WORD2.test(w)).length;
+}
+function thumbnailAss(width, height, text) {
+  const px = scaler(width, height);
+  const side = Math.round(width * 0.05);
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    "WrapStyle: 0",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    // The bundled face is heavy already: no faux bold.
+    `Style: Thumb,${CAPTION_FONT},${px(150)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${px(10)},0,5,${side},${side},0,1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    `Dialogue: 0,0:00:00.00,0:00:10.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(height * 5 / 6)})}${assDraw(text.toUpperCase())}`,
+    ""
+  ].join("\n");
+}
+async function writeThumbnail(project, n2, o2, tools, run2 = {}) {
+  const words = o2.text === void 0 ? 0 : thumbWordCount(o2.text);
+  if (words > MAX_THUMB_WORDS) throw new MirageError("BAD_INPUT", `thumbnail text is ${words} words \u2014 keep it to ${MAX_THUMB_WORDS} or fewer`, "");
+  if (o2.focus && ![o2.focus.x, o2.focus.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
+    throw new MirageError("BAD_INPUT", "focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)", "");
+  }
+  const dir = episodeDir(project, n2);
+  const ep = await loadEpisode(project, n2);
+  const fps = ep.output.fps;
+  const shown2 = thumbSource(ep, o2.at);
+  const { width: W, height: H } = thumbSize(ep.output);
+  let input2;
+  let pick2 = "";
+  let focus;
+  let from;
+  let where;
+  if ("card" in shown2) {
+    const cut = latestCut(dir, n2);
+    const t = Math.floor(o2.at * fps + 1e-6) / fps;
+    input2 = ["-accurate_seek", "-ss", ffNum(Math.max(0, t - 1 / (4 * fps))), "-i", join21(dir, cut)];
+    focus = o2.focus ?? { x: 0.5, y: 0.5 };
+    from = "card";
+    where = { name: cut, hint: `Render video ${n2} again (cut or render), then write the thumbnail.` };
+  } else {
+    const item = shown2.laid.item;
+    const src = sourcesFor({ ...ep, items: [item] }, await loadCatalog(project)).get(item.clip);
+    input2 = readFrom(src, shown2.src);
+    pick2 = `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,`;
+    focus = o2.focus ?? item.focus;
+    from = { clip: item.clip, src: ms(shown2.src) };
+    where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
+  }
+  const text = o2.text !== void 0 && tidy(o2.text) !== "";
+  const vf = `${pick2}scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)},setsar=1,unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08${text ? `,ass=thumbnail.ass:fontsdir=${filterValue(bundledFontsDir())}` : ""}`;
+  const file2 = join21(dir, "thumbnail.jpg");
+  const part = join21(dir, `.thumbnail-${randomUUID9().slice(0, 8)}.jpg`);
+  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
+  try {
+    if (text) await writeFile8(join21(work, "thumbnail.ass"), thumbnailAss(W, H, o2.text));
+    await tools.runFfmpeg([...input2, "-vf", vf, "-frames:v", "1", "-q:v", "2", part], { cwd: work, signal: run2.signal });
+    if (!existsSync11(part)) throw new MirageError("BAD_INPUT", `${where.name} has no picture at ${secs("card" in shown2 ? o2.at : shown2.src)} s`, where.hint);
+    run2.signal?.throwIfAborted();
+    await rename7(part, file2);
+  } finally {
+    await rm12(part, { force: true });
+    await rm12(work, { recursive: true, force: true });
+  }
+  return { file: file2, width: W, height: H, from };
+}
+function thumbnailReport(n2, r) {
+  const from = r.from === "card" ? "the card" : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
+  return `wrote episodes/${n2}/thumbnail.jpg (${r.width}\xD7${r.height}, from ${from})`;
+}
+var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, CAND_FILE, MAX_THUMB_WORDS, secs, HAS_WORD2;
 var init_thumbnail = __esm({
   "packages/core/src/mirage/thumbnail.ts"() {
     "use strict";
     init_src();
+    init_encode();
     init_errors4();
+    init_fonts();
     init_ingest();
+    init_overlays();
     init_render_episode();
     init_timeline();
     MAX_CANDIDATES = 12;
@@ -35222,6 +35337,9 @@ var init_thumbnail = __esm({
     EPS5 = 1e-9;
     ms = (t) => Math.round(t * 1e3) / 1e3;
     CAND_FILE = /^cand-\d+\.jpg$/;
+    MAX_THUMB_WORDS = 4;
+    secs = (n2) => String(ms(n2));
+    HAS_WORD2 = /[\p{L}\p{N}]/u;
   }
 });
 
@@ -35278,6 +35396,7 @@ __export(src_exports2, {
   MAX_COMMAND: () => MAX_COMMAND,
   MAX_PERSON_SFX_SEC: () => MAX_PERSON_SFX_SEC,
   MAX_SPEEDUP: () => MAX_SPEEDUP,
+  MAX_THUMB_WORDS: () => MAX_THUMB_WORDS,
   MIN_GAP_SEC: () => MIN_GAP_SEC,
   MirageError: () => MirageError,
   NARRATION_GAPS: () => NARRATION_GAPS,
@@ -35298,6 +35417,7 @@ __export(src_exports2, {
   appendLog: () => appendLog,
   appendStep: () => appendStep,
   asCancelled: () => asCancelled,
+  assDraw: () => assDraw,
   assembleNarration: () => assembleNarration,
   bitrateFor: () => bitrateFor,
   buildAss: () => buildAss,
@@ -35326,6 +35446,7 @@ __export(src_exports2, {
   cutLoudness: () => cutLoudness,
   cutOf: () => cutOf,
   decodeMono: () => decodeMono,
+  defaultCjkFont: () => defaultCjkFont,
   deleteNote: () => deleteNote,
   describeError: () => describeError,
   describeZodError: () => describeZodError,
@@ -35400,6 +35521,7 @@ __export(src_exports2, {
   previewSize: () => previewSize,
   readClaudeProcess: () => readClaudeProcess,
   readControl: () => readControl,
+  readFrom: () => readFrom,
   readJsonFile: () => readJsonFile,
   readLog: () => readLog,
   readNotes: () => readNotes,
@@ -35423,6 +35545,7 @@ __export(src_exports2, {
   sameFileName: () => sameFileName,
   saveCatalog: () => saveCatalog,
   saveEpisode: () => saveEpisode,
+  scaler: () => scaler,
   sendNotes: () => sendNotes,
   sentenceTokens: () => sentenceTokens,
   sentenceWords: () => sentenceWords,
@@ -35455,6 +35578,11 @@ __export(src_exports2, {
   takeCorrection: () => takeCorrection,
   textTokens: () => textTokens,
   thumbCandidates: () => thumbCandidates,
+  thumbSize: () => thumbSize,
+  thumbSource: () => thumbSource,
+  thumbWordCount: () => thumbWordCount,
+  thumbnailAss: () => thumbnailAss,
+  thumbnailReport: () => thumbnailReport,
   tidy: () => tidy,
   timelineDuration: () => timelineDuration,
   toSrt: () => toSrt,
@@ -35475,7 +35603,8 @@ __export(src_exports2, {
   writeControl: () => writeControl,
   writeJsonFile: () => writeJsonFile,
   writeProgress: () => writeProgress,
-  writeSessionState: () => writeSessionState
+  writeSessionState: () => writeSessionState,
+  writeThumbnail: () => writeThumbnail
 });
 var init_src3 = __esm({
   "packages/core/src/index.ts"() {
@@ -35495,7 +35624,7 @@ __export(hook_exports, {
   runHook: () => runHook
 });
 import { appendFileSync as appendFileSync2, existsSync as existsSync12, mkdirSync as mkdirSync2, readdirSync as readdirSync2 } from "node:fs";
-import { mkdir as mkdir11, writeFile as writeFile8 } from "node:fs/promises";
+import { mkdir as mkdir11, writeFile as writeFile9 } from "node:fs/promises";
 import { join as join22 } from "node:path";
 function logHookError(pluginData2, event2, e) {
   if (!pluginData2) return;
@@ -35755,7 +35884,7 @@ var init_hook = __esm({
           ...last ? { stoppedAt: last.label } : {}
         });
         await mkdir11(dir, { recursive: true });
-        await writeFile8(join22(dir, "report.md"), md);
+        await writeFile9(join22(dir, "report.md"), md);
       }
     };
   }

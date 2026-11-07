@@ -701,6 +701,26 @@ describe('thumbnail', () => {
     expect(await readLog(sessionDir(dir, 1, 's1'))).toMatchObject([{ kind: 'warning', text: warning }]);
   });
 
+  it('writes the thumbnail from the source frame at a time, with text and a focus', async () => {
+    const dir = await withCut(null);
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=30', '-pix_fmt', 'yuv420p', '-f', 'mp4', join(dir, 'screen.mov')]);
+    const { call } = await connect(dir, { tools: await realMediaTools() });
+    expect(await call('thumbnail', { video: 1, at: 12.4 })).toEqual({ isError: false, text: 'wrote episodes/1/thumbnail.jpg (1280×720, from c001 at 12.4 s)' });
+    expect(await call('thumbnail', { video: 1, at: 1, text: 'Ship it', focus: { x: 0, y: 1 } })).toEqual({ isError: false, text: 'wrote episodes/1/thumbnail.jpg (1280×720, from c001 at 1 s)' });
+    expect(existsSync(join(dir, 'episodes', '1', 'thumbnail.jpg'))).toBe(true);
+    expect(existsSync(join(dir, 'episodes', '1', 'thumbs'))).toBe(false);
+  });
+
+  it('says what is wrong with the time, the text or the focus', async () => {
+    const { call } = await connect(await withCut('rough.mp4'), { tools: await realMediaTools() });
+    expect(await call('thumbnail', { video: 1, at: 14 })).toEqual({ isError: true, text: '✖ 14 s is outside the video (0–14 s)' });
+    expect(await call('thumbnail', { video: 1, at: 1, text: 'one two three four five' })).toEqual({ isError: true, text: '✖ thumbnail text is 5 words — keep it to 4 or fewer' });
+    expect(await call('thumbnail', { video: 1, text: 'Ship it' })).toEqual({
+      isError: true, text: '✖ text and focus go with at (the second of the video the thumbnail shows)\n  Run thumbnail without them to pick a frame, then again with at.',
+    });
+    expect((await call('thumbnail', { video: 1, at: 1, focus: { x: 2, y: 0 } })).isError).toBe(true);
+  });
+
   it('says there is no cut yet, with what to run', async () => {
     const { call } = await connect(await withCut(null), { tools: await realMediaTools() });
     expect(await call('thumbnail', { video: 1 })).toEqual({ isError: true, text: '✖ video 1 has no cut yet\n  Run cut (or render) first.' });

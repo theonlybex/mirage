@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: MIT
+import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isCard, type Catalog, type Episode } from '@wordedits/shared';
+import { isCard, type Catalog, type ClipItem, type Episode } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
+import { ffNum } from './encode.js';
 import { MirageError } from './errors.js';
+import { bundledFontsDir, CAPTION_FONT } from './fonts.js';
 import { loadCatalog } from './ingest.js';
-import { episodeDir, loadEpisode } from './render-episode.js';
-import { layoutTimeline } from './timeline.js';
+import { assDraw, scaler, tidy } from './overlays.js';
+import { episodeDir, filterValue, frameTolerance, loadEpisode, readFrom, sourcesFor } from './render-episode.js';
+import { layoutTimeline, type LaidItem } from './timeline.js';
 
 /** A frame of the cut worth considering as a thumbnail: where it is (output seconds) and why it was picked. */
 export interface ThumbCandidate {
@@ -124,15 +128,22 @@ export interface CandidateFrames {
 
 const CAND_FILE = /^cand-\d+\.jpg$/;
 
+/** Video `n`'s last cut: the newer of final.mp4 and rough.mp4 by modification time (final on a tie). Throws when there is none. */
+function latestCut(dir: string, n: number): 'final.mp4' | 'rough.mp4' {
+  const made = (['final.mp4', 'rough.mp4'] as const).flatMap((f) => (existsSync(join(dir, f)) ? [{ f, at: statSync(join(dir, f)).mtimeMs }] : []));
+  if (!made.length) throw new MirageError('NO_EPISODE', `video ${n} has no cut yet`, 'Run cut (or render) first.');
+  return made.reduce((a, b) => (b.at > a.at ? b : a)).f;
+}
+
 /**
- * Writes the candidate frames of video `n`'s last cut (the newer of final.mp4 and rough.mp4 by modification time, final on a tie) as episodes/<n>/thumbs/cand-01.jpg …, each at
- * the cut's size, after removing the earlier cand-*.jpg files (nothing else in thumbs/). Throws when there is no cut.
+ * Writes the candidate frames of video `n`'s last cut (latestCut) as episodes/<n>/thumbs/cand-01.jpg …, each at the cut's
+ * size. They are written in a folder of their own inside the episode folder first and only then swapped in, removing the
+ * earlier cand-*.jpg files (nothing else in thumbs/): stopped or failed part way, the earlier candidates stay as they were.
+ * Throws when there is no cut.
  */
 export async function writeCandidates(project: string, n: number, tools: MediaTools, o: { signal?: AbortSignal } = {}): Promise<CandidateFrames> {
   const dir = episodeDir(project, n);
-  const made = (['final.mp4', 'rough.mp4'] as const).flatMap((f) => (existsSync(join(dir, f)) ? [{ f, at: statSync(join(dir, f)).mtimeMs }] : []));
-  const source = made.length ? made.reduce((a, b) => (b.at > a.at ? b : a)).f : undefined;
-  if (!source) throw new MirageError('NO_EPISODE', `video ${n} has no cut yet`, 'Run cut (or render) first.');
+  const source = latestCut(dir, n);
   const cut = join(dir, source);
   const ep = await loadEpisode(project, n);
   const catalog = await loadCatalog(project);
@@ -143,23 +154,30 @@ export async function writeCandidates(project: string, n: number, tools: MediaTo
   const loudness = ownSound && probe.hasAudio ? await cutLoudness(cut, tools, o) : [];
   const laid = layoutTimeline(ep);
   const cutSec = probe.videoDurationSec ?? probe.durationSec;
-  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1]!.end) > 1 / ep.output.fps + EPS;
+  // The render accepts a cut this close to the timeline's length as the timeline's own.
+  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1]!.end) > Math.max(0.1, 1 / ep.output.fps) + EPS;
   // A timeline that grew after the cut has times the cut doesn't reach.
   const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
 
-  const thumbs = join(dir, 'thumbs');
-  await mkdir(thumbs, { recursive: true });
-  for (const f of await readdir(thumbs)) if (CAND_FILE.test(f)) await rm(join(thumbs, f), { force: true });
-
-  const frames: CandidateFrames['frames'] = [];
-  for (const [i, p] of picks.entries()) {
-    const file = `cand-${String(i + 1).padStart(2, '0')}.jpg`;
-    // -accurate_seek (FFmpeg's default when transcoding) decodes from the keyframe before to the frame at p.t exactly.
-    await tools.runFfmpeg(['-accurate_seek', '-ss', p.t.toFixed(3), '-i', cut, '-frames:v', '1', '-q:v', '2', join(thumbs, file)], { signal: o.signal });
-    if (!existsSync(join(thumbs, file))) throw new MirageError('BAD_INPUT', `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n} again (cut or render), then pick frames.`);
-    frames.push({ ...p, file });
+  const work = await mkdtemp(join(dir, '.thumbs-'));
+  try {
+    const frames: CandidateFrames['frames'] = [];
+    for (const [i, p] of picks.entries()) {
+      const file = `cand-${String(i + 1).padStart(2, '0')}.jpg`;
+      // -accurate_seek (FFmpeg's default when transcoding) decodes from the keyframe before to the frame at p.t exactly.
+      await tools.runFfmpeg(['-accurate_seek', '-ss', p.t.toFixed(3), '-i', cut, '-frames:v', '1', '-q:v', '2', join(work, file)], { signal: o.signal });
+      if (!existsSync(join(work, file))) throw new MirageError('BAD_INPUT', `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n} again (cut or render), then pick frames.`);
+      frames.push({ ...p, file });
+    }
+    o.signal?.throwIfAborted();
+    const thumbs = join(dir, 'thumbs');
+    await mkdir(thumbs, { recursive: true });
+    for (const f of await readdir(thumbs)) if (CAND_FILE.test(f)) await rm(join(thumbs, f), { force: true });
+    for (const f of frames) await rename(join(work, f.file), join(thumbs, f.file));
+    return { source, timelineChanged, frames };
+  } finally {
+    await rm(work, { recursive: true, force: true });
   }
-  return { source, timelineChanged, frames };
 }
 
 /** A time as m:ss.s (tenths rounded as a whole, so 59.96 is 1:00.0). */
@@ -175,4 +193,169 @@ export function candidatesReport(n: number, r: CandidateFrames): string[] {
     ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  ${f.reason}`),
     ...(r.timelineChanged ? [`⚠ the timeline changed after ${r.source} was made — run cut again for frames that match`] : []),
   ];
+}
+
+/** At most this many words on a thumbnail. */
+export const MAX_THUMB_WORDS = 4;
+
+/** The thumbnail's size: 1280×720 for a video wider than tall, else the 1080×1920 cover of a Short or Reel. */
+export function thumbSize(output: { width: number; height: number }): { width: number; height: number } {
+  return output.width > output.height ? { width: 1280, height: 720 } : { width: 1080, height: 1920 };
+}
+
+/** Seconds as written in a reply: up to 3 decimals, no trailing zeros. */
+const secs = (n: number) => String(ms(n));
+
+/** What the video shows at an output time: a clip item's picture at `src` seconds into its clip, or a card. */
+export type ThumbSource = { laid: LaidItem; src: number } | { laid: LaidItem; card: true };
+
+/**
+ * What video `ep` shows at output time `at`: the item of the frame showing it, and for a clip item the time in its clip,
+ * as the render picks it: `src.in` + the frame's place in the item × speed / fps. During a hold, the held frame (the one
+ * at the shot's end, which the render clones), kept inside the shot. Under a move it is still the clip's own frame: the
+ * thumbnail makes its own crop. Throws when `at` is outside the video.
+ */
+export function thumbSource(ep: Episode, at: number): ThumbSource {
+  const fps = ep.output.fps;
+  const laid = layoutTimeline(ep);
+  const total = laid.reduce((f, l) => f + l.frames, 0);
+  const outside = () => new MirageError('BAD_INPUT', `${at} s is outside the video (0–${secs(total / fps)} s)`, '');
+  if (!Number.isFinite(at) || at < 0) throw outside();
+  // The frame showing `at` (allowing for rounding: 4.6 × 30 is 137.99999…).
+  const frame = Math.floor(at * fps + 1e-6);
+  let first = 0;
+  for (const l of laid) {
+    if (frame < first + l.frames) {
+      if (isCard(l.item)) return { laid: l, card: true };
+      const { src, speed } = l.item;
+      return { laid: l, src: Math.min(src.out, src.in + (Math.min(frame - first, l.srcFrames) * speed) / fps) };
+    }
+    first += l.frames;
+  }
+  throw outside();
+}
+
+const HAS_WORD = /[\p{L}\p{N}]/u;
+
+/** The words of a thumbnail's text: emoji left out as they are when drawn, and a dash or other mark on its own is no word. */
+export function thumbWordCount(text: string): number {
+  return tidy(text).split(/\s+/).filter((w) => HAS_WORD.test(w)).length;
+}
+
+/**
+ * The subtitle script drawing a thumbnail's text on a width×height picture: capitals in the bundled Montserrat
+ * ExtraBold, white with a black outline px(10), size px(150) (pixels for a 1080-px short side, scaled by the picture's
+ * short side), centred on the middle of the lower third and wrapping inside 5% side margins. The text goes through
+ * assDraw as captions and overlays do (emoji left out, braces harmless).
+ */
+export function thumbnailAss(width: number, height: number, text: string): string {
+  const px = scaler(width, height);
+  const side = Math.round(width * 0.05);
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    // The bundled face is heavy already: no faux bold.
+    `Style: Thumb,${CAPTION_FONT},${px(150)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${px(10)},0,5,${side},${side},0,1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    `Dialogue: 0,0:00:00.00,0:00:10.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round((height * 5) / 6)})}${assDraw(text.toUpperCase())}`,
+    '',
+  ].join('\n');
+}
+
+export interface Thumbnail {
+  file: string;
+  width: number;
+  height: number;
+  /** The clip and the second of it the picture is, or the card (its frame from the cut). */
+  from: { clip: string; src: number } | 'card';
+}
+
+/**
+ * Writes episodes/<n>/thumbnail.jpg from what video `n` shows at output second `at` (thumbSource): a clip item's frame
+ * read from the clip file itself (not the compressed cut), a card's frame from the last cut. Scaled to cover the
+ * thumbnail size (thumbSize), cropped around `focus` (default the item's own, a card's centre) the way Mirage crops,
+ * sharpened and brightened a little, with `text` (at most MAX_THUMB_WORDS words) drawn on it (thumbnailAss). Written
+ * beside the old one and then renamed over it, so a stop or failure leaves an earlier thumbnail as it was.
+ */
+export async function writeThumbnail(
+  project: string,
+  n: number,
+  o: { at: number; text?: string; focus?: { x: number; y: number } },
+  tools: MediaTools,
+  run: { signal?: AbortSignal } = {},
+): Promise<Thumbnail> {
+  const words = o.text === undefined ? 0 : thumbWordCount(o.text);
+  if (words > MAX_THUMB_WORDS) throw new MirageError('BAD_INPUT', `thumbnail text is ${words} words — keep it to ${MAX_THUMB_WORDS} or fewer`, '');
+  if (o.focus && ![o.focus.x, o.focus.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
+    throw new MirageError('BAD_INPUT', 'focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)', '');
+  }
+  const dir = episodeDir(project, n);
+  const ep = await loadEpisode(project, n);
+  const fps = ep.output.fps;
+  const shown = thumbSource(ep, o.at);
+  const { width: W, height: H } = thumbSize(ep.output);
+
+  let input: string[];
+  let pick = '';
+  let focus: { x: number; y: number };
+  let from: Thumbnail['from'];
+  let where: { name: string; hint: string };
+  if ('card' in shown) {
+    const cut = latestCut(dir, n);
+    // The cut's frame showing `at`: -accurate_seek decodes from the keyframe before to the first frame at or after the
+    // seek time, a quarter of a frame before that frame's own time (so a time stored a hair early still counts).
+    const t = Math.floor(o.at * fps + 1e-6) / fps;
+    input = ['-accurate_seek', '-ss', ffNum(Math.max(0, t - 1 / (4 * fps))), '-i', join(dir, cut)];
+    focus = o.focus ?? { x: 0.5, y: 0.5 };
+    from = 'card';
+    where = { name: cut, hint: `Render video ${n} again (cut or render), then write the thumbnail.` };
+  } else {
+    const item = shown.laid.item as ClipItem;
+    const src = sourcesFor({ ...ep, items: [item] }, await loadCatalog(project)).get(item.clip)!;
+    // Read as the render's chunks read a clip (readFrom: the clip's clock with 0 at the time, a late video stream
+    // included; FFmpeg turns a rotated clip upright as it does there), and pick the frame the render shows: the latest
+    // at or before the time, a quarter of a frame late still counting (fps holds it at 0, the first frame out). The seek
+    // goes to the keyframe before and decodes from there, so the frame is exact.
+    input = readFrom(src, shown.src);
+    pick = `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,`;
+    focus = o.focus ?? item.focus;
+    from = { clip: item.clip, src: ms(shown.src) };
+    where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
+  }
+
+  const text = o.text !== undefined && tidy(o.text) !== '';
+  // Mirage's crop: the window at (iw−ow)·x, (ih−oh)·y.
+  const vf =
+    `${pick}scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)},setsar=1,` +
+    `unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08${text ? `,ass=thumbnail.ass:fontsdir=${filterValue(bundledFontsDir())}` : ''}`;
+  const file = join(dir, 'thumbnail.jpg');
+  const part = join(dir, `.thumbnail-${randomUUID().slice(0, 8)}.jpg`);
+  // The script is named relative to the folder FFmpeg runs in, so its path needs no escaping in the graph.
+  const work = await mkdtemp(join(tmpdir(), 'mirage-thumb-'));
+  try {
+    if (text) await writeFile(join(work, 'thumbnail.ass'), thumbnailAss(W, H, o.text!));
+    await tools.runFfmpeg([...input, '-vf', vf, '-frames:v', '1', '-q:v', '2', part], { cwd: work, signal: run.signal });
+    if (!existsSync(part)) throw new MirageError('BAD_INPUT', `${where.name} has no picture at ${secs('card' in shown ? o.at : shown.src)} s`, where.hint);
+    run.signal?.throwIfAborted();
+    await rename(part, file);
+  } finally {
+    await rm(part, { force: true });
+    await rm(work, { recursive: true, force: true });
+  }
+  return { file, width: W, height: H, from };
+}
+
+/** The tool's reply: the file, its size and where the picture came from. */
+export function thumbnailReport(n: number, r: Thumbnail): string {
+  const from = r.from === 'card' ? 'the card' : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
+  return `wrote episodes/${n}/thumbnail.jpg (${r.width}×${r.height}, from ${from})`;
 }

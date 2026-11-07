@@ -193,7 +193,7 @@ export interface ChunkShape {
  * stream (no keyframe to seek to: the demuxer would move the audio up to the video's first frame too, losing the sound
  * before it), reads from the start on the same clock.
  */
-function readFrom(src: ClipSource, sec: number): string[] {
+export function readFrom(src: ClipSource, sec: number): string[] {
   if (sec < (src.videoStartSec ?? 0)) return [...(sec > 0 ? ['-itsoffset', ffNum(-sec)] : []), '-i', src.path];
   return ['-noaccurate_seek', '-ss', ffNum(sec), '-i', src.path];
 }

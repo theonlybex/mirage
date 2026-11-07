@@ -10,7 +10,7 @@ import { LATER_DAYS, writeSetupState } from '@wordedits/shared/setup-state';
 import {
   analyzeLibrary, appendLog, candidatesReport, checkEpisode, checkReport, describeError, episodeDir, fitRecording, formatsDir, ingestClips, ingestReport, initProject, listVersions, loadFormats,
   MirageError, musicReport, newVideo, planVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
-  sessionDir, slotsReport, speakNarration, speakReport, updateSlots, videoStage, voReport, writeCandidates, writeSessionState, type EpisodeMode, type MediaTools,
+  sessionDir, slotsReport, speakNarration, speakReport, thumbnailReport, updateSlots, videoStage, voReport, writeCandidates, writeSessionState, writeThumbnail, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
 import { DEFAULT_VOICE, KOKORO_VOICES, kokoroSpeaker, type Speaker } from '@wordedits/sidecars';
 import { preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } from './preflight.js';
@@ -295,11 +295,24 @@ export function createEngineServer(ctx: EngineContext): McpServer {
 
   tool(
     'thumbnail',
-    'Pick thumbnail frames for a video: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from.',
-    { video },
-    async ({ video: n }, { signal }) => {
-      const r = await long('thumbnail', n, signal, (h) => writeCandidates(project, n, tools, { signal: h.signal }));
-      return report(n, candidatesReport(n, r));
+    'Thumbnails for a video. Without at: writes candidate frames from its last cut (the strongest moments, loud shots, reveals, evenly spaced) to episodes/<n>/thumbs/ to choose from. ' +
+      'With at: writes episodes/<n>/thumbnail.jpg at full quality from the source frame the video shows at that second (1280×720, or the 1080×1920 cover for a vertical video), with optional text.',
+    {
+      video,
+      at: z.number().optional().describe('The second of the video the thumbnail shows (e.g. a candidate frame\'s time)'),
+      text: z.string().optional().describe('With at: up to 4 words drawn on the thumbnail in capitals'),
+      focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional().describe('With at: the point kept in view when the picture is cropped, 0–1 from the left and from the top (default the item\'s own focus)'),
+    },
+    async ({ video: n, at, text, focus }, { signal }) => {
+      if (at === undefined) {
+        if (text !== undefined || focus !== undefined) {
+          throw new MirageError('BAD_INPUT', 'text and focus go with at (the second of the video the thumbnail shows)', 'Run thumbnail without them to pick a frame, then again with at.');
+        }
+        const r = await long('thumbnail', n, signal, (h) => writeCandidates(project, n, tools, { signal: h.signal }));
+        return report(n, candidatesReport(n, r));
+      }
+      const r = await long('thumbnail', n, signal, (h) => writeThumbnail(project, n, { at, text, focus }, tools, { signal: h.signal }));
+      return report(n, [thumbnailReport(n, r)]);
     },
   );
 

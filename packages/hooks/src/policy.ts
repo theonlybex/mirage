@@ -106,6 +106,8 @@ const segments = (rel: string) => rel.split(path.sep);
 export function stepLabel(tool: string, input: unknown): { label: string; doneLabel: string } {
   const engine = engineTool(tool);
   if (engine !== null) {
+    // thumbnail with `at` writes the thumbnail itself; without it, it picks candidate frames.
+    if (engine === 'thumbnail' && typeof record(input).at === 'number') return { label: 'Writing the thumbnail', doneLabel: 'Thumbnail written' };
     const [label, doneLabel] = ENGINE_LABELS[engine] ?? ['Working', 'Done'];
     return { label, doneLabel };
   }

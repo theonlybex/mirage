@@ -33,6 +33,8 @@ describe('stepLabel', () => {
     [E('setup_later'), {}, 'Noting that for later', 'Noted for later'],
     [E('formats'), {}, 'Looking up the formats', 'Formats looked up'],
     [E('thumbnail'), { video: 1 }, 'Picking thumbnail frames', 'Thumbnail frames ready'],
+    [E('thumbnail'), { video: 1, at: 12.5 }, 'Writing the thumbnail', 'Thumbnail written'],
+    [E('thumbnail'), { video: 1, at: 0, text: 'Ship it' }, 'Writing the thumbnail', 'Thumbnail written'],
     ['Read', { file_path: '/p/frames/c001/0001.jpg' }, 'Looking at clips', 'Looked at clips'],
     ['Read', { file_path: '/p/episodes/1/summary.md' }, 'Reading summary.md', 'Read summary.md'],
     ['Write', { file_path: '/p/episodes/1/episode.json' }, 'Writing the timeline', 'Timeline written'],
