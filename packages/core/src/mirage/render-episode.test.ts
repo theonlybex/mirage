@@ -1651,7 +1651,7 @@ describe('cards (real ffmpeg)', () => {
   it('draws a name label, a chosen subtitle and a time tag in yellow where they belong, at their times (real frames), in the bundled font', async () => {
     const card = (id: string, text: string) => ({ id, beat: 'title', card: { style: 'bold', text, sec: 2 } });
     const overlays = [
-      { kind: 'name', text: 'Sam Rivera', sub: 'Founder, Wondish', start: 0.5, end: 1.5 },
+      { kind: 'name', text: 'Sam Rivera', sub: 'Founder, Lamp Co', start: 0.5, end: 1.5 },
       { kind: 'subtitle', text: 'So I went back to the start.', start: 2.5, end: 3.5 },
       { kind: 'timecard', text: '9:41 AM', start: 4.5, end: 5.5 },
     ];

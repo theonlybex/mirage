@@ -360,7 +360,7 @@ describe('buildAss name labels, chosen subtitles and time tags', () => {
   const base = { cjkFont: null, captions: [], prompts: [] };
   const style = (ass: string, name: string) => ass.split('\n').find((l) => l.startsWith(`Style: ${name},`))?.split(',');
   const lines = (ass: string, name: string) => ass.split('\n').filter((l) => l.startsWith('Dialogue:') && l.split(',')[3] === name);
-  const name = { kind: 'name' as const, text: 'Sam Rivera', sub: 'Founder, Wondish', start: 1, end: 4, tone: 'neutral' as const };
+  const name = { kind: 'name' as const, text: 'Sam Rivera', sub: 'Founder, Lamp Co', start: 1, end: 4, tone: 'neutral' as const };
   const subtitle = { kind: 'subtitle' as const, text: 'So I went back to the start.', start: 2, end: 5, tone: 'neutral' as const };
   const timecard = { kind: 'timecard' as const, text: '9:41 AM', start: 0, end: 3, tone: 'neutral' as const };
   const YELLOW = '&H0000D4FF';
@@ -369,7 +369,7 @@ describe('buildAss name labels, chosen subtitles and time tags', () => {
     const ass = buildAss({ ...base, width: 1920, height: 1080, overlays: [name] });
     // Montserrat ExtraBold 64 px in yellow (no faux bold), a black 5 px outline, bottom-left (1), margins 115 px (6% of 1920) both sides, 194 px (18% of 1080) up.
     expect(style(ass, 'Name')).toEqual(['Style: Name', 'Montserrat ExtraBold', '64', YELLOW, YELLOW, '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '5', '0', '1', '115', '115', '194', '1']);
-    expect(lines(ass, 'Name')).toEqual(['Dialogue: 3,0:00:01.00,0:00:04.00,Name,,0,0,0,,{\\fad(150,150)}Sam Rivera\\N{\\fs40\\c&H00FFFFFF&}Founder, Wondish']);
+    expect(lines(ass, 'Name')).toEqual(['Dialogue: 3,0:00:01.00,0:00:04.00,Name,,0,0,0,,{\\fad(150,150)}Sam Rivera\\N{\\fs40\\c&H00FFFFFF&}Founder, Lamp Co']);
     expect(style(ass, 'Subtitle')).toBeUndefined();
     expect(style(ass, 'Timecard')).toBeUndefined();
   });

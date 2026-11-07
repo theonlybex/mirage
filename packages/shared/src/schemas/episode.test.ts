@@ -206,8 +206,8 @@ describe('EpisodeSchema card items', () => {
       for (const kind of ['name', 'subtitle', 'timecard']) expect(ov({ kind }).success, kind).toBe(true);
     });
     it('takes a sub line on a name label only, and says so on any other kind', () => {
-      const parsed = ov({ kind: 'name', sub: 'Founder, Wondish' });
-      expect(parsed.success && parsed.data.overlays[0]).toMatchObject({ kind: 'name', text: 'Sam', sub: 'Founder, Wondish' });
+      const parsed = ov({ kind: 'name', sub: 'Founder, Lamp Co' });
+      expect(parsed.success && parsed.data.overlays[0]).toMatchObject({ kind: 'name', text: 'Sam', sub: 'Founder, Lamp Co' });
       for (const kind of ['callout', 'counter', 'badge', 'label', 'chapter', 'before', 'after', 'subtitle', 'timecard']) {
         expect(firstIssue(ov({ kind, sub: 'x' })), kind).toEqual({ path: ['overlays', 0, 'sub'], message: `overlay "Sam": sub (the second line) is only for a name label — a ${kind} overlay has none` });
       }

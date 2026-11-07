@@ -120,6 +120,19 @@ describe('the plugin skills', () => {
     expect(edit).toContain("move starts at");
   });
 
+  it('edit teaches card items and the name, subtitle and timecard overlays', () => {
+    const edit = read('edit');
+    expect(edit).toContain('`card`');
+    for (const word of ['mono', 'bold', 'image', 'sec']) expect(edit, `edit never names the card's ${word}`).toContain(`\`${word}\``);
+    for (const kind of ['name', 'subtitle', 'timecard']) expect(edit, `edit never names the ${kind} overlay`).toContain(`\`${kind}\``);
+    expect(edit).toContain('`sub`');
+    expect(edit).toContain("A subtitle's text is words actually said at that moment: copy them from the transcript, never write new ones.");
+    expect(edit).toContain("card image <path> is missing");
+    expect(edit).toContain("isn't a PNG or JPEG");
+    expect(edit).toContain("doesn't match what's said at");
+    expect(edit).toContain('"9:41"');
+  });
+
   it('edit teaches sound effects and music dips: the field, the seven built-ins, the sfx folder and the rules', () => {
     const edit = read('edit');
     expect(edit).toContain('`sfx`');
