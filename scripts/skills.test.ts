@@ -120,6 +120,16 @@ describe('the plugin skills', () => {
     expect(edit).toContain("move starts at");
   });
 
+  it('edit teaches sound effects and music dips: the field, the seven built-ins, the sfx folder and the rules', () => {
+    const edit = read('edit');
+    expect(edit).toContain('`sfx`');
+    for (const key of ['sound', 'at', 'gainDb']) expect(edit, `edit never names sfx's ${key}`).toContain(`\`${key}\``);
+    for (const name of ['whoosh', 'swoosh-out', 'hit', 'riser', 'pop', 'ding', 'click']) expect(edit, `edit never names the ${name} sound`).toContain(`\`${name}\``);
+    expect(edit).toContain('`dips`');
+    expect(edit).toContain('`sfx/`');
+    expect(edit).toContain("Leave a sound effect out rather than use one that doesn't fit; the person reviews the finished edit, and a sound they don't like comes back as a note.");
+  });
+
   it('the copy the plan fixes word for word is there', () => {
     const edit = read('edit');
     expect(edit).toContain("Here's the rough cut in Mirage's viewer. Click on the video to leave notes, then press Send notes.");
