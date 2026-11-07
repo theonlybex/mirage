@@ -129,6 +129,16 @@ export interface CandidateFrames {
 
 const CAND_FILE = /^cand-\d+\.jpg$/;
 
+/** What writeCandidates and writeThumbnail write before swapping it in: left behind only by a run that was killed. */
+const LEFT_CANDIDATES = /^\.thumbs-/;
+const LEFT_THUMBNAIL = /^\.thumbnail-[^/\\]*\.jpg$/;
+
+/** Removes the entries of `dir` named like `pattern` (as versions sweeps its .tmp- entries); a folder that isn't there has none. */
+async function sweep(dir: string, pattern: RegExp): Promise<void> {
+  const names = await readdir(dir).catch(() => [] as string[]);
+  for (const f of names) if (pattern.test(f)) await rm(join(dir, f), { recursive: true, force: true }).catch(() => {});
+}
+
 /** Video `n`'s last cut: the newer of final.mp4 and rough.mp4 by modification time (final on a tie). Throws when there is none. */
 function latestCut(dir: string, n: number): 'final.mp4' | 'rough.mp4' {
   const made = (['final.mp4', 'rough.mp4'] as const).flatMap((f) => (existsSync(join(dir, f)) ? [{ f, at: statSync(join(dir, f)).mtimeMs }] : []));
@@ -160,6 +170,8 @@ export async function writeCandidates(project: string, n: number, tools: MediaTo
   // A timeline that grew after the cut has times the cut doesn't reach.
   const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
 
+  // What a stopped or failed run left (its own folder), then this run's folder.
+  await sweep(dir, LEFT_CANDIDATES);
   const work = await mkdtemp(join(dir, '.thumbs-'));
   try {
     const frames: CandidateFrames['frames'] = [];
@@ -214,10 +226,11 @@ const secs = (n: number) => String(ms(n));
 export type ThumbSource = { laid: LaidItem; src: number } | { laid: LaidItem; card: true };
 
 /**
- * What video `ep` shows at output time `at`: the item of the frame showing it, and for a clip item the time in its clip,
- * as the render picks it: `src.in` + the frame's place in the item × speed / fps. During a hold, the held frame (the one
- * at the shot's end, which the render clones), kept inside the shot. Under a move it is still the clip's own frame: the
- * thumbnail makes its own crop. Throws when `at` is outside the video.
+ * What video `ep` shows at output time `at`: the item of the frame showing it, and for a clip item the time in its clip
+ * the render looks for: `src.in` + the frame's place in the item × speed / fps. During a hold, the held frame: the render
+ * clones its frame `srcFrames`, at `src.in + srcFrames × speed / fps` (which can be a little past src.out, and past the
+ * clip's last frame; the render, and writeThumbnail, then show the last frame there is). Under a move it is still the
+ * clip's own frame: the thumbnail makes its own crop. Throws when `at` is outside the video.
  */
 export function thumbSource(ep: Episode, at: number): ThumbSource {
   const fps = ep.output.fps;
@@ -232,7 +245,7 @@ export function thumbSource(ep: Episode, at: number): ThumbSource {
     if (frame < first + l.frames) {
       if (isCard(l.item)) return { laid: l, card: true };
       const { src, speed } = l.item;
-      return { laid: l, src: Math.min(src.out, src.in + (Math.min(frame - first, l.srcFrames) * speed) / fps) };
+      return { laid: l, src: src.in + (Math.min(frame - first, l.srcFrames) * speed) / fps };
     }
     first += l.frames;
   }
@@ -338,15 +351,28 @@ export async function writeThumbnail(
     where = { name: `card ${item.id}`, hint: `Check card ${item.id} (run check), then write the thumbnail again.` };
   } else {
     const item = shown.laid.item as ClipItem;
-    const src = sourcesFor({ ...ep, items: [item] }, await loadCatalog(project)).get(item.clip)!;
-    // Read as the render's chunks read a clip (readFrom: the clip's clock with 0 at the time, a late video stream
-    // included; FFmpeg turns a rotated clip upright as it does there), and pick the frame the render shows: the latest
-    // at or before the time, a quarter of a frame late still counting (fps holds it at 0, the first frame out). The seek
-    // goes to the keyframe before and decodes from there, so the frame is exact.
-    input = readFrom(src, shown.src);
+    const catalog = await loadCatalog(project);
+    const src = sourcesFor({ ...ep, items: [item] }, catalog).get(item.clip)!;
+    // Read as the render's chunks read a clip (readFrom: the clip's clock, a late video stream included; FFmpeg turns a
+    // rotated clip upright as it does there), and pick the frame the render shows: the latest at or before the time, a
+    // quarter of a frame late still counting, on the render's clock (setpts … / speed, then fps). The seek goes to the
+    // keyframe before and decodes from there, so the frame is exact.
+    // The time can be at or past the clip's last frame (a freeze on its end, a shot running a little past the video):
+    // reading from there, FFmpeg would have nothing at or after 0 and write nothing. So it reads from `back` seconds
+    // earlier (a frame's worth, and at least a second before the video's end), puts the time `k` output frames in, and
+    // keeps frame k, or the last frame there is when the clip ends first, as the render's hold does (tpad clones it).
+    const videoEnd = (() => {
+      const p = catalog.clips.find((c) => c.id === item.clip)!.probe;
+      return p.videoDurationSec ?? p.durationSec;
+    })();
+    const from0 = Math.max(0, Math.min(shown.src - item.speed / fps, videoEnd - 1));
+    const back = shown.src - from0;
+    const k = Math.max(0, Math.ceil((back * fps) / item.speed - 1e-6));
+    input = readFrom(src, from0);
     // Mirage's crop: the window at (iw−ow)·x, (ih−oh)·y.
     picture =
-      `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,` +
+      `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,` +
+      `trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',` +
       `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:${focusAt(o.focus ?? item.focus)},setsar=1,${look}`;
     from = { clip: item.clip, src: ms(shown.src) };
     where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
@@ -356,6 +382,7 @@ export async function writeThumbnail(
   // relative to the folder FFmpeg runs in, so their paths need no escaping in the graph.
   const vf = [picture, ...(scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : []), ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`)].join(',');
   const file = join(dir, 'thumbnail.jpg');
+  await sweep(dir, LEFT_THUMBNAIL);
   const part = join(dir, `.thumbnail-${randomUUID().slice(0, 8)}.jpg`);
   const work = await mkdtemp(join(tmpdir(), 'mirage-thumb-'));
   try {

@@ -41565,6 +41565,13 @@ async function cutLoudness(file2, tools, o2 = {}) {
   }
 }
 var CAND_FILE = /^cand-\d+\.jpg$/;
+var LEFT_CANDIDATES = /^\.thumbs-/;
+var LEFT_THUMBNAIL = /^\.thumbnail-[^/\\]*\.jpg$/;
+async function sweep(dir, pattern) {
+  const names = await readdir8(dir).catch(() => []);
+  for (const f of names) if (pattern.test(f)) await rm12(join21(dir, f), { recursive: true, force: true }).catch(() => {
+  });
+}
 function latestCut(dir, n2) {
   const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync5(join21(dir, f)).mtimeMs }] : []);
   if (!made.length) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
@@ -41583,6 +41590,7 @@ async function writeCandidates(project2, n2, tools, o2 = {}) {
   const cutSec = probe2.videoDurationSec ?? probe2.durationSec;
   const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > Math.max(0.1, 1 / ep.output.fps) + EPS5;
   const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
+  await sweep(dir, LEFT_CANDIDATES);
   const work = await mkdtemp2(join21(dir, ".thumbs-"));
   try {
     const frames = [];
@@ -41631,7 +41639,7 @@ function thumbSource(ep, at2) {
     if (frame < first + l.frames) {
       if (isCard(l.item)) return { laid: l, card: true };
       const { src, speed } = l.item;
-      return { laid: l, src: Math.min(src.out, src.in + Math.min(frame - first, l.srcFrames) * speed / fps) };
+      return { laid: l, src: src.in + Math.min(frame - first, l.srcFrames) * speed / fps };
     }
     first += l.frames;
   }
@@ -41700,15 +41708,24 @@ async function writeThumbnail(project2, n2, o2, tools, run2 = {}) {
     where = { name: `card ${item.id}`, hint: `Check card ${item.id} (run check), then write the thumbnail again.` };
   } else {
     const item = shown2.laid.item;
-    const src = sourcesFor({ ...ep, items: [item] }, await loadCatalog(project2)).get(item.clip);
-    input2 = readFrom(src, shown2.src);
-    picture = `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:${focusAt(o2.focus ?? item.focus)},setsar=1,${look}`;
+    const catalog = await loadCatalog(project2);
+    const src = sourcesFor({ ...ep, items: [item] }, catalog).get(item.clip);
+    const videoEnd = (() => {
+      const p = catalog.clips.find((c3) => c3.id === item.clip).probe;
+      return p.videoDurationSec ?? p.durationSec;
+    })();
+    const from0 = Math.max(0, Math.min(shown2.src - item.speed / fps, videoEnd - 1));
+    const back = shown2.src - from0;
+    const k = Math.max(0, Math.ceil(back * fps / item.speed - 1e-6));
+    input2 = readFrom(src, from0);
+    picture = `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:${focusAt(o2.focus ?? item.focus)},setsar=1,${look}`;
     from = { clip: item.clip, src: ms(shown2.src) };
     where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
   }
   if (o2.text !== void 0 && tidy(o2.text) !== "") scripts.push(["thumbnail.ass", thumbnailAss(W, H, o2.text)]);
   const vf = [picture, ...scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : [], ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`)].join(",");
   const file2 = join21(dir, "thumbnail.jpg");
+  await sweep(dir, LEFT_THUMBNAIL);
   const part = join21(dir, `.thumbnail-${randomUUID8().slice(0, 8)}.jpg`);
   const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
   try {

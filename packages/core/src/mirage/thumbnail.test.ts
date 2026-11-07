@@ -234,9 +234,9 @@ describe('thumbSource', () => {
     expect(where(13.49)).toEqual({ id: 'e', src: 4.966667 });
   });
 
-  it('keeps the held frame inside the shot when its frames round past src.out', () => {
-    // 2.02 s is 61 frames at 30 fps (2.033 s): the held frame is the shot's end.
-    expect(where(2.5, ep([item('f', [0, 2.02], { hold: 1 })]))).toEqual({ id: 'f', src: 2.02 });
+  it('holds the frame the render holds when the shot\'s frames round past src.out', () => {
+    // 2.02 s is 61 frames at 30 fps: the render clones its frame 61, 2.033 s into the clip (the last there is, if the clip ends before).
+    expect(where(2.5, ep([item('f', [0, 2.02], { hold: 1 })]))).toEqual({ id: 'f', src: 2.033333 });
   });
 
   it('refuses a time outside the video', () => {
@@ -562,6 +562,32 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       const px = await pixels(thumbFile(dir));
       expect(near(px.avg(0, 0, 560, 720), 'red')).toBe(true);
       expect(near(px.avg(720, 0, 1280, 720), 'blue')).toBe(true);
+    });
+
+    it('freezes on a clip\'s last frame, and shows the last frame of a shot that runs past the video', async () => {
+      // c001 is 12 s: 11–12 s is blue. A hold with src.out at the clip's end looks for a frame at 12 s, which isn't there.
+      const dir = await thumbProject('lastframe', [item('a', [10, 12], { hold: 1 }), item('b', [11, 12.05]), item('c', [11.5, 12.05], { hold: 1 })]);
+      expect((await writeThumbnail(dir, 1, { at: 2.5 }, tools)).from).toEqual({ clip: 'c001', src: 12 });
+      expect(near(await colour(thumbFile(dir)), 'blue')).toBe(true);
+      // b: 32 frames from 3 s; its last is 11 + 31/30 s into the clip, past the last frame (11.967 s).
+      expect((await writeThumbnail(dir, 1, { at: 3 + 31 / 30 }, tools)).from).toEqual({ clip: 'c001', src: 12.033 });
+      expect(near(await colour(thumbFile(dir)), 'blue')).toBe(true);
+      // c (from 4.067 s): held, past the end too.
+      expect((await writeThumbnail(dir, 1, { at: 5.5 }, tools)).from).toEqual({ clip: 'c001', src: 12.067 });
+      expect(near(await colour(thumbFile(dir)), 'blue')).toBe(true);
+    });
+
+    it('sweeps what a stopped run left in the episode folder', async () => {
+      const dir = await thumbProject('sweep', [item('a', [0, 4])]);
+      const ep1 = join(dir, 'episodes', '1');
+      await mkdir(join(ep1, '.thumbs-old1'));
+      await writeFile(join(ep1, '.thumbs-old1', 'cand-01.jpg'), 'x');
+      await writeFile(join(ep1, '.thumbnail-old2.jpg'), 'x');
+      await writeThumbnail(dir, 1, { at: 1 }, tools);
+      expect((await readdir(ep1)).filter((f) => f.startsWith('.thumbnail-'))).toEqual([]);
+      await ff(cutArgs(join(ep1, 'rough.mp4'), { sec: 4 }));
+      await writeCandidates(dir, 1, tools);
+      expect((await readdir(ep1)).filter((f) => f.startsWith('.thumbs-'))).toEqual([]);
     });
 
     it('shows the clip frame the video shows: the latest at or before the time, as the render does', async () => {
