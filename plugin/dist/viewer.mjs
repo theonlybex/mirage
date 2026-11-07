@@ -27285,6 +27285,15 @@ var VoiceLineSchema = strictObject2({
   /** The written line, used for caption spelling. */
   text: external_exports.string().optional()
 });
+var CaptionsSchema = strictObject2({
+  /** phrase = a line at a time; pop = 1–3 big words, each popping in; karaoke = the phrase with the spoken word lit; chosen/off = no automatic captions. */
+  style: external_exports.enum(["phrase", "pop", "karaoke", "chosen", "off"]).default("phrase"),
+  position: external_exports.enum(["bottom", "middle"]).default("bottom"),
+  /** Words to light up in the pop style: every time it is said (a string), or only the saying nearest output time `at`. */
+  highlight: external_exports.array(external_exports.union([external_exports.string().min(1), strictObject2({ word: external_exports.string().min(1), at: external_exports.number().min(0) })])).default([]),
+  /** The highlight colour as #RRGGBB. */
+  color: external_exports.string().regex(/^#[0-9A-Fa-f]{6}$/).optional()
+});
 var even = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
 var EpisodeSchema = strictObject2({
   version: external_exports.literal(2),
@@ -27320,7 +27329,8 @@ var EpisodeSchema = strictObject2({
      */
     holds: external_exports.array(strictObject2({ at: external_exports.number(), sec: external_exports.number(), item: external_exports.string().optional(), hold: external_exports.number().optional(), out: external_exports.number().optional(), outAdded: external_exports.number().optional(), split: external_exports.string().optional() })).optional()
   }).nullable().default(null),
-  loudnessLufs: external_exports.number().default(-14)
+  loudnessLufs: external_exports.number().default(-14),
+  captions: CaptionsSchema.optional()
 }).superRefine((ep, ctx) => {
   for (const [list, what] of [[ep.items, "item"], [ep.slots, "slot"]]) {
     const seen = /* @__PURE__ */ new Set();

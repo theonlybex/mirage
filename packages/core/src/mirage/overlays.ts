@@ -133,40 +133,59 @@ const EMOJI = new RegExp(`${PICTO}|[\\u{FE0F}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E0
 export const undrawable = (text: string) => new RegExp(PICTO, 'u').test(text);
 /** Runs of Chinese/Japanese text. macOS's fallback for Han is a font libass can't open, so they get an explicit one. */
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]+/gu;
-const tidy = (t: string) => t.replace(EMOJI, '').replace(/\s+([.,!?;:])/g, '$1').trim();
+/** A word as shown in a caption: emoji gone, no space before punctuation. */
+export const tidy = (t: string) => t.replace(EMOJI, '').replace(/\s+([.,!?;:])/g, '$1').trim();
 
-export function groupCaptions(words: Word[], o: { durationSec: number; maxChars?: number; maxGap?: number; lead?: number; minDur?: number }): Cue[] {
-  const maxChars = o.maxChars ?? 38;
-  const maxGap = o.maxGap ?? 0.6;
-  const lead = o.lead ?? 0.15;
-  const minDur = o.minDur ?? 0.8;
-  const groups: { text: string; start: number; end: number }[][] = [];
-  let cur: { text: string; start: number; end: number }[] = [];
-  for (const word of words) {
+export interface GroupedWord {
+  text: string;
+  start: number;
+  end: number;
+  /** Index of the word in the list given to `groupWords`. */
+  index: number;
+}
+
+/** Groups words into caption phrases: a group ends at a sentence end, a gap over `maxGap`, or when `maxChars`/`maxWords` would pass. */
+export function groupWords(words: Word[], o: { maxChars: number; maxWords?: number; maxGap: number }): GroupedWord[][] {
+  const groups: GroupedWord[][] = [];
+  let cur: GroupedWord[] = [];
+  for (const [index, word] of words.entries()) {
     const text = tidy(word.w);
     if (!text) continue;
     const last = cur[cur.length - 1];
     const joined = [...cur.map((x) => x.text), text].join(' ');
-    if (last && (joined.length > maxChars || word.start - last.end > maxGap || SENTENCE_END.test(last.text))) {
+    if (last && (joined.length > o.maxChars || (o.maxWords !== undefined && cur.length >= o.maxWords) || word.start - last.end > o.maxGap || SENTENCE_END.test(last.text))) {
       groups.push(cur);
       cur = [];
     }
-    cur.push({ text, start: word.start, end: word.end });
+    cur.push({ text, start: word.start, end: word.end, index });
   }
   if (cur.length) groups.push(cur);
+  return groups;
+}
 
-  const raw = groups.map((g) => ({ start: r3(Math.max(0, g[0].start - lead)), end: g[g.length - 1].end, text: tidy(g.map((x) => x.text).join(' ')) }));
-  const cues: Cue[] = [];
+/** When each group shows: a little before its first word, at least `minDur`, never past the next group, never overlapping the one before. */
+export function groupSpans<T extends { start: number; end: number }>(groups: T[][], o: { durationSec: number; lead: number; minDur: number }): { start: number; end: number; group: T[] }[] {
+  const raw = groups.map((g) => ({ start: r3(Math.max(0, g[0].start - o.lead)), end: g[g.length - 1].end, group: g }));
+  const spans: { start: number; end: number; group: T[] }[] = [];
   for (let i = 0; i < raw.length; i++) {
-    const prev = cues[cues.length - 1];
+    const prev = spans[spans.length - 1];
     const start = prev ? Math.max(raw[i].start, prev.end) : raw[i].start;
     const limit = i + 1 < raw.length ? raw[i + 1].start : o.durationSec;
-    const end = r3(Math.max(raw[i].end, Math.min(start + minDur, limit)));
-    // Overlapping words can push a cue's start past its end: drop it rather than emit an inverted cue.
+    const end = r3(Math.max(raw[i].end, Math.min(start + o.minDur, limit)));
+    // Overlapping words can push a group's start past its end: drop it rather than emit an inverted span.
     if (end <= start + EPS) continue;
-    cues.push({ start, end, text: raw[i].text });
+    spans.push({ start, end, group: raw[i].group });
   }
-  return cues;
+  return spans;
+}
+
+export function groupCaptions(words: Word[], o: { durationSec: number; maxChars?: number; maxGap?: number; lead?: number; minDur?: number }): Cue[] {
+  const groups = groupWords(words, { maxChars: o.maxChars ?? 38, maxGap: o.maxGap ?? 0.6 });
+  return groupSpans(groups, { durationSec: o.durationSec, lead: o.lead ?? 0.15, minDur: o.minDur ?? 0.8 }).map((s) => ({
+    start: s.start,
+    end: s.end,
+    text: tidy(s.group.map((x) => x.text).join(' ')),
+  }));
 }
 
 function srtTime(sec: number): string {

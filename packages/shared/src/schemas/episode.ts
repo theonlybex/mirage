@@ -79,6 +79,18 @@ export const VoiceLineSchema = strictObject({
 });
 export type VoiceLine = z.infer<typeof VoiceLineSchema>;
 
+/** How spoken words are burned in as captions. Absent = phrase captions at the bottom, as before. */
+export const CaptionsSchema = strictObject({
+  /** phrase = a line at a time; pop = 1–3 big words, each popping in; karaoke = the phrase with the spoken word lit; chosen/off = no automatic captions. */
+  style: z.enum(['phrase', 'pop', 'karaoke', 'chosen', 'off']).default('phrase'),
+  position: z.enum(['bottom', 'middle']).default('bottom'),
+  /** Words to light up in the pop style: every time it is said (a string), or only the saying nearest output time `at`. */
+  highlight: z.array(z.union([z.string().min(1), strictObject({ word: z.string().min(1), at: z.number().min(0) })])).default([]),
+  /** The highlight colour as #RRGGBB. */
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+});
+export type Captions = z.infer<typeof CaptionsSchema>;
+
 const even = z.number().int().positive().refine((n) => n % 2 === 0, { message: 'must be even' });
 
 export const EpisodeSchema = strictObject({
@@ -120,6 +132,7 @@ export const EpisodeSchema = strictObject({
     .nullable()
     .default(null),
   loudnessLufs: z.number().default(-14),
+  captions: CaptionsSchema.optional(),
 }).superRefine((ep, ctx) => {
   for (const [list, what] of [[ep.items, 'item'], [ep.slots, 'slot']] as const) {
     const seen = new Set<string>();

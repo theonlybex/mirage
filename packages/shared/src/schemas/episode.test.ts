@@ -34,6 +34,25 @@ describe('EpisodeSchema', () => {
   });
 });
 
+describe('EpisodeSchema captions', () => {
+  it('stays absent when absent: parses undefined and stringifies without the key', () => {
+    const ep = EpisodeSchema.parse(base);
+    expect(ep.captions).toBeUndefined();
+    expect('captions' in ep).toBe(false);
+    expect(JSON.stringify(ep)).not.toContain('captions');
+  });
+  it('fills style defaults, and refuses a colour name or an unknown key', () => {
+    expect(EpisodeSchema.parse({ ...base, captions: { style: 'pop' } }).captions).toEqual({ style: 'pop', position: 'bottom', highlight: [] });
+    expect(EpisodeSchema.parse({ ...base, captions: {} }).captions).toEqual({ style: 'phrase', position: 'bottom', highlight: [] });
+    const full = { style: 'pop', position: 'middle', highlight: ['gulp', { word: 'money', at: 4.5 }], color: '#C6FF3D' };
+    expect(EpisodeSchema.parse({ ...base, captions: full }).captions).toEqual(full);
+    expect(EpisodeSchema.safeParse({ ...base, captions: { color: 'lime' } }).success).toBe(false);
+    expect(EpisodeSchema.safeParse({ ...base, captions: { style: 'bounce' } }).success).toBe(false);
+    expect(EpisodeSchema.safeParse({ ...base, captions: { highlight: [''] } }).success).toBe(false);
+    expect(firstIssue(EpisodeSchema.safeParse({ ...base, captions: { colour: '#C6FF3D' } }))?.message).toMatch(/^unknown key "colour"/);
+  });
+});
+
 const firstIssue = (r: { error?: { issues: { path: PropertyKey[]; message: string }[] } }) => r.error && { path: r.error.issues[0].path, message: r.error.issues[0].message };
 
 describe('EpisodeSchema unknown keys', () => {

@@ -36144,6 +36144,15 @@ var VoiceLineSchema = strictObject2({
   /** The written line, used for caption spelling. */
   text: external_exports.string().optional()
 });
+var CaptionsSchema = strictObject2({
+  /** phrase = a line at a time; pop = 1–3 big words, each popping in; karaoke = the phrase with the spoken word lit; chosen/off = no automatic captions. */
+  style: external_exports.enum(["phrase", "pop", "karaoke", "chosen", "off"]).default("phrase"),
+  position: external_exports.enum(["bottom", "middle"]).default("bottom"),
+  /** Words to light up in the pop style: every time it is said (a string), or only the saying nearest output time `at`. */
+  highlight: external_exports.array(external_exports.union([external_exports.string().min(1), strictObject2({ word: external_exports.string().min(1), at: external_exports.number().min(0) })])).default([]),
+  /** The highlight colour as #RRGGBB. */
+  color: external_exports.string().regex(/^#[0-9A-Fa-f]{6}$/).optional()
+});
 var even = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
 var EpisodeSchema = strictObject2({
   version: external_exports.literal(2),
@@ -36179,7 +36188,8 @@ var EpisodeSchema = strictObject2({
      */
     holds: external_exports.array(strictObject2({ at: external_exports.number(), sec: external_exports.number(), item: external_exports.string().optional(), hold: external_exports.number().optional(), out: external_exports.number().optional(), outAdded: external_exports.number().optional(), split: external_exports.string().optional() })).optional()
   }).nullable().default(null),
-  loudnessLufs: external_exports.number().default(-14)
+  loudnessLufs: external_exports.number().default(-14),
+  captions: CaptionsSchema.optional()
 }).superRefine((ep, ctx) => {
   for (const [list, what] of [[ep.items, "item"], [ep.slots, "slot"]]) {
     const seen = /* @__PURE__ */ new Set();
@@ -38017,36 +38027,43 @@ var EMOJI = new RegExp(`${PICTO}|[\\u{FE0F}\\u{200D}\\u{20E3}\\u{E0020}-\\u{E007
 var undrawable = (text) => new RegExp(PICTO, "u").test(text);
 var CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]+/gu;
 var tidy = (t) => t.replace(EMOJI, "").replace(/\s+([.,!?;:])/g, "$1").trim();
-function groupCaptions(words, o2) {
-  const maxChars = o2.maxChars ?? 38;
-  const maxGap = o2.maxGap ?? 0.6;
-  const lead = o2.lead ?? 0.15;
-  const minDur = o2.minDur ?? 0.8;
+function groupWords(words, o2) {
   const groups = [];
   let cur = [];
-  for (const word of words) {
+  for (const [index, word] of words.entries()) {
     const text = tidy(word.w);
     if (!text) continue;
     const last = cur[cur.length - 1];
     const joined = [...cur.map((x) => x.text), text].join(" ");
-    if (last && (joined.length > maxChars || word.start - last.end > maxGap || SENTENCE_END3.test(last.text))) {
+    if (last && (joined.length > o2.maxChars || o2.maxWords !== void 0 && cur.length >= o2.maxWords || word.start - last.end > o2.maxGap || SENTENCE_END3.test(last.text))) {
       groups.push(cur);
       cur = [];
     }
-    cur.push({ text, start: word.start, end: word.end });
+    cur.push({ text, start: word.start, end: word.end, index });
   }
   if (cur.length) groups.push(cur);
-  const raw = groups.map((g) => ({ start: r34(Math.max(0, g[0].start - lead)), end: g[g.length - 1].end, text: tidy(g.map((x) => x.text).join(" ")) }));
-  const cues = [];
+  return groups;
+}
+function groupSpans(groups, o2) {
+  const raw = groups.map((g) => ({ start: r34(Math.max(0, g[0].start - o2.lead)), end: g[g.length - 1].end, group: g }));
+  const spans = [];
   for (let i2 = 0; i2 < raw.length; i2++) {
-    const prev = cues[cues.length - 1];
+    const prev = spans[spans.length - 1];
     const start = prev ? Math.max(raw[i2].start, prev.end) : raw[i2].start;
     const limit = i2 + 1 < raw.length ? raw[i2 + 1].start : o2.durationSec;
-    const end = r34(Math.max(raw[i2].end, Math.min(start + minDur, limit)));
+    const end = r34(Math.max(raw[i2].end, Math.min(start + o2.minDur, limit)));
     if (end <= start + EPS2) continue;
-    cues.push({ start, end, text: raw[i2].text });
+    spans.push({ start, end, group: raw[i2].group });
   }
-  return cues;
+  return spans;
+}
+function groupCaptions(words, o2) {
+  const groups = groupWords(words, { maxChars: o2.maxChars ?? 38, maxGap: o2.maxGap ?? 0.6 });
+  return groupSpans(groups, { durationSec: o2.durationSec, lead: o2.lead ?? 0.15, minDur: o2.minDur ?? 0.8 }).map((s) => ({
+    start: s.start,
+    end: s.end,
+    text: tidy(s.group.map((x) => x.text).join(" "))
+  }));
 }
 function srtTime(sec) {
   const ms = Math.round(sec * 1e3);
