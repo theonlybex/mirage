@@ -31631,6 +31631,46 @@ var init_encode = __esm({
   }
 });
 
+// packages/core/src/mirage/move.ts
+function moveSpan(item, frames, fps) {
+  const m = item.move;
+  return {
+    z0: item.zoom,
+    z1: m?.zoom ?? item.zoom,
+    x0: item.focus.x,
+    x1: m?.focus?.x ?? item.focus.x,
+    y0: item.focus.y,
+    y1: m?.focus?.y ?? item.focus.y,
+    a: Math.round((m?.start ?? 0) * fps),
+    b: Math.round((m?.end ?? frames / fps) * fps)
+  };
+}
+function moveExprs(item, frames, fps, n2, first = 0) {
+  const { z0, z1, x0, x1, y0, y1, a: a2, b } = moveSpan(item, frames, fps);
+  const f = ffNum;
+  const at2 = a2 + first;
+  let e;
+  if (!item.move) e = "st(0,0)";
+  else if (b - a2 <= 1) e = `st(0,gte(${n2},${at2}))`;
+  else {
+    const p = `st(0,clip(${at2 === 0 ? n2 : `(${n2}-${at2})`}/${b - a2 - 1},0,1))`;
+    const curve = { linear: "", in: "ld(0)^2", out: "1-(1-ld(0))^2", inOut: "if(lt(ld(0),0.5),2*ld(0)^2,1-2*(1-ld(0))^2)" }[item.move.ease];
+    e = curve ? `${p};st(0,${curve})` : p;
+  }
+  return {
+    e,
+    zoom: z1 === z0 ? f(z0) : `${f(z0)}*(${f(z1)}/${f(z0)})^ld(0)`,
+    x: x1 === x0 ? f(x0) : `${f(x0)}+(${f(x1)}-${f(x0)})*ld(0)`,
+    y: y1 === y0 ? f(y0) : `${f(y0)}+(${f(y1)}-${f(y0)})*ld(0)`
+  };
+}
+var init_move = __esm({
+  "packages/core/src/mirage/move.ts"() {
+    "use strict";
+    init_encode();
+  }
+});
+
 // packages/core/src/mirage/slots.ts
 function computeSlots(ep, catalog, o2 = {}) {
   const minLen = o2.minLen ?? 2.5;
@@ -32191,6 +32231,20 @@ function framed(frame, at2, o2, k) {
   }
   return `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`;
 }
+function moveFilters(l, k, o2, src) {
+  const { item } = l;
+  const { width: W, height: H } = o2;
+  const fill = item.frame === "fill";
+  const zMax = Math.max(item.zoom, item.move.zoom);
+  const fit = fill ? "max" : "min";
+  const larger = !!src.width && !!src.height && Math[fit](W / src.width, H / src.height) * zMax < 1;
+  const pre = larger ? `scale=w='trunc(iw*${fit}(${W}/iw,${H}/ih)*${ffNum(zMax)}/2)*2':h=-2,` : "";
+  const { e, zoom, x, y } = moveExprs(item, l.frames, o2.fps, "in", 1);
+  const [w, h2] = fill ? [`min(W,H*${W}/${H})`, `min(H,W*${H}/${W})`] : ["W", "H"];
+  const left = `${e};st(1,${w}/(${zoom}));(W-ld(1))*(${x})`;
+  const top = `${e};st(1,${h2}/(${zoom}));(H-ld(1))*(${y})`;
+  return `${pre}perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=linear:eval=frame,${fill ? `scale=${W}:${H}` : framed(item.frame, cropAt(item.focus), o2, k)}`;
+}
 function itemChunkArgs(laid, o2, sources, output2) {
   const inputs = [];
   const chains = [];
@@ -32203,8 +32257,10 @@ function itemChunkArgs(laid, o2, sources, output2) {
     else inputs.push("-noaccurate_seek", "-ss", ffNum(item.src.in), "-i", src.path);
     const at2 = cropAt(item.focus);
     const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2${at2},` : "";
+    const head = `[${k}:v]setpts=(PTS-${frameTolerance(o2.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o2.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},`;
+    const hold = `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},`;
     chains.push(
-      `[${k}:v]setpts=(PTS-${frameTolerance(o2.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o2.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}${framed(item.frame, at2, o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`
+      item.move ? `${head}${hold}${moveFilters(l, k, o2, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]` : `${head}${zoom}${framed(item.frame, at2, o2, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`
     );
     const dur = ffNum(l.frames / o2.fps);
     if (item.audio === "keep" && item.speed === 1 && src.hasAudio) {
@@ -32550,6 +32606,7 @@ var init_render_episode = __esm({
     init_fonts();
     init_ingest();
     init_lock();
+    init_move();
     init_music();
     init_overlays();
     init_tempo();

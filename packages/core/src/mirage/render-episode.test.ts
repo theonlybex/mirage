@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { bundledFontsDir, CAPTION_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
-import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkItems, type ClipSource, chunkSize, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover } from './voiceover.js';
 
@@ -97,6 +98,59 @@ describe('itemChunkArgs', () => {
     const h = ep([{ id: 'h', beat: 'problem', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep', hold: 0.5 }]);
     const g = itemChunkArgs(layoutTimeline(h), { width: 960, height: 540, fps: 30 }, sourcesFor(h, cat), '/w/c.mov');
     expect(g[g.indexOf('-filter_complex') + 1]).toContain('aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=2,apad,atrim=end=2.5,asetpts=PTS-STARTPTS[a0]');
+  });
+});
+
+describe('itemChunkArgs with a move', () => {
+  const graphOf = (items: object[], o: { width: number; height: number }) => {
+    const e = ep(items, { output: { ...o, fps: 30 } });
+    const a = itemChunkArgs(layoutTimeline(e), { ...o, fps: 30 }, sourcesFor(e, cat), '/w/c.mov');
+    return a[a.indexOf('-filter_complex') + 1];
+  };
+  const inOut = (d: number) => `st(0,clip((in-1)/${d},0,1));st(0,if(lt(ld(0),0.5),2*ld(0)^2,1-2*(1-ld(0))^2))`;
+  /** perspective sending the move's window at each frame to the picture's corners (w, h: the window's size at zoom 1). */
+  const persp = (e: string, zoom: string, x: string, y: string, w = 'W', h = 'H') => {
+    const left = `${e};st(1,${w}/(${zoom}));(W-ld(1))*(${x})`;
+    const top = `${e};st(1,${h}/(${zoom}));(H-ld(1))*(${y})`;
+    return `perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=linear:eval=frame`;
+  };
+
+  it('holds first (so held frames keep moving), then moves the source picture, then frames it', () => {
+    const g = graphOf([{ id: 'm', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, hold: 0.5, move: { zoom: 1.2 } }], { width: 1920, height: 1080 });
+    expect(g).toContain(
+      '[0:v]setpts=(PTS-0.008333/TB)/1,fps=30:start_time=0:round=up,trim=end_frame=61,tpad=stop=-1:stop_mode=clone,trim=end_frame=75,' +
+        `${persp(inOut(74), '1*(1.2/1)^ld(0)', '0.5', '0.5')},` +
+        'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,setpts=PTS-STARTPTS[v0]',
+    );
+  });
+  it('leaves the other items of the chunk exactly as they were', () => {
+    const g = graphOf(
+      [
+        { id: 'm', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, move: { zoom: 1.2 } },
+        { id: 'a', beat: 'cold-open', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep', zoom: 1.2 },
+      ],
+      { width: 960, height: 540 },
+    );
+    expect(g).toContain('[1:v]setpts=(PTS-0.008333/TB)/1,fps=30:start_time=0:round=up,trim=end_frame=61,crop=trunc(iw/1.2/2)*2:trunc(ih/1.2/2)*2,scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v1]');
+  });
+  it('moves from the item zoom and focus to the move ones, starting where the move starts', () => {
+    const g = graphOf([{ id: 'm', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, zoom: 1.5, focus: { x: 0.2, y: 0.5 }, move: { zoom: 1, focus: { x: 0.8 }, ease: 'linear', start: 0.5 } }], { width: 1920, height: 1080 });
+    expect(g).toContain(`trim=end_frame=60,${persp('st(0,clip((in-16)/44,0,1))', '1.5*(1/1.5)^ld(0)', '0.2+(0.8-0.2)*ld(0)', '0.5')},scale=1920:1080:`);
+  });
+  it('moves the picture before blur splits it, so the blurred background follows the move', () => {
+    const g = graphOf([{ id: 'b', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, frame: 'blur', move: { zoom: 1.2 } }], { width: 1080, height: 1920 });
+    expect(g).toContain(`:interpolation=linear:eval=frame,split[fg0][bg0];[bg0]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,gblur=sigma=12,`);
+    expect(g).toContain('[bb0][ff0]overlay=(W-w)/2:(H-h)/2,setsar=1,setpts=PTS-STARTPTS[v0]');
+  });
+  it("fill: the moving window is cut to the output's shape, so focus pans it, and the picture is only scaled after", () => {
+    const g = graphOf([{ id: 'f', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, frame: 'fill', focus: { x: 0.25, y: 0.5 }, move: { zoom: 1.2, focus: { x: 0.75 } } }], { width: 1080, height: 1920 });
+    expect(g).toContain(`trim=end_frame=60,${persp(inOut(59), '1*(1.2/1)^ld(0)', '0.25+(0.75-0.25)*ld(0)', '0.5', 'min(W,H*1080/1920)', 'min(H,W*1920/1080)')},scale=1080:1920,setsar=1,setpts=PTS-STARTPTS[v0]`);
+  });
+  it('scales a picture larger than the output needs at the closest zoom down before moving it', () => {
+    const fit = graphOf([{ id: 'm', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, move: { zoom: 1.2 } }], { width: 960, height: 540 });
+    expect(fit).toContain("trim=end_frame=60,scale=w='trunc(iw*min(960/iw,540/ih)*1.2/2)*2':h=-2,perspective=");
+    const fill = graphOf([{ id: 'm', beat: 'montage', clip: 'c001', src: { in: 0, out: 2 }, zoom: 1.4, frame: 'fill', move: { zoom: 1.1 } }], { width: 360, height: 640 });
+    expect(fill).toContain("trim=end_frame=60,scale=w='trunc(iw*max(360/iw,640/ih)*1.4/2)*2':h=-2,perspective=");
   });
 });
 
@@ -636,4 +690,142 @@ describe('loadEpisode errors', () => {
     await expect(loadEpisode(project, 3)).rejects.toMatchObject({ code: 'NO_EPISODE', message: 'episodes/3/episode.json says it is episode 1', hint: 'Set "number" to 3 in episodes/3/episode.json.' });
     await expect(saveEpisode(project, ep([{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }]), 3)).rejects.toMatchObject({ code: 'NO_EPISODE' });
   });
+});
+
+describe('itemChunkArgs with a move (real ffmpeg)', () => {
+  let dir: string;
+  const sources = new Map<string, ClipSource>();
+  const ff = (args: string[]) => run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'we-move-'));
+    const make = async (id: string, w: number, h: number, sec: number, lavfi: string, extra: string[] = []) => {
+      await ff(['-f', 'lavfi', '-i', lavfi, '-c:v', 'libx264', '-preset', 'veryfast', ...extra, join(dir, `${id}.mp4`)]);
+      sources.set(id, { path: join(dir, `${id}.mp4`), hasAudio: false, durationSec: sec, width: w, height: h });
+    };
+    const box = (x: number, y: number, s: number) => `drawbox=x=${x}:y=${y}:w=${s}:h=${s}:color=white:t=fill`;
+    // Black with one small white square right of and above the centre, which a push-in moves out to the top right.
+    await make('sq', 1920, 1080, 6, `color=black:s=1920x1080:r=30:d=6,${box(1400, 300, 40)}`, ['-pix_fmt', 'yuv420p']);
+    // Grey to its edges: any black there is the move's doing.
+    await make('grey', 1920, 1080, 3, `color=gray:s=1920x1080:r=30:d=3,${box(1400, 300, 40)}`, ['-pix_fmt', 'yuv420p']);
+    await make('odd', 1081, 607, 2, `color=gray:s=1081x607:r=30:d=2,format=yuv444p,${box(700, 150, 30)}`, ['-pix_fmt', 'yuv444p']);
+    await make('long', 640, 360, 40, `color=black:s=640x360:r=30:d=40,${box(480, 60, 20)}`, ['-pix_fmt', 'yuv420p']);
+    await make('ts', 1920, 1080, 6, 'testsrc2=size=1920x1080:rate=30:duration=6', ['-pix_fmt', 'yuv420p']);
+  }, 300_000);
+
+  /** Renders one item as a chunk; gives its frames as grey pictures and how long FFmpeg took. */
+  const render = async (item: object, o: { width: number; height: number }, frames = true) => {
+    const e = ep([{ id: 'm', beat: 'montage', ...item }], { output: { ...o, fps: 30 } });
+    const out = join(dir, `${randomUUID()}.mov`);
+    const t = performance.now();
+    await ff(itemChunkArgs(layoutTimeline(e), { ...o, fps: 30 }, sources, out));
+    const seconds = (performance.now() - t) / 1000;
+    if (!frames) return { seconds, frames: [] as Buffer[] };
+    const raw = join(dir, `${randomUUID()}.gray`);
+    await ff(['-i', out, '-f', 'rawvideo', '-pix_fmt', 'gray', raw]);
+    const buf = await readFile(raw);
+    const size = o.width * o.height;
+    return { seconds, frames: Array.from({ length: buf.length / size }, (_, i) => buf.subarray(i * size, (i + 1) * size)) };
+  };
+  /** The centre of the white in a frame (the background is 0; 4 is above the encoder's noise there). */
+  const centroid = (f: Buffer, width: number) => {
+    let s = 0, sx = 0, sy = 0;
+    for (let i = 0; i < f.length; i++) {
+      const v = f[i] - 4;
+      if (v > 0) { s += v; sx += v * (i % width); sy += v * Math.floor(i / width); }
+    }
+    return { x: sx / s, y: sy / s };
+  };
+  /** The darkest pixel on the frame's four edges. */
+  const edgeMin = (f: Buffer, width: number, height: number) => {
+    let m = 255;
+    for (let x = 0; x < width; x++) m = Math.min(m, f[x], f[(height - 1) * width + x]);
+    for (let y = 0; y < height; y++) m = Math.min(m, f[y * width], f[y * width + width - 1]);
+    return m;
+  };
+  /** Steps of a point moving right and up (x grows, y shrinks): the largest second difference, and the most backward step. */
+  const steadiness = (c: { x: number; y: number }[]) => {
+    let second = 0;
+    let back = 0;
+    for (let i = 1; i < c.length; i++) {
+      back = Math.min(back, c[i].x - c[i - 1].x, c[i - 1].y - c[i].y);
+      if (i + 1 < c.length) second = Math.max(second, Math.abs(c[i + 1].x - 2 * c[i].x + c[i - 1].x), Math.abs(c[i + 1].y - 2 * c[i].y + c[i - 1].y));
+    }
+    return { second, back };
+  };
+  // A still picture's centroid wobbles by about 0.002 px through the encoder; a step back smaller than this is that.
+  const NOISE = 0.005;
+
+  it('moves a point by a steady amount each frame on a slow push-in (1 → 1.1 over 6 s)', async () => {
+    const { frames } = await render({ clip: 'sq', src: { in: 0, out: 6 }, move: { zoom: 1.1 } }, { width: 1920, height: 1080 });
+    expect(frames).toHaveLength(180);
+    const c = frames.map((f) => centroid(f, 1920));
+    const { second, back } = steadiness(c);
+    console.log(`push-in 1 → 1.1 over 6 s: largest second difference ${second.toFixed(3)} px, most backward step ${back.toFixed(4)} px`);
+    expect(second).toBeLessThan(0.25);
+    expect(back).toBeGreaterThan(-NOISE);
+    // From the square's own place (1419.5, 319.5) to 1.1× as far from the centre.
+    expect(c[0].x).toBeCloseTo(1419.5, 0);
+    expect(c[0].y).toBeCloseTo(319.5, 0);
+    expect(Math.abs(c[179].x - (960 + 459.5 * 1.1))).toBeLessThan(0.3);
+    expect(Math.abs(c[179].y - (540 - 220.5 * 1.1))).toBeLessThan(0.3);
+  }, 120_000);
+
+  it('renders a move in at most 3× the time of the same item at a fixed zoom', async () => {
+    const time = async (item: object) => Math.min(...[await render(item, { width: 1920, height: 1080 }, false), await render(item, { width: 1920, height: 1080 }, false)].map((r) => r.seconds));
+    const fixed = await time({ clip: 'ts', src: { in: 0, out: 6 }, zoom: 1.1 });
+    const moving = await time({ clip: 'ts', src: { in: 0, out: 6 }, move: { zoom: 1.1 } });
+    console.log(`1920×1080 6 s: fixed zoom ${fixed.toFixed(2)} s, move ${moving.toFixed(2)} s (${(moving / fixed).toFixed(2)}×)`);
+    expect(moving / fixed).toBeLessThanOrEqual(3);
+  }, 180_000);
+
+  it('moves smoothly on a sped-up item (20×)', async () => {
+    const { frames } = await render({ clip: 'long', src: { in: 0, out: 40 }, speed: 20, move: { zoom: 1.2 } }, { width: 640, height: 360 });
+    expect(frames).toHaveLength(60);
+    const c = frames.map((f) => centroid(f, 640));
+    expect(steadiness(c).back).toBeGreaterThan(-NOISE);
+    expect(Math.abs(c[59].x - (320 + 169.5 * 1.2))).toBeLessThan(0.3);
+  }, 120_000);
+
+  it('keeps moving through a held second', async () => {
+    const { frames } = await render({ clip: 'sq', src: { in: 0, out: 2 }, hold: 1, move: { zoom: 1.1 } }, { width: 1920, height: 1080 });
+    expect(frames).toHaveLength(90);
+    const c = frames.map((f) => centroid(f, 1920));
+    const held = c.slice(60);
+    expect(steadiness(held).back).toBeGreaterThan(-NOISE);
+    expect(held[29].x - held[0].x).toBeGreaterThan(5);
+    expect(steadiness(c).second).toBeLessThan(0.25);
+  }, 120_000);
+
+  it('leaves no black at the edges of a vertical blur or fill output', async () => {
+    for (const frame of ['blur', 'fill']) {
+      const { frames } = await render({ clip: 'grey', src: { in: 0, out: 2 }, frame, focus: { x: 0.2, y: 0.5 }, move: { zoom: 1.3, focus: { x: 0.9, y: 0.1 } } }, { width: 1080, height: 1920 });
+      expect(frames).toHaveLength(60);
+      expect(Math.min(...frames.map((f) => edgeMin(f, 1080, 1920)))).toBeGreaterThan(40);
+    }
+  }, 180_000);
+
+  it('pushes in from the full picture and pulls out to it without a black line at the edge', async () => {
+    for (const item of [{ move: { zoom: 1.3 } }, { zoom: 1.3, move: { zoom: 1 } }, { zoom: 1.3, focus: { x: 1, y: 1 }, move: { zoom: 1, focus: { x: 0, y: 0 } } }]) {
+      const { frames } = await render({ clip: 'grey', src: { in: 0, out: 1 }, ...item }, { width: 960, height: 540 });
+      expect(frames).toHaveLength(30);
+      expect(Math.min(...frames.map((f) => edgeMin(f, 960, 540)))).toBeGreaterThan(40);
+    }
+  }, 180_000);
+
+  it('moves a picture of odd size (1081 × 607)', async () => {
+    for (const frame of ['fit', 'fill']) {
+      const { frames } = await render({ clip: 'odd', src: { in: 0, out: 2 }, frame, focus: { x: 0.7, y: 0.3 }, move: { zoom: 1.37, focus: { x: 0.1 } } }, { width: 1080, height: 1920 });
+      expect(frames).toHaveLength(60);
+    }
+  }, 120_000);
+
+  it('punches in over 3 frames: start, between, end', async () => {
+    const { frames } = await render({ clip: 'sq', src: { in: 0, out: 1 }, move: { zoom: 1.5, start: 0.5, end: 0.6 } }, { width: 1920, height: 1080 });
+    expect(frames).toHaveLength(30);
+    const c = frames.map((f) => centroid(f, 1920));
+    for (const p of c.slice(0, 16)) expect(Math.abs(p.x - 1419.5)).toBeLessThan(0.3);
+    for (const p of c.slice(17)) expect(Math.abs(p.x - (960 + 459.5 * 1.5))).toBeLessThan(0.3);
+    expect(c[16].x).toBeGreaterThan(1425);
+    expect(c[16].x).toBeLessThan(1640);
+  }, 120_000);
 });

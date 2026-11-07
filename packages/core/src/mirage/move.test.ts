@@ -1,6 +1,6 @@
 import { TimelineItemSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { ease, moveFrames } from './move.js';
+import { ease, moveExprs, moveFrames } from './move.js';
 
 const item = (extra: object = {}) =>
   TimelineItemSchema.parse({ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 6 }, ...extra });
@@ -109,5 +109,52 @@ describe('moveFrames', () => {
   it('gives one entry for a one-frame item, at the end value since a one-frame move is a cut to it', () => {
     expect(moveFrames(item({ move: { zoom: 1.5 } }), 1, 30)).toEqual([{ zoom: 1.5, x: 0.5, y: 0.5 }]);
     expect(moveFrames(item({ move: { zoom: 1.5 } }), 0, 30)).toEqual([]);
+  });
+});
+
+/** Evaluates one of moveExprs' FFmpeg expressions at frame `n` (the variable named `n`), as FFmpeg's evaluator does. */
+const evalExpr = (expr: string, n: number): number => {
+  const slots: number[] = Array(10).fill(0);
+  const fns = {
+    st: (i: number, v: number) => (slots[i] = v),
+    ld: (i: number) => slots[i],
+    clip: (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v)),
+    lt: (a: number, b: number) => Number(a < b),
+    gte: (a: number, b: number) => Number(a >= b),
+    IF: (c: number, a: number, b: number) => (c ? a : b),
+  };
+  // FFmpeg's ; runs expressions in turn and gives the last (JS's comma), ^ is a power.
+  const js = expr.replaceAll('^', '**').replaceAll('if(', 'IF(').replaceAll(';', ',');
+  return new Function(...Object.keys(fns), 'n', `return (${js});`)(...Object.values(fns), n) as number;
+};
+
+describe('moveExprs', () => {
+  const agree = (it: ReturnType<typeof item>, frames: number) => {
+    const want = moveFrames(it, frames, 30);
+    const x = moveExprs(it, frames, 30, 'n');
+    want.forEach((w, i) => {
+      expect(evalExpr(`${x.e};${x.zoom}`, i)).toBeCloseTo(w.zoom, 9);
+      expect(evalExpr(`${x.e};${x.x}`, i)).toBeCloseTo(w.x, 9);
+      expect(evalExpr(`${x.e};${x.y}`, i)).toBeCloseTo(w.y, 9);
+    });
+  };
+  it('gives, at every frame, the zoom and focus moveFrames gives, for every ease', () => {
+    for (const e of ['linear', 'in', 'out', 'inOut'] as const) {
+      agree(item({ move: { zoom: 1.3, ease: e } }), 180);
+      agree(item({ zoom: 1.3, focus: { x: 0.2, y: 0.9 }, move: { zoom: 1, focus: { x: 0.7 }, ease: e, start: 1, end: 4.5 } }), 180);
+    }
+  });
+  it('agrees on a 3-frame punch-in, a one-frame step, a move that never plays and one cut off by the shot end', () => {
+    agree(item({ move: { zoom: 1.5, start: 1, end: 1.1 } }), 90);
+    agree(item({ move: { zoom: 1.5, start: 1, end: 1.02 } }), 60);
+    agree(item({ move: { zoom: 1.5, start: 10 } }), 30);
+    agree(item({ move: { zoom: 1.5, start: 0, end: 10, ease: 'linear' } }), 30);
+    agree(item({ hold: 1, move: { zoom: 1.2 } }), 180);
+    agree(item({ move: { zoom: 1.5 } }), 1);
+  });
+  it('writes the eased progress once, in slot 0, and reads it back', () => {
+    const x = moveExprs(item({ focus: { x: 0.5, y: 0.5 }, move: { zoom: 1.5, focus: { x: 0.25 }, ease: 'linear' } }), 60, 30, 'in');
+    expect(x).toEqual({ e: 'st(0,clip(in/59,0,1))', zoom: '1*(1.5/1)^ld(0)', x: '0.5+(0.25-0.5)*ld(0)', y: '0.5' });
+    expect(moveExprs(item({ move: { zoom: 1.2, start: 0.5 } }), 60, 30, 'in').e).toBe('st(0,clip((in-15)/44,0,1));st(0,if(lt(ld(0),0.5),2*ld(0)^2,1-2*(1-ld(0))^2))');
   });
 });

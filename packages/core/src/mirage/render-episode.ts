@@ -12,6 +12,7 @@ import { MirageError } from './errors.js';
 import { bundledFontsDir } from './fonts.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, clearLeftovers, type Lock } from './lock.js';
+import { moveExprs } from './move.js';
 import { checkCueFiles, cueTrack, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
@@ -101,6 +102,35 @@ function framed(frame: TimelineItem['frame'], at: string, o: { width: number; he
   return `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`;
 }
 
+/**
+ * An animated zoom (the item's `move`): perspective sends each frame's crop window, at the zoom and focus moveFrames
+ * gives that frame, to the picture's corners. It samples between pixels, so a slow push-in moves a steady fraction of a
+ * pixel each frame (crop and zoompan place the window on whole pixels, which shimmers); bilinear is as steady as bicubic
+ * here and faster. For fill the window is cut to the output's shape inside the move, placed by the focus as fill's crop
+ * is, so the focus can pan it and the picture after it is only scaled to size.
+ */
+function moveFilters(l: LaidItem, k: number, o: { width: number; height: number; fps: number }, src: ClipSource): string {
+  const { item } = l;
+  const { width: W, height: H } = o;
+  const fill = item.frame === 'fill';
+  // perspective works on every pixel of the picture each frame: a picture larger than framing needs at the move's
+  // closest zoom (fit and blur fit it inside the output, fill covers it) is scaled down to that first.
+  const zMax = Math.max(item.zoom, item.move!.zoom);
+  const fit = fill ? 'max' : 'min';
+  const larger = !!src.width && !!src.height && Math[fit](W / src.width, H / src.height) * zMax < 1;
+  const pre = larger ? `scale=w='trunc(iw*${fit}(${W}/iw,${H}/ih)*${ffNum(zMax)}/2)*2':h=-2,` : '';
+  // The window: the picture over the zoom (for fill, cut to the output's shape), its corner at (W−w)·x, (H−h)·y.
+  // perspective counts frames from 1.
+  const { e, zoom, x, y } = moveExprs(item, l.frames, o.fps, 'in', 1);
+  const [w, h] = fill ? [`min(W,H*${W}/${H})`, `min(H,W*${H}/${W})`] : ['W', 'H'];
+  const left = `${e};st(1,${w}/(${zoom}));(W-ld(1))*(${x})`;
+  const top = `${e};st(1,${h}/(${zoom}));(H-ld(1))*(${y})`;
+  return (
+    `${pre}perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)'` +
+    `:interpolation=linear:eval=frame,${fill ? `scale=${W}:${H}` : framed(item.frame, cropAt(item.focus), o, k)}`
+  );
+}
+
 export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: number; fps: number }, sources: Map<string, ClipSource>, output: string): string[] {
   const inputs: string[] = [];
   const chains: string[] = [];
@@ -125,11 +155,14 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     // video stream starts. A frame up to a quarter of an output frame late still counts as on time: MKV and WebM store
     // times in milliseconds (30 fps frame 2 at 0.067 s, after its true 0.0667 s), and on-grid times would otherwise
     // show every third frame twice and skip the next. The first trim keeps one frame past src.out for a hold and ends
-    // decoding there.
+    // decoding there. The hold clones the last frame after framing it, except under a move: held frames keep moving, so
+    // the hold comes first and the move and framing work on every frame.
+    const head = `[${k}:v]setpts=(PTS-${frameTolerance(o.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},`;
+    const hold = `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},`;
     chains.push(
-      `[${k}:v]setpts=(PTS-${frameTolerance(o.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},${zoom}` +
-        `${framed(item.frame, at, o, k)},setsar=1,` +
-        `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`,
+      item.move
+        ? `${head}${hold}${moveFilters(l, k, o, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]`
+        : `${head}${zoom}${framed(item.frame, at, o, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`,
     );
     const dur = ffNum(l.frames / o.fps);
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
