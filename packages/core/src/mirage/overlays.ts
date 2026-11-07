@@ -1,5 +1,7 @@
 import type { Catalog, Episode, Overlay, Slot, Transcript, VoiceLine, Word } from '@wordedits/shared';
 import { isFiller, normalizeWord } from '../autoedit/takes.js';
+import { HIGHLIGHT_COLOR, type CaptionLine, type CaptionPart } from './captions.js';
+import { CAPTION_FONT } from './fonts.js';
 import { layoutTimeline } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -226,7 +228,27 @@ const WHITE = '&H00FFFFFF';
 const BLACK = '&H00000000';
 const BOX = '&H4D000000';
 
-export function buildAss(o: { width: number; height: number; font?: string; cjkFont?: string | null; captions: Cue[]; overlays: Overlay[]; prompts: Slot[] }): string {
+/** '#RRGGBB' as an ASS override colour (&H00BBGGRR&). */
+const assColor = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex.slice(1, 3)}&`.toUpperCase();
+/** The newest word of a pop caption grows in from 115%. */
+const POP_IN = (scale: number) => `\\fscx${Math.round(scale * 1.15)}\\fscy${Math.round(scale * 1.15)}\\t(0,120,\\fscx${scale}\\fscy${scale})`;
+
+export function buildAss(o: {
+  width: number;
+  height: number;
+  font?: string;
+  cjkFont?: string | null;
+  /** Phrase captions (the Caption style). */
+  captions: Cue[];
+  /** Word-by-word captions in the bundled font; their style (Pop or Karaoke) is declared only when given. */
+  captionLines?: { style: 'pop' | 'karaoke'; lines: CaptionLine[] };
+  /** Where captions sit (default bottom). */
+  position?: 'bottom' | 'middle';
+  /** Colour of key (pop) and lit (karaoke) words, '#RRGGBB' (default HIGHLIGHT_COLOR). */
+  highlightColor?: string;
+  overlays: Overlay[];
+  prompts: Slot[];
+}): string {
   const cjk = o.cjkFont === undefined ? defaultCjkFont() : o.cjkFont;
   // Emoji left out; CJK runs switch to a font that has them and back to the style's font (\fn alone).
   const draw = (t: string) => {
@@ -237,9 +259,11 @@ export function buildAss(o: { width: number; height: number; font?: string; cjkF
   const px = (n: number) => Math.max(1, Math.round(n * k));
   const font = o.font ?? defaultFont();
   const side = Math.round(o.width * 0.05);
-  // Name, Fontsize, Primary, Outline, Back, Bold, BorderStyle, Outline, Alignment, MarginV
-  const styles: [string, number, string, string, string, number, number, number, number, number][] = [
-    ['Caption', px(64), WHITE, BOX, BOX, -1, 3, px(18), 2, px(90)],
+  // Middle: the captions' bottom edge a little below the centre, for every caption style.
+  const captionMv = (bottom: number) => (o.position === 'middle' ? Math.round(o.height * 0.38) : bottom);
+  // Name, Fontsize, Primary, Outline, Back, Bold, BorderStyle, Outline, Alignment, MarginV[, Fontname]
+  const styles: [string, number, string, string, string, number, number, number, number, number, string?][] = [
+    ['Caption', px(64), WHITE, BOX, BOX, -1, 3, px(18), 2, captionMv(px(90))],
     ['Callout', px(150), WHITE, BLACK, BLACK, -1, 1, px(6), 5, 0],
     ['BadgeFail', px(48), WHITE, '&H002A2AE0', '&H002A2AE0', -1, 3, px(14), 9, px(60)],
     ['BadgePass', px(48), WHITE, '&H004EAA2E', '&H004EAA2E', -1, 3, px(14), 9, px(60)],
@@ -252,9 +276,12 @@ export function buildAss(o: { width: number; height: number; font?: string; cjkF
     ['Prompt', px(54), '&H0000D7FF', BOX, BOX, -1, 3, px(16), 8, px(150)],
     ['PromptNext', px(44), '&H00B4B4B4', BOX, BOX, 0, 3, px(14), 8, px(150)],
   ];
+  // The bundled face is already heavy: no faux bold on it.
+  if (o.captionLines?.style === 'pop') styles.push(['Pop', px(84), WHITE, BLACK, BLACK, 0, 1, px(7), 2, captionMv(px(120)), CAPTION_FONT]);
+  if (o.captionLines?.style === 'karaoke') styles.push(['Karaoke', px(64), WHITE, BLACK, BLACK, 0, 1, px(5), 2, captionMv(px(120)), CAPTION_FONT]);
   const styleLines = styles.map(
-    ([name, size, primary, outline, back, bold, border, outw, align, mv]) =>
-      `Style: ${name},${font},${size},${primary},${primary},${outline},${back},${bold},0,0,0,100,100,0,0,${border},${outw},0,${align},${side},${side},${mv},1`,
+    ([name, size, primary, outline, back, bold, border, outw, align, mv, face = font]) =>
+      `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold},0,0,0,100,100,0,0,${border},${outw},0,${align},${side},${side},${mv},1`,
   );
 
   const events: string[] = [];
@@ -262,6 +289,21 @@ export function buildAss(o: { width: number; height: number; font?: string; cjkF
     events.push(`Dialogue: ${layer},${assTime(start)},${assTime(end)},${style},,0,0,0,,${text}`);
 
   for (const c of o.captions) ev(2, c.start, c.end, 'Caption', draw(c.text));
+  if (o.captionLines) {
+    const color = assColor(o.highlightColor ?? HIGHLIGHT_COLOR);
+    // A key word is coloured and larger, a lit one coloured; \r goes back to the style for the words after it.
+    const part = (p: CaptionPart, text: string, last: boolean) => {
+      const scale = p.key ? 112 : 100;
+      const tags = `${p.key || p.lit ? `\\c${color}` : ''}${p.pop ? POP_IN(scale) : p.key ? `\\fscx${scale}\\fscy${scale}` : ''}`;
+      if (!tags) return text;
+      return `{${tags}}${text}${p.key || p.lit || !last ? '{\\r}' : ''}`;
+    };
+    const style = o.captionLines.style === 'pop' ? 'Pop' : 'Karaoke';
+    for (const line of o.captionLines.lines) {
+      const parts = line.parts.map((p) => [p, draw(p.text)] as const).filter(([, text]) => text);
+      if (parts.length) ev(2, line.start, line.end, style, parts.map(([p, text], i) => part(p, text, i === parts.length - 1)).join(' '));
+    }
+  }
   for (const ov of o.overlays) {
     const text = draw(ov.text);
     switch (ov.kind) {

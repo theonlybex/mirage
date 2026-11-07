@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Builds the generated half of plugin/: the engine, hook and viewer bundles (dist/*.mjs), the viewer page (dist/viewer-ui/),
-// the licence (LICENSE) and the notices of every bundled npm package
+// the licence (LICENSE) and the notices of every bundled npm package and of the caption font in fonts/
 // (THIRD_PARTY_NOTICES.txt). The output is the same on every run (no dates, no absolute paths in the banner), so a test can
 // compare a rebuild with what is committed.
 import { readdirSync, readFileSync } from 'node:fs';
@@ -44,7 +44,17 @@ function packageNotice(dir: string): PackageNotice {
 
 const RULE = '='.repeat(80);
 
-/** THIRD_PARTY_NOTICES.txt: every npm package with code in the bundles, by name and version, with its licence id and full text. */
+/** The fonts in plugin/fonts/ (written by hand, not built): name and version, licence id, and the licence file beside them. */
+const FONTS = [{ name: 'Montserrat ExtraBold v7.222 (fonts/Montserrat-ExtraBold.ttf)', licence: 'OFL-1.1', file: 'OFL.txt' }];
+
+function fontNotices(): string[] {
+  return FONTS.map((f) => [RULE, f.name, `License: ${f.licence}`, '', `${f.file}:\n\n${readFileSync(join(PLUGIN_DIR, 'fonts', f.file), 'utf8').replace(/\r\n/g, '\n').trimEnd()}`].join('\n'));
+}
+
+/**
+ * THIRD_PARTY_NOTICES.txt: every npm package with code in the bundles, by name and version, with its licence id and full
+ * text; then the fonts in fonts/.
+ */
 export function thirdPartyNotices(inputs: Iterable<string>): string {
   const dirs = new Set<string>();
   for (const f of inputs) {
@@ -64,9 +74,10 @@ export function thirdPartyNotices(inputs: Iterable<string>): string {
     '',
     'The files in dist/ also contain the third-party packages below, each under its own licence. Each is listed with its',
     'version, its licence and the licence text it ships with. The font and icons of the viewer page have their licences in',
-    'dist/viewer-ui/assets/licenses/ as well.',
+    'dist/viewer-ui/assets/licenses/ as well. The caption font in fonts/ comes last, with its licence (fonts/OFL.txt).',
     '',
     ...notices.map((n) => `${n}\n`),
+    ...fontNotices().map((n) => `${n}\n`),
   ].join('\n');
 }
 

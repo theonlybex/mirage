@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type Transcript, type Word } from '@wordedits/shared';
 import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
+import type { CaptionLine } from './captions.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt, undrawable } from './overlays.js';
 
 const w = (text: string, start: number, end: number): Word => ({ w: text, start, end, conf: 1 });
@@ -104,6 +105,85 @@ describe('buildAss', () => {
     expect(ass).toContain(',BadgeFail,,0,0,0,,{\\fad(100,150)}FAILED');
     expect(ass).toContain('Dialogue: 6,0:00:02.50,0:00:04.00,PromptNext,,0,0,0,,Next: Every request took ten seconds.');
     expect(ass).toContain('Dialogue: 6,0:00:04.00,0:00:09.00,Prompt,,0,0,0,,Every request took ten seconds.');
+  });
+});
+
+describe('buildAss without captions settings', () => {
+  it('writes exactly what it always has (no Pop or Karaoke style, the caption at the bottom)', () => {
+    const o = { width: 1920, height: 1080, font: 'Helvetica Neue', cjkFont: null, captions: [{ start: 0.05, end: 1.3, text: 'Hi {there}' }], overlays: [{ kind: 'badge' as const, text: 'FAILED', start: 3, end: 5, tone: 'fail' as const }], prompts: [] };
+    const today =
+      '[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\n' +
+      'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n' +
+      'Style: Caption,Helvetica Neue,64,&H00FFFFFF,&H00FFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,18,0,2,96,96,90,1\n' +
+      'Style: Callout,Helvetica Neue,150,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,5,96,96,0,1\n' +
+      'Style: BadgeFail,Helvetica Neue,48,&H00FFFFFF,&H00FFFFFF,&H002A2AE0,&H002A2AE0,-1,0,0,0,100,100,0,0,3,14,0,9,96,96,60,1\n' +
+      'Style: BadgePass,Helvetica Neue,48,&H00FFFFFF,&H00FFFFFF,&H004EAA2E,&H004EAA2E,-1,0,0,0,100,100,0,0,3,14,0,9,96,96,60,1\n' +
+      'Style: BadgeLive,Helvetica Neue,48,&H00FFFFFF,&H00FFFFFF,&H00E37100,&H00E37100,-1,0,0,0,100,100,0,0,3,14,0,9,96,96,60,1\n' +
+      'Style: BadgeNeutral,Helvetica Neue,48,&H00FFFFFF,&H00FFFFFF,&H00333333,&H00333333,-1,0,0,0,100,100,0,0,3,14,0,9,96,96,60,1\n' +
+      'Style: Counter,Helvetica Neue,40,&H00FFFFFF,&H00FFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,12,0,7,96,96,60,1\n' +
+      'Style: Label,Helvetica Neue,48,&H00FFFFFF,&H00FFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,14,0,1,96,96,220,1\n' +
+      'Style: Chapter,Helvetica Neue,96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,5,96,96,0,1\n' +
+      'Style: Before,Helvetica Neue,56,&H00FFFFFF,&H00FFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,14,0,8,96,96,60,1\n' +
+      'Style: Prompt,Helvetica Neue,54,&H0000D7FF,&H0000D7FF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,3,16,0,8,96,96,150,1\n' +
+      'Style: PromptNext,Helvetica Neue,44,&H00B4B4B4,&H00B4B4B4,&H4D000000,&H4D000000,0,0,0,0,100,100,0,0,3,14,0,8,96,96,150,1\n\n' +
+      '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n' +
+      'Dialogue: 2,0:00:00.05,0:00:01.30,Caption,,0,0,0,,Hi (there)\nDialogue: 4,0:00:03.00,0:00:05.00,BadgeFail,,0,0,0,,{\\fad(100,150)}FAILED\n';
+    expect(buildAss(o)).toBe(today);
+    // A phrase caption at the bottom, said out loud, is the same file.
+    expect(buildAss({ ...o, position: 'bottom' })).toBe(today);
+  });
+});
+
+describe('buildAss pop and karaoke captions', () => {
+  const base = { width: 1080, height: 1920, cjkFont: null, captions: [], overlays: [], prompts: [] };
+  const pop: CaptionLine[] = [
+    { start: 0.9, end: 1.3, parts: [{ text: 'SO', pop: true }] },
+    { start: 1.3, end: 1.5, parts: [{ text: 'SO' }, { text: 'HE', pop: true }] },
+    { start: 1.5, end: 1.9, parts: [{ text: 'SO' }, { text: 'HE' }, { text: 'QUIETLY', pop: true }] },
+    { start: 1.9, end: 2.4, parts: [{ text: 'GULP', key: true }, { text: 'IT', pop: true }] },
+    { start: 2.4, end: 2.9, parts: [{ text: 'GULP', key: true, pop: true }] },
+  ];
+  const lines = (ass: string, style: string) => ass.split('\n').filter((l) => l.startsWith('Dialogue:') && l.split(',')[3] === style);
+  const style = (ass: string, name: string) => ass.split('\n').find((l) => l.startsWith(`Style: ${name},`))!.split(',');
+
+  it('declares a Pop style in Montserrat ExtraBold and pops in the newest word', () => {
+    const ass = buildAss({ ...base, captionLines: { style: 'pop', lines: pop } });
+    // Name, Fontname, Fontsize, Primary, Secondary, Outline, Back, Bold, …, BorderStyle, Outline, Shadow, Alignment, L, R, MarginV
+    expect(style(ass, 'Pop')).toEqual(['Style: Pop', 'Montserrat ExtraBold', '84', '&H00FFFFFF', '&H00FFFFFF', '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '7', '0', '2', '54', '54', '120', '1']);
+    expect(ass).not.toMatch(/^Style: Karaoke,/m);
+    expect(ass).toContain('Dialogue: 2,0:00:01.50,0:00:01.90,Pop,,0,0,0,,SO HE {\\fscx115\\fscy115\\t(0,120,\\fscx100\\fscy100)}QUIETLY');
+    expect(lines(ass, 'Pop')).toHaveLength(5);
+    expect(lines(ass, 'Caption')).toEqual([]);
+  });
+
+  it('draws a key word in the highlight colour at 112%, then goes back to the style', () => {
+    const ass = buildAss({ ...base, captionLines: { style: 'pop', lines: pop } });
+    expect(lines(ass, 'Pop')[3]).toMatch(/,,\{\\c&H003DFFC6&\\fscx112\\fscy112\}GULP\{\\r\} \{\\fscx115\\fscy115\\t\(0,120,\\fscx100\\fscy100\)\}IT$/);
+    // A key word that is also the newest pops in from 115% of its 112%.
+    expect(lines(ass, 'Pop')[4]).toMatch(/,,\{\\c&H003DFFC6&\\fscx129\\fscy129\\t\(0,120,\\fscx112\\fscy112\)\}GULP\{\\r\}$/);
+    expect(buildAss({ ...base, captionLines: { style: 'pop', lines: pop }, highlightColor: '#FF0000' })).toContain('{\\c&H000000FF&\\fscx112\\fscy112}GULP{\\r}');
+  });
+
+  it('declares a Karaoke style and lights the word being said', () => {
+    const ass = buildAss({ ...base, captionLines: { style: 'karaoke', lines: [{ start: 0, end: 1, parts: [{ text: 'Every' }, { text: 'request', lit: true }, { text: 'took' }] }] } });
+    expect(style(ass, 'Karaoke')).toEqual(['Style: Karaoke', 'Montserrat ExtraBold', '64', '&H00FFFFFF', '&H00FFFFFF', '&H00000000', '&H00000000', '0', '0', '0', '0', '100', '100', '0', '0', '1', '5', '0', '2', '54', '54', '120', '1']);
+    expect(ass).not.toMatch(/^Style: Pop,/m);
+    expect(lines(ass, 'Karaoke')).toEqual(['Dialogue: 2,0:00:00.00,0:00:01.00,Karaoke,,0,0,0,,Every {\\c&H003DFFC6&}request{\\r} took']);
+  });
+
+  it('escapes, drops emoji and switches font for CJK in caption parts, as everywhere else', () => {
+    const ass = buildAss({ ...base, cjkFont: 'Hiragino Sans GB', captionLines: { style: 'pop', lines: [{ start: 0, end: 1, parts: [{ text: '{HI}' }, { text: '漢字', key: true }, { text: '🚀' }, { text: 'GO', pop: true }] }] } });
+    expect(lines(ass, 'Pop')).toEqual(['Dialogue: 2,0:00:00.00,0:00:01.00,Pop,,0,0,0,,(HI) {\\c&H003DFFC6&\\fscx112\\fscy112}{\\fnHiragino Sans GB}漢字{\\fn}{\\r} {\\fscx115\\fscy115\\t(0,120,\\fscx100\\fscy100)}GO']);
+  });
+
+  it('puts every caption style in the middle of the frame for position middle', () => {
+    expect(style(buildAss({ ...base, position: 'middle', captionLines: { style: 'pop', lines: pop } }), 'Pop').slice(18, 22)).toEqual(['2', '54', '54', '730']);
+    expect(style(buildAss({ ...base, position: 'middle', captionLines: { style: 'karaoke', lines: [] } }), 'Karaoke')[21]).toBe('730');
+    expect(style(buildAss({ ...base, position: 'middle' }), 'Caption')[21]).toBe('730');
+    expect(style(buildAss({ ...base, position: 'bottom' }), 'Caption')[21]).toBe('90');
+    // Sizes scale with the frame: the rough cut of a vertical video is 540×960.
+    const small = buildAss({ ...base, width: 540, height: 960, position: 'middle', captionLines: { style: 'pop', lines: pop } });
+    expect(style(small, 'Pop').slice(2, 3).concat(style(small, 'Pop').slice(16, 17), style(small, 'Pop').slice(21, 22))).toEqual(['42', '4', '365']);
   });
 });
 

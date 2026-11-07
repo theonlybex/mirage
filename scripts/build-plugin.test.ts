@@ -63,6 +63,10 @@ describe('buildPlugin', () => {
     expect(notices).toContain('Permission is hereby granted, free of charge');
     expect(notices).toMatch(/fast-uri@[^\n]+\nLicense: BSD-3-Clause\n[\s\S]*?Redistribution and use in source and binary forms/);
     expect(notices).toMatch(/human-signals@[^\n]+\nLicense: Apache-2\.0\n[\s\S]*?Apache License/);
+    // The caption font, with the full text of its licence.
+    expect(notices).toMatch(/^Montserrat ExtraBold [^\n]+\nLicense: OFL-1\.1\n/m);
+    expect(notices).toContain('SIL Open Font License');
+    expect(notices).toContain(readFileSync(join(PLUGIN, 'fonts', 'OFL.txt'), 'utf8').replace(/\r\n/g, '\n').trimEnd());
     expect(notices).not.toContain(ROOT); // no absolute paths: the same on every machine
     expect(readFileSync(join(built, 'LICENSE'), 'utf8')).toBe(readFileSync(join(ROOT, 'LICENSE'), 'utf8'));
   });

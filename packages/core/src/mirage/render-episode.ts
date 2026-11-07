@@ -7,7 +7,9 @@ import { encodeArgs, ffNum } from './encode.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 import { asCancelled } from './cancel.js';
+import { captionWarnings, karaokeLines, popLines, type CaptionLine } from './captions.js';
 import { MirageError } from './errors.js';
+import { bundledFontsDir } from './fonts.js';
 import { loadCatalog, sha256File } from './ingest.js';
 import { acquireLock, clearLeftovers, type Lock } from './lock.js';
 import { checkCueFiles, cueTrack, loadLibrary } from './music.js';
@@ -228,12 +230,19 @@ export interface FinalEpisodeOptions {
   durationSec: number;
   loudnessLufs: number;
   assFile: string;
+  /** A folder of fonts for libass to load (all of them, into memory): only ever the plugin's own. */
   fontsDir?: string;
   musicWav?: string;
   voiceRaw?: string;
   /** Some item keeps its live sound (default true). */
   liveAudio?: boolean;
 }
+
+/**
+ * A filter option's value as it must be written in a filter graph: escaped for the option list (\ ' :), then for the
+ * graph (\ ' [ ] , ;). Spaces inside need nothing.
+ */
+const filterValue = (v: string) => v.replace(/[\\':]/g, '\\$&').replace(/[\\'[\],;]/g, '\\$&');
 
 export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   const inputs = ['-f', 'concat', '-safe', '0', '-i', o.chunkList];
@@ -244,7 +253,7 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   if (o.voiceRaw) inputs.push('-f', 'f32le', '-ar', '48000', '-ac', '1', '-i', o.voiceRaw);
   const D = ffNum(o.durationSec);
 
-  const chains = [`[0:v]ass=${o.assFile}${o.fontsDir ? `:fontsdir=${o.fontsDir}` : ''}[vout]`];
+  const chains = [`[0:v]ass=${filterValue(o.assFile)}${o.fontsDir ? `:fontsdir=${filterValue(o.fontsDir)}` : ''}[vout]`];
   if (o.voiceRaw) {
     chains.push(`[0:a]${FLTP_STEREO}[live]`, `[${voiceIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[vo]`, '[live][vo]amix=inputs=2:duration=first:normalize=0[speechraw]');
   } else {
@@ -361,7 +370,7 @@ export type RenderResult = {
   outputPath: string;
   srtPath: string | null;
   durationSec: number;
-  /** Things the user should hear about (printed with ⚠): lines edited since the voice-over was fitted. */
+  /** Things the user should hear about (printed with ⚠): lines edited since the voice-over was fitted, captions settings that do nothing. */
   warnings: string[];
 };
 
@@ -408,6 +417,9 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
       throw new MirageError('BAD_ITEM', `voice-over recording ${abs} changed since vo fitted it`, `Put back the recording you fitted, or run vo again with the new one: pnpm mirage vo <project> ${o.episode} <recording> (then --add for lines from other recordings).`);
     }
   }
+  // Pop and karaoke captions are drawn in the bundled font: a broken install stops here, not with libass's fallback font.
+  const style = o.mode === 'guide' ? 'off' : (ep.captions?.style ?? 'phrase');
+  const fontsDir = style === 'pop' || style === 'karaoke' ? bundledFontsDir() : undefined;
   const outputPath = join(dir, `${o.mode}.mp4`);
   const id = randomUUID();
   const work = join(dir, `.work-${id}`);
@@ -454,17 +466,29 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
       voiceRaw = 'vo.f32';
     }
 
-    const cues = o.mode === 'guide' ? [] : groupCaptions(speechWords(ep, catalog, voTranscripts), { durationSec: D });
-    await writeFile(join(work, 'overlays.ass'), buildAss({ width: W, height: H, captions: cues, overlays: ep.overlays, prompts: o.mode === 'guide' ? ep.slots : [] }));
+    // final.srt is always phrase cues; what is burned in depends on the captions style (the guide cut burns in none).
+    const words = o.mode === 'guide' ? [] : speechWords(ep, catalog, voTranscripts);
+    const cues = groupCaptions(words, { durationSec: D });
+    let captionLines: { style: 'pop' | 'karaoke'; lines: CaptionLine[] } | undefined;
+    if (style === 'pop') captionLines = { style, lines: popLines(words, { durationSec: D, highlight: ep.captions!.highlight }) };
+    if (style === 'karaoke') captionLines = { style, lines: karaokeLines(words, { durationSec: D }) };
+    await writeFile(
+      join(work, 'overlays.ass'),
+      buildAss({
+        width: W, height: H, captions: style === 'phrase' ? cues : [], captionLines, position: ep.captions?.position, highlightColor: ep.captions?.color,
+        overlays: ep.overlays, prompts: o.mode === 'guide' ? ep.slots : [],
+      }),
+    );
 
     o.signal?.throwIfAborted();
     const encoder = final ? await o.tools.pickEncoder() : { name: 'libx264' as const, extraArgs: [] };
     await o.tools.runFfmpeg(
       episodeFinalArgs({
         chunkList: 'chunks.txt', output: partial, encoder, mode: final ? 'final' : 'preview', width: W, height: H, fps, durationSec: D,
-        // No fontsdir: libass would load every font in it into memory (about 1 GB for /System/Library/Fonts), and it
-        // finds system fonts and fallbacks itself; buildAss names a font for the scripts whose fallback it can't open.
-        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', musicWav, voiceRaw,
+        // fontsdir only for the plugin's own fonts folder: libass loads every font in it into memory (about 1 GB for
+        // /System/Library/Fonts), and it finds system fonts and fallbacks itself; buildAss names a font for the scripts
+        // whose fallback it can't open.
+        loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir, musicWav, voiceRaw,
         liveAudio: laid.some((l) => l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), signal: o.signal, onProgress: (f) => report(0.7 + 0.3 * f) },
@@ -489,7 +513,8 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     }
     report(1);
     // The voice-over says what was fitted, and its captions say the same: a line edited since then is only flagged.
-    return { outputPath, srtPath, durationSec: D, warnings: final ? lineChangeWarnings(ep, 'render') : [] };
+    const warnings = [...(final ? lineChangeWarnings(ep, 'render') : []), ...(o.mode === 'guide' ? [] : captionWarnings(words, ep.captions))];
+    return { outputPath, srtPath, durationSec: D, warnings };
   } catch (e) {
     await rm(partial, { force: true }).catch(() => {});
     throw e;

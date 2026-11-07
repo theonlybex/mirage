@@ -1,14 +1,16 @@
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
-import { run, SidecarError } from '@wordedits/sidecars';
+import { run, SidecarError, wordsFromWhisperJson } from '@wordedits/sidecars';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog, sha256File } from './ingest.js';
+import { bundledFontsDir, CAPTION_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
+import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
 import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover } from './voiceover.js';
@@ -209,6 +211,27 @@ describe('episodeFinalArgs', () => {
     const hi = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: 0, assFile: 'o.ass' });
     expect(hi[hi.indexOf('-filter_complex') + 1]).toContain('loudnorm=I=-5:TP=-1');
   });
+  it('escapes the fonts folder for the filter graph, and adds none without one', () => {
+    const graph = (fontsDir?: string) => { const a = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -14, assFile: 'overlays.ass', fontsDir }); const g = a[a.indexOf('-filter_complex') + 1]; return g.slice(0, g.indexOf('[vout]') + 6); };
+    expect(graph()).toBe('[0:v]ass=overlays.ass[vout]');
+    expect(graph('/a b/fonts')).toBe('[0:v]ass=overlays.ass:fontsdir=/a b/fonts[vout]');
+    // Option level (\ ' :), then graph level (\ ' [ ] , ;).
+    expect(graph("C:\\Mirage's [x], y;")).toBe("[0:v]ass=overlays.ass:fontsdir=C\\\\:\\\\\\\\Mirage\\\\\\'s \\[x\\]\\, y\\;[vout]");
+  });
+
+  it('hands libass a fonts folder whose path has spaces, quotes, colons and brackets (real ffmpeg)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'we-fontsdir-'));
+    const fonts = join(root, process.platform === 'win32' ? "my fonts 'q' [x], y;" : "my fonts 'q' : \\ [x], y;");
+    await mkdir(fonts);
+    await copyFile(join(bundledFontsDir(), CAPTION_FONT_FILE), join(fonts, CAPTION_FONT_FILE));
+    await writeFile(join(root, 'o.ass'), buildAss({ width: 320, height: 180, captions: [], overlays: [], prompts: [], captionLines: { style: 'pop', lines: [{ start: 0, end: 1, parts: [{ text: 'HI', pop: true }] }] } }));
+    const a = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 320, height: 180, fps: 30, durationSec: 1, loudnessLufs: -14, assFile: 'o.ass', fontsDir: fonts });
+    const g = a[a.indexOf('-filter_complex') + 1];
+    const chain = g.slice(0, g.indexOf('[vout]') + 6);
+    const { stderr } = await run('ffmpeg', ['-hide_banner', '-v', 'verbose', '-f', 'lavfi', '-i', 'color=gray:s=320x180:d=0.5', '-filter_complex', chain, '-map', '[vout]', '-frames:v', '1', '-f', 'null', '-'], { cwd: root });
+    expect(stderr).toContain(`Loading font file '${join(fonts, CAPTION_FONT_FILE)}'`);
+    expect(stderr).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
+  }, 60_000);
 });
 
 describe('renderEpisode (real ffmpeg)', () => {
@@ -443,6 +466,51 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(await peakHz(0.5, 500)).toBeGreaterThan((await peakHz(0.5, 700)) + 10);
     expect(await peakHz(3.5, 700)).toBeGreaterThan((await peakHz(3.5, 500)) + 10);
   }, 120_000);
+
+  it('burns pop captions into a vertical video in the bundled font; final.srt keeps phrase cues; no captions setting changes nothing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'we speech '));
+    await copyFile('fixtures/speech-retake.mp4', join(dir, 'speech-retake.mp4'));
+    const words = wordsFromWhisperJson(readFileSync('fixtures/whisper/speech-retake.json', 'latin1'));
+    const [clip] = (await ingestClips({ project, clipsDir: dir, tools: { ...tools, transcribe: async () => ({ words, segments: [], speech: [] }) } })).added;
+    const items = [{ id: 's', beat: 'problem', clip: clip.id, src: { in: 0, out: 6 }, audio: 'keep' }];
+    const output = { width: 1080, height: 1920, fps: 30 };
+    const e = ep(items, { number: 15, output, captions: { style: 'pop', position: 'middle', highlight: ['say', 'zebra'] } });
+    await saveEpisode(project, e);
+    // The last pass (the one with the ass filter) runs at -v verbose, so libass says which font file it picked.
+    const logs: string[] = [];
+    const graphs: string[] = [];
+    const verbose: MediaTools = {
+      ...tools,
+      runFfmpeg: async (args, opts) => {
+        const graph = args[args.indexOf('-filter_complex') + 1] ?? '';
+        if (!graph.includes(']ass=')) return tools.runFfmpeg(args, opts);
+        graphs.push(graph);
+        logs.push((await run('ffmpeg', ['-hide_banner', '-v', 'verbose', '-nostats', '-y', ...args], { cwd: opts?.cwd, timeoutMs: opts?.timeoutMs })).stderr);
+      },
+    };
+    const r = await renderEpisode({ project, episode: 15, mode: 'final', tools: verbose });
+    const p = await tools.probe(r.outputPath);
+    expect([p.width, p.height]).toEqual([1080, 1920]);
+    expect(logs[0]).toContain(`Loading font file '${join(bundledFontsDir(), CAPTION_FONT_FILE)}'`);
+    expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
+    expect(graphs[0]).toMatch(/\[0:v\]ass=overlays\.ass:fontsdir=.*fonts\[vout\]/);
+    const zebra = 'captions.highlight "zebra" is never said in this video — check the spelling or remove it';
+    expect(r.warnings).toEqual([zebra]);
+    const said = speechWords(e, await loadCatalog(project), null);
+    expect(said.map((x) => x.w)).toContain('say');
+    expect(await readFile(r.srtPath!, 'utf8')).toBe(toSrt(groupCaptions(said, { durationSec: 6 })));
+
+    // The rough cut shows them too, at its own size, and warns the same way.
+    const rough = await renderEpisode({ project, episode: 15, mode: 'rough', tools: verbose });
+    expect(rough.warnings).toEqual([zebra]);
+    expect(logs[1]).toMatch(/fontselect: .*Montserrat-ExtraBold/);
+
+    // Without captions: today's ass= argument, no fontsdir, no warnings.
+    await saveEpisode(project, ep(items, { number: 15, output }));
+    const plain = await renderEpisode({ project, episode: 15, mode: 'rough', tools: verbose });
+    expect(graphs[2].split(';')[0]).toBe('[0:v]ass=overlays.ass[vout]');
+    expect(plain.warnings).toEqual([]);
+  }, 180_000);
 
   it('clears work folders, partial files and temp files left by a command that was killed, taking over its lock', async () => {
     const dir = join(project, 'episodes', '6');
