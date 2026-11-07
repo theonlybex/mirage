@@ -35,7 +35,8 @@ const span = (s: Span) => `${formatTime(s.start)} to ${formatTime(s.end)}`;
 function Picture({ p, duration }: { p: Presence<TimelineView['items'][number]>; duration: number }) {
   const { item } = p;
   const [broken, setBroken] = useState(false);
-  const words = [beatName(item.beat), span(item), item.quiet ? 'quiet' : null, item.speed !== 1 ? `${item.speed}× speed` : null].filter(Boolean).join(' · ');
+  const card = item.card ? `card: ${item.card.label}` : null;
+  const words = [beatName(item.beat), card, span(item), item.quiet ? 'quiet' : null, item.speed !== 1 ? `${item.speed}× speed` : null].filter(Boolean).join(' · ');
   return (
     <div
       className="tl-picture"
@@ -46,9 +47,12 @@ function Picture({ p, duration }: { p: Presence<TimelineView['items'][number]>; 
       data-state={p.state}
       data-beat={item.beat}
       data-quiet={item.quiet ? 'true' : undefined}
+      data-card={item.card?.style}
       style={place(item, duration, { '--beat': beatColour(item.beat) })}
     >
-      {item.thumb && !broken ? (
+      {item.card ? (
+        <span className="tl-picture__card">{item.card.label}</span>
+      ) : item.thumb && !broken ? (
         <img src={withKey(item.thumb)} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setBroken(true)} />
       ) : (
         <span className="tl-picture__blank" />

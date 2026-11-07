@@ -1,13 +1,19 @@
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
+import { EpisodeSchema, isCard, type Catalog, type ClipItem, type MusicLibrary, type TimelineItem } from '@wordedits/shared';
 import { run } from '@wordedits/sidecars';
 import { describe, expect, it } from 'vitest';
 import { realMediaTools } from '../media-tools.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, findTrack, snapToBeats } from './music.js';
 import { layoutTimeline } from './timeline.js';
+
+/** The item as a clip item (a card here is a mistake in the test). */
+const clip = (i: TimelineItem): ClipItem => {
+  if (isCard(i)) throw new Error(`item ${i.id} is a card`);
+  return i;
+};
 
 const lib = (bpm: number, beatOffset: number): MusicLibrary => ({ version: 1, tracks: [{ file: 'beat.wav', mood: 'upbeat', licence: '', bpm, beatOffset, durationSec: 60 }] });
 const catalog = (dur: number): Catalog => ({
@@ -38,10 +44,26 @@ describe('snapToBeats', () => {
     expect(s.overlays[0].start).toBeCloseTo(5.5);
   });
 
+  it('leaves cards alone: their length stays, and an onBeat item after one still lands on a beat', () => {
+    const ep = episode([
+      { id: 'k', beat: 'title', card: { style: 'bold', text: 'Day 3', sec: 1.3 } },
+      { id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 1.3 }, onBeat: true },
+      { id: 'k2', beat: 'title', card: { style: 'mono', text: 'end', sec: 0.7 } },
+    ]);
+    const s = snapToBeats(ep, catalog(60), lib(120, 0));
+    expect(s.items[0]).toBe(ep.items[0]);
+    expect(s.items[2]).toBe(ep.items[2]);
+    // a: from 1.3 s to the beat nearest 2.6 s (2.5 s); the second card keeps its 0.7 s.
+    expect(layoutTimeline(s).map((l) => [l.item.id, +(l.end - l.start).toFixed(3)])).toEqual([['k', 1.3], ['a', 1.2], ['k2', 0.7]]);
+    // Only cards: nothing to snap.
+    const cards = episode([ep.items[0], ep.items[2]]);
+    expect(snapToBeats(cards, catalog(60), lib(120, 0)).items).toEqual(cards.items);
+  });
+
   it('slows an item down when the clip has no more footage', () => {
     const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0.2, out: 1.2 }, onBeat: true }]);
     const s = snapToBeats(ep, catalog(1.2), lib(100, 0));
-    expect(s.items[0].speed).toBeCloseTo(1 / 1.2, 3);
+    expect(clip(s.items[0]).speed).toBeCloseTo(1 / 1.2, 3);
     expect(layoutTimeline(s)[0].frames).toBe(36);
   });
 
@@ -74,7 +96,7 @@ describe('snapToBeats', () => {
   it('is idempotent when an item is slowed to fit the footage left', () => {
     const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 3 }, onBeat: true }]);
     const once = snapToBeats(ep, catalog(1), lib(60, 0));
-    expect(once.items[0].src.out).toBe(1);
+    expect(clip(once.items[0]).src.out).toBe(1);
     expect(snapToBeats(once, catalog(1), lib(60, 0))).toEqual(once);
   });
 
@@ -126,7 +148,7 @@ describe('snapToBeats', () => {
     const short = catalog(10);
     short.clips[0].probe.videoDurationSec = 1.2;
     const ep = episode([{ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0.2, out: 1.2 }, onBeat: true }]);
-    expect(snapToBeats(ep, short, lib(100, 0)).items[0].src.out).toBe(1.2);
+    expect(clip(snapToBeats(ep, short, lib(100, 0)).items[0]).src.out).toBe(1.2);
   });
 
   it('leaves items alone when no cue with a known tempo plays under them', () => {

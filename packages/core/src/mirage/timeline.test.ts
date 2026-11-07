@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { EpisodeSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
-import { dropCollapsed, formatTime, itemFrames, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
+import { dropCollapsed, formatTime, itemFrames, itemsFingerprint, layoutTimeline, shiftAfter, timelineDuration } from './timeline.js';
 
 const ep = EpisodeSchema.parse({
   version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
@@ -29,6 +30,32 @@ describe('timeline layout', () => {
   it('never gives an item zero frames', () => {
     const tiny = EpisodeSchema.parse({ ...ep, items: [{ id: 't', beat: 'montage', clip: 'c', src: { in: 0, out: 0.001 } }] });
     expect(layoutTimeline(tiny)[0].frames).toBe(1);
+  });
+});
+
+describe('cards on the timeline', () => {
+  const card = (id: string, sec: number, extra: object = {}) => ({ id, beat: 'title', card: { style: 'bold', text: id, sec }, ...extra });
+  const withCards = EpisodeSchema.parse({ ...ep, items: [card('k0', 1.5), ep.items[0], card('k1', 2, { hold: 0.5 }), card('k2', 0.51), ep.items[1]] });
+  it("gives a card round(sec · fps) source frames, then its hold", () => {
+    expect(itemFrames(withCards.items[2], 30)).toEqual({ srcFrames: 60, holdFrames: 15, frames: 75 });
+    expect(itemFrames(withCards.items[3], 30)).toEqual({ srcFrames: 15, holdFrames: 0, frames: 15 });
+  });
+  it('lays cards out between clip items, at the start, and two in a row', () => {
+    expect(layoutTimeline(withCards).map((l) => [l.item.id, l.start, l.end])).toEqual([['k0', 0, 1.5], ['a', 1.5, 3.5], ['k1', 3.5, 6], ['k2', 6, 6.5], ['b', 6.5, 9.5]]);
+    const only = EpisodeSchema.parse({ ...ep, items: [card('k0', 1), card('k1', 2)] });
+    expect(timelineDuration(only)).toBe(3);
+  });
+  it("fingerprints a card as ['card', id, sec, hold]: a changed length is a re-cut, a changed text isn't", () => {
+    const fp = itemsFingerprint(withCards.items);
+    const edit = (f: (c: (typeof withCards.items)[number]) => object) => itemsFingerprint(EpisodeSchema.parse({ ...withCards, items: withCards.items.map((i) => (i.id === 'k1' ? f(i) : i)) }).items);
+    expect(edit((c) => ({ ...c, card: { style: 'bold', text: 'k1', sec: 2.5 } }))).not.toBe(fp);
+    expect(edit((c) => ({ ...c, hold: 1 }))).not.toBe(fp);
+    expect(edit((c) => ({ ...c, card: { style: 'mono', text: 'other', sec: 2 } }))).toBe(fp);
+  });
+  it('fingerprints clip items exactly as before: [id, clip, in, out, speed, hold] each', () => {
+    const old = [['a', 'c001', 0, 2, 1, 0], ['b', 'c002', 0, 60, 20, 0], ['c', 'c003', 1, 2, 1, 0.5]];
+    expect(itemsFingerprint(ep.items)).toBe(createHash('sha256').update(JSON.stringify(old)).digest('hex').slice(0, 16));
+    expect(itemsFingerprint(ep.items)).toBe('3bb643a6be3722e4');
   });
 });
 

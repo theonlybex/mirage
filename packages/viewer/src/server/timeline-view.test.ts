@@ -32,6 +32,22 @@ describe('buildTimelineView', () => {
     expect(v.voice).toEqual([{ slot: 's1', start: 0.5, end: 4 }]);
   });
 
+  it('shows a card as its text, or its picture\'s file name, with no thumbnail', () => {
+    const items = [
+      { id: 'k', beat: 'title', card: { style: 'mono', text: '3 days later\n...', sec: 2 } },
+      { id: 'i1', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 10 } },
+      { id: 'p', beat: 'outro', card: { style: 'image', image: 'pics/the end.jpg', sec: 1.5 }, hold: 0.5 },
+    ];
+    const v = buildTimelineView(project, raw(episodeJson('Cards', { items })), null);
+    expect(v.status).toBe('ok');
+    expect(v.durationSec).toBeCloseTo(14);
+    expect(v.items).toEqual([
+      { id: 'k', beat: 'title', card: { style: 'mono', label: '3 days later' }, start: 0, end: 2, thumb: null, quiet: false, speed: 1 },
+      { id: 'i1', beat: 'cold-open', clip: 'c001', start: 2, end: 12, thumb: mediaPath(join(project, 'frames/c001/f5.jpg')), quiet: false, speed: 1 },
+      { id: 'p', beat: 'outro', card: { style: 'image', label: 'the end.jpg' }, start: 12, end: 14, thumb: null, quiet: false, speed: 1 },
+    ]);
+  });
+
   it('has no thumbnail when the catalog is missing, broken or lacks the clip', () => {
     expect(buildTimelineView(project, raw(episodeJson(), null), null).items.map((i) => i.thumb)).toEqual([null, null]);
     expect(buildTimelineView(project, raw(episodeJson(), '{ nope'), null).items.map((i) => i.thumb)).toEqual([null, null]);

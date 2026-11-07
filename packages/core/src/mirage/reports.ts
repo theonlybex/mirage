@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-import type { Episode } from '@wordedits/shared';
+import { isCard, type Episode } from '@wordedits/shared';
+import { cardLabel } from './cards.js';
 import type { IngestResult } from './ingest.js';
 import { loadCatalog } from './ingest.js';
 import type { LibraryReport } from './music.js';
@@ -19,7 +20,8 @@ export function checkReport({ episode: ep, warnings, notes }: { episode: Episode
   const lines: string[] = [];
   for (const l of layoutTimeline(ep)) {
     const it = l.item;
-    lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${it.clip}  ${it.src.in.toFixed(2)}–${it.src.out.toFixed(2)}  ×${it.speed}  ${l.start.toFixed(2)}–${l.end.toFixed(2)}${it.quiet ? '  quiet' : ''}`);
+    const what = isCard(it) ? `card ${it.card.style} "${cardLabel(it)}"` : `${it.clip}  ${it.src.in.toFixed(2)}–${it.src.out.toFixed(2)}  ×${it.speed}`;
+    lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${what}  ${l.start.toFixed(2)}–${l.end.toFixed(2)}${it.quiet ? '  quiet' : ''}`);
   }
   lines.push(`total ${formatTime(timelineDuration(ep))} · ${ep.items.length} items · ${ep.overlays.length} overlays · ${ep.music.length} music cues${ep.sfx ? ` · ${ep.sfx.length} sound effects` : ''}`);
   for (const m of notes) lines.push(`• ${m}`);

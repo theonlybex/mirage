@@ -26,7 +26,25 @@ export function describeZodError(e: ZodError): string {
   return `${at ? `${at}: ` : ''}${issue.message}`;
 }
 
-const firstIssue = (e: ZodError) => e.issues.find((i) => i.code === 'unrecognized_keys') ?? e.issues[0];
+type Issue = ZodError['issues'][number];
+
+/**
+ * The issues with each failed union (a timeline item is a clip item or a card) replaced by those of the branch the
+ * value was most likely meant for: the first whose keys all fit it (no unknown key at its top), else the first. Its
+ * "Invalid input" says nothing; the branch's issues name the field.
+ */
+function flatIssues(issues: readonly Issue[]): Issue[] {
+  return issues.flatMap((i) => {
+    if (i.code !== 'invalid_union' || !('errors' in i) || !i.errors.length) return [i];
+    const branch = i.errors.find((b) => !b.some((x) => x.code === 'unrecognized_keys' && x.path.length === 0)) ?? i.errors[0]!;
+    return flatIssues(branch.map((x) => ({ ...x, path: [...i.path, ...x.path] })));
+  });
+}
+
+const firstIssue = (e: ZodError) => {
+  const issues = flatIssues(e.issues);
+  return issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0]!;
+};
 
 const UNKNOWN_KEY_HINT = 'Remove or rename that key (a misspelled key would be ignored).';
 

@@ -26,6 +26,18 @@ describe('checkReport', () => {
     expect(lines[2]).toMatch(/^total .* · 2 items · 1 overlays · 1 music cues$/);
     expect(lines.slice(3)).toEqual(['• snapped a to 1.0 s', '⚠ overlay 1 is long']);
   });
+  it('lists a card by its style and text, or its picture', () => {
+    const withCards = EpisodeSchema.parse({
+      ...episode,
+      items: [{ id: 'k', beat: 'title', card: { style: 'bold', text: 'Day 3\nlater', sec: 2 } }, episode.items[0], { id: 'p', beat: 'outro', card: { style: 'image', image: 'pics/end.png', sec: 1.5 }, quiet: true }],
+    });
+    const lines = checkReport({ episode: withCards, notes: [], warnings: [] });
+    expect(lines.slice(0, 3)).toEqual([
+      '  1  title     k            card bold "Day 3"  0.00–2.00',
+      '  2  cold-open open         c001  12.50–18.00  ×1  2.00–7.50',
+      '  3  outro     p            card image "end.png"  7.50–9.00  quiet',
+    ]);
+  });
   it('counts sound effects in the total only when the episode has the list', () => {
     const total = (ep: typeof episode) => checkReport({ episode: ep, notes: [], warnings: [] }).find((l) => l.startsWith('total'))!;
     expect(total(episode)).not.toContain('sound effects');

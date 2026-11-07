@@ -138,3 +138,28 @@ describe('slots after a re-cut (carrySlots)', () => {
     expect(carrySlots(old, computeSlots(old, catalog)).slots.map((s) => s.line)).toEqual(['Intro line.', 'Screen line.', 'Outro line.']);
   });
 });
+
+describe('slots over cards', () => {
+  const card = (id: string, sec: number, extra: object = {}) => ({ id, beat: 'title', card: { style: 'bold', text: 'Day 3', sec }, ...extra });
+  const withCard = EpisodeSchema.parse({ ...ep, items: [ep.items[0], card('k', 4), ep.items[1]] });
+  it('run over a card (picture time, with no speech), but not over a quiet one', () => {
+    expect(computeSlots(withCard, catalog)).toEqual([{ id: 'n1', start: 2.8, end: 13, maxWords: 27, line: '' }]);
+    const quiet = EpisodeSchema.parse({ ...withCard, items: [ep.items[0], card('k', 4, { quiet: true }), ep.items[1]] });
+    expect(computeSlots(quiet, catalog).map((s) => [s.start, s.end])).toEqual([[7, 13]]);
+  });
+  it('records a card in the cut as its own time, with no clip', () => {
+    expect(cutOf(withCard).items).toEqual([
+      { id: 'talk', start: 0, end: 3, in: 0, speed: 1, clip: 'c001', out: 3 },
+      { id: 'k', start: 3, end: 7, in: 0, speed: 1, out: 4 },
+      { id: 'screen', start: 7, end: 13, in: 10, speed: 1, clip: 'c001', out: 16 },
+    ]);
+  });
+  it('carries a line written over a card with the card when the cut changes', () => {
+    const written = { ...withCard, slots: [{ id: 'n1', start: 3.5, end: 6.5, maxWords: 8, line: 'Three days later.' }], slotsCut: cutOf(withCard) };
+    // The card moves to the front.
+    const moved = EpisodeSchema.parse({ ...written, items: [written.items[1], written.items[0], written.items[2]] });
+    const next = [{ id: 'n1', start: 0, end: 4, maxWords: 11, line: '' }, { id: 'n2', start: 7.3, end: 13, maxWords: 16, line: '' }];
+    const { slots } = carrySlots(moved, next);
+    expect(slots.map((s) => s.line)).toEqual(['Three days later.', '']);
+  });
+});

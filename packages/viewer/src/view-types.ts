@@ -2,12 +2,15 @@
 // What the viewer server sends the page, in one place both sides compile against. Types only: no Node, no DOM.
 import type { Control, LogEntry, Note, Progress, StepLine, VersionMeta } from '@wordedits/shared';
 
-/** What the page draws of episode.json: the lanes with times in output seconds. `thumb` is a media path (the page adds the key). */
+/**
+ * What the page draws of episode.json: the lanes with times in output seconds. `thumb` is a media path (the page adds the
+ * key). A card item has `card` (its style, and its text or picture's file name) instead of `clip`, and no thumbnail.
+ */
 export type TimelineView = {
   status: 'empty' | 'ok' | 'editing';
   title: string;
   durationSec: number;
-  items: { id: string; beat: string; clip: string; start: number; end: number; thumb: string | null; quiet: boolean; speed: number }[];
+  items: { id: string; beat: string; clip?: string; card?: { style: string; label: string }; start: number; end: number; thumb: string | null; quiet: boolean; speed: number }[];
   overlays: { kind: string; text: string; tone: string; start: number; end: number }[];
   music: { track: string; start: number; end: number }[];
   slots: { id: string; start: number; end: number; line: string; maxWords: number }[];

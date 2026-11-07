@@ -27343,7 +27343,7 @@ var MoveSchema = strictObject2({
   start: external_exports.number().min(0).optional(),
   end: external_exports.number().positive().optional()
 }).refine((m) => m.start === void 0 || m.end === void 0 || m.end > m.start, { message: "move: end must be after start" });
-var TimelineItemSchema = strictObject2({
+var ClipItemSchema = strictObject2({
   id: external_exports.string().min(1),
   beat: BeatSchema,
   clip: external_exports.string().min(1),
@@ -27380,6 +27380,33 @@ var TimelineItemSchema = strictObject2({
 }).superRefine((it, ctx) => {
   if (it.src.out <= it.src.in) ctx.addIssue({ code: "custom", path: ["src"], message: `item ${it.id}: src.out must be greater than src.in` });
 });
+var isProjectPath = (p) => !/^[\\/]/.test(p) && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes("..");
+var CardItemSchema = strictObject2({
+  id: external_exports.string().min(1),
+  beat: BeatSchema,
+  card: strictObject2({
+    text: external_exports.string().default(""),
+    style: external_exports.enum(["mono", "bold", "image"]),
+    sec: external_exports.number().min(0.5).max(30),
+    /** The picture of an `image` card: a path inside the project to a PNG or JPEG. */
+    image: external_exports.string().min(1).optional()
+  }),
+  /** Seconds the card stays on longer (set by voice-over fitting, which never splits a card). */
+  hold: external_exports.number().min(0).max(10).default(0),
+  /** No narration over this card. */
+  quiet: external_exports.boolean().default(false)
+}).superRefine((it, ctx) => {
+  const c3 = it.card;
+  if (c3.style === "image") {
+    if (c3.image === void 0) ctx.addIssue({ code: "custom", path: ["card", "image"], message: `item ${it.id}: an image card needs an image (a PNG or JPEG in the project)` });
+    else if (!isProjectPath(c3.image)) ctx.addIssue({ code: "custom", path: ["card", "image"], message: `item ${it.id}: card image ${c3.image} must be a path inside the project (no .., not absolute)` });
+  } else {
+    if (c3.image !== void 0) ctx.addIssue({ code: "custom", path: ["card", "image"], message: `item ${it.id}: only an image card takes an image (style is ${c3.style})` });
+    if (!c3.text.trim()) ctx.addIssue({ code: "custom", path: ["card", "text"], message: `item ${it.id}: a ${c3.style} card needs text` });
+  }
+});
+var TimelineItemSchema = external_exports.union([ClipItemSchema, CardItemSchema]);
+var isCard = (item) => "card" in item;
 var OverlaySchema = range(
   {
     kind: external_exports.enum(["callout", "counter", "badge", "label", "chapter", "before", "after"]),
@@ -28072,7 +28099,17 @@ function describeZodError(e) {
   const at = issuePath(issue2.path);
   return `${at ? `${at}: ` : ""}${issue2.message}`;
 }
-var firstIssue = (e) => e.issues.find((i2) => i2.code === "unrecognized_keys") ?? e.issues[0];
+function flatIssues(issues) {
+  return issues.flatMap((i2) => {
+    if (i2.code !== "invalid_union" || !("errors" in i2) || !i2.errors.length) return [i2];
+    const branch = i2.errors.find((b) => !b.some((x) => x.code === "unrecognized_keys" && x.path.length === 0)) ?? i2.errors[0];
+    return flatIssues(branch.map((x) => ({ ...x, path: [...i2.path, ...x.path] })));
+  });
+}
+var firstIssue = (e) => {
+  const issues = flatIssues(e.issues);
+  return issues.find((i2) => i2.code === "unrecognized_keys") ?? issues[0];
+};
 var UNKNOWN_KEY_HINT = "Remove or rename that key (a misspelled key would be ignored).";
 function schemaError(display, e, hint) {
   return new JsonFileError(display, describeZodError(e), firstIssue(e).code === "unrecognized_keys" ? UNKNOWN_KEY_HINT : hint);
@@ -28147,12 +28184,13 @@ function sameMove(p, q) {
   if (!p || !q) return p === q;
   return p.zoom === q.zoom && p.ease === q.ease && p.start === q.start && p.end === q.end && p.focus?.x === q.focus?.x && p.focus?.y === q.focus?.y;
 }
+var shotOf = (item) => isCard(item) ? void 0 : item.splitFrom?.item;
 function splitShots(items) {
   const out = [];
   for (let i2 = 0; i2 < items.length; ) {
-    const shot = items[i2].splitFrom?.item;
+    const shot = shotOf(items[i2]);
     let j = i2;
-    while (shot !== void 0 && j + 1 < items.length && items[j + 1].splitFrom?.item === shot) j++;
+    while (shot !== void 0 && j + 1 < items.length && shotOf(items[j + 1]) === shot) j++;
     if (j > i2) out.push({ from: i2, to: j });
     i2 = j + 1;
   }
@@ -28190,7 +28228,7 @@ function moveClocks(laid, fps) {
 
 // packages/core/src/mirage/timeline.ts
 function itemFrames(item, fps) {
-  const srcFrames = Math.max(1, Math.round((item.src.out - item.src.in) / item.speed * fps));
+  const srcFrames = isCard(item) ? Math.max(1, Math.round(item.card.sec * fps)) : Math.max(1, Math.round((item.src.out - item.src.in) / item.speed * fps));
   const holdFrames = Math.round(item.hold * fps);
   return { srcFrames, holdFrames, frames: srcFrames + holdFrames };
 }
@@ -28385,6 +28423,12 @@ async function lockEpisode(project2, n2, command) {
 var NARRATION_GAPS = { lead: 0.3, sentence: 0.3, line: 0.8 };
 var MARGIN_SEC = 0.03;
 var MIN_PAUSE = NARRATION_GAPS.sentence + 2 * MARGIN_SEC;
+
+// packages/core/src/mirage/cards.ts
+function cardLabel(item) {
+  const text = item.card.text.trim().split("\n")[0].trim();
+  return text || (item.card.image ?? "").split(/[\\/]/).pop();
+}
 
 // packages/core/src/mirage/versions.ts
 import { randomBytes, randomUUID as randomUUID3 } from "node:crypto";
@@ -28952,16 +28996,18 @@ function buildTimelineView(project2, raw, previous) {
     status: "ok",
     title: ep.title,
     durationSec: timelineDuration(ep),
-    items: layoutTimeline(ep).map(({ item, start, end: end2 }) => ({
-      id: item.id,
-      beat: item.beat,
-      clip: item.clip,
-      start,
-      end: end2,
-      thumb: thumbFor(project2, catalog, item.clip, item.src),
-      quiet: item.quiet,
-      speed: item.speed
-    })),
+    items: layoutTimeline(ep).map(
+      ({ item, start, end: end2 }) => isCard(item) ? { id: item.id, beat: item.beat, card: { style: item.card.style, label: cardLabel(item) }, start, end: end2, thumb: null, quiet: item.quiet, speed: 1 } : {
+        id: item.id,
+        beat: item.beat,
+        clip: item.clip,
+        start,
+        end: end2,
+        thumb: thumbFor(project2, catalog, item.clip, item.src),
+        quiet: item.quiet,
+        speed: item.speed
+      }
+    ),
     overlays: ep.overlays.map((o2) => ({ kind: o2.kind, text: o2.text, tone: o2.tone, start: o2.start, end: o2.end })),
     music: ep.music.map((m) => ({ track: m.track, start: m.start, end: m.end })),
     slots: ep.slots.map((s) => ({ id: s.id, start: s.start, end: s.end, line: s.line, maxWords: s.maxWords })),

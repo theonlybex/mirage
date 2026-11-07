@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
-import type { Episode, Move, MusicLibrary } from '@wordedits/shared';
+import { isCard, type ClipItem, type Episode, type Move, type MusicLibrary } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
+import { checkCardImages } from './cards.js';
 import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
 import { splitShots } from './move.js';
@@ -37,14 +38,15 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
   // fit froze frames inside it (its source frames and its end hold), so fitting never causes a warning.
   const shotAt = new Map(splitShots(ep.items).map((s) => [s.to, s]));
   for (const l of laid) {
-    const m = l.item.move;
+    const m = isCard(l.item) ? undefined : l.item.move;
     if (m && !l.clock) moveWarning(l.item.id, m, l.frames);
     const shot = shotAt.get(l.index);
     if (!shot) continue;
     const parts = laid.slice(shot.from, shot.to + 1);
     if (!parts.some((p) => p.clock)) continue;
     const frames = parts.reduce((s, p) => s + p.srcFrames, 0) + l.holdFrames;
-    moveWarning(l.item.splitFrom!.item, l.item.splitFrom!.move, frames);
+    const { splitFrom } = l.item as ClipItem;
+    moveWarning(splitFrom!.item, splitFrom!.move, frames);
   }
   ep.music.forEach((c, i) => {
     if (c.start >= D - 1e-6) out.push(`music cue ${i + 1} (${c.track}) starts at ${s2(c.start)} s, after the episode ends (${s2(D)} s) — it will never play`);
@@ -52,7 +54,7 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
   if (snapped) {
     // Same rule as snapToBeats: the cue playing at the item's start decides its beat.
     for (const l of layoutTimeline(ep)) {
-      if (!l.item.onBeat) continue;
+      if (isCard(l.item) || !l.item.onBeat) continue;
       const cue = ep.music.find((c) => l.start >= c.start - 1e-6 && l.start < c.end);
       const track = cue && lib ? findTrack(lib, cue.track) : undefined;
       if (!cue) out.push(`item ${l.item.id} is onBeat but no music plays under it — left unsnapped`);
@@ -115,6 +117,7 @@ export async function checkEpisode(project: string, n: number, tools?: MediaTool
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n);
   sourcesFor(ep, catalog);
+  checkCardImages(root, ep);
   const warnings: string[] = [];
   const notes: string[] = [];
   // library.json only matters to an episode with music: a broken one must not block a cut without any.
@@ -131,7 +134,7 @@ export async function checkEpisode(project: string, n: number, tools?: MediaTool
     if (!p?.hasAudio) throw unreadableSfx(`sfx ${k + 1}`, src.path);
   }
   if (ep.voiceover) {
-    if (ep.items.some((i) => i.onBeat) || ep.music.length) notes.push('Montages were not snapped to the beat: the voice-over is fitted to this cut.');
+    if (ep.items.some((i) => !isCard(i) && i.onBeat) || ep.music.length) notes.push('Montages were not snapped to the beat: the voice-over is fitted to this cut.');
   } else if (lib) {
     const snapped = dropCollapsed(snapToBeats(ep, catalog, lib), ep);
     ep = snapped.episode;
@@ -147,7 +150,7 @@ export async function checkEpisode(project: string, n: number, tools?: MediaTool
   }
   warnings.push(...lineChangeWarnings(ep, 'check'));
   for (const item of ep.items) {
-    if (item.audio !== 'keep' || item.speed !== 1) continue;
+    if (isCard(item) || item.audio !== 'keep' || item.speed !== 1) continue;
     const clip = catalog.clips.find((c) => c.id === item.clip);
     if (clip?.probe.hasAudio && clip.transcript === null) {
       warnings.push(`item ${item.id} keeps audio from ${clip.id}, which has no transcript — narration slots and captions won't see its speech`);

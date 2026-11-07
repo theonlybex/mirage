@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { CatalogSchema } from './catalog.js';
-import { EpisodeSchema } from './episode.js';
+import { EpisodeSchema, isCard, type ClipItem, type TimelineItem } from './episode.js';
 import { MusicLibrarySchema } from './library.js';
+
+/** The item as a clip item (a card here is a mistake in the test). */
+const clip = (i: TimelineItem): ClipItem => {
+  if (isCard(i)) throw new Error(`item ${i.id} is a card`);
+  return i;
+};
 
 const item = { id: 'i1', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 2 } };
 const base = { version: 2, number: 1, title: 'Weather app, part 1', output: { width: 1920, height: 1080, fps: 30 }, items: [item] };
@@ -40,11 +46,11 @@ describe('EpisodeSchema move', () => {
     const ep = EpisodeSchema.parse(base);
     expect('move' in ep.items[0]!).toBe(false);
     expect(JSON.stringify(ep)).not.toContain('move');
-    const m = EpisodeSchema.parse(withMove({ zoom: 1.2, start: 1 })).items[0]!.move;
+    const m = clip(EpisodeSchema.parse(withMove({ zoom: 1.2, start: 1 })).items[0]!).move;
     expect(m).toEqual({ zoom: 1.2, ease: 'inOut', start: 1 });
   });
   it('takes a focus, an ease and times', () => {
-    const m = EpisodeSchema.parse(withMove({ zoom: 1, focus: { x: 0.8, y: 0.3 }, ease: 'out', start: 0.5, end: 2 })).items[0]!.move;
+    const m = clip(EpisodeSchema.parse(withMove({ zoom: 1, focus: { x: 0.8, y: 0.3 }, ease: 'out', start: 0.5, end: 2 })).items[0]!).move;
     expect(m).toEqual({ zoom: 1, focus: { x: 0.8, y: 0.3 }, ease: 'out', start: 0.5, end: 2 });
   });
   it('refuses end <= start, a zoom outside 1–2, a missing zoom, a bad focus or ease and an unknown key', () => {
@@ -144,5 +150,53 @@ describe('EpisodeSchema sound effects and dips', () => {
     expect(dip({ start: 3, end: 2 })).toBe(false);
     expect(dip({ start: -1, end: 2 })).toBe(false);
     expect(dip({ start: 1, end: 2, fade: 0.1 })).toBe(false);
+  });
+});
+
+describe('EpisodeSchema card items', () => {
+  const card = (c: object, extra: object = {}) => ({ id: 'k1', beat: 'title', card: { style: 'bold', sec: 2, text: 'Day 3', ...c }, ...extra });
+  const parses = (c: object, extra: object = {}) => EpisodeSchema.safeParse({ ...base, items: [item, card(c, extra)] }).success;
+  it('parses a card item, filling text, hold and quiet, and tells it from a clip item', () => {
+    const ep = EpisodeSchema.parse({ ...base, items: [item, { id: 'k1', beat: 'title', card: { style: 'image', sec: 3, image: 'pics/shot.png' } }] });
+    expect(ep.items[1]).toEqual({ id: 'k1', beat: 'title', card: { style: 'image', sec: 3, image: 'pics/shot.png', text: '' }, hold: 0, quiet: false });
+    expect(ep.items.map(isCard)).toEqual([false, true]);
+    expect(EpisodeSchema.parse(JSON.parse(JSON.stringify(ep)))).toEqual(ep);
+  });
+  it('refuses clip, src, speed, audio, zoom, move, frame, focus and onBeat on a card, naming the key', () => {
+    for (const k of ['clip', 'src', 'speed', 'audio', 'zoom', 'move', 'frame', 'focus', 'onBeat']) {
+      const r = EpisodeSchema.safeParse({ ...base, items: [card({}, { [k]: k === 'move' ? { zoom: 1.2 } : 1 })] });
+      expect(firstIssue(r)?.message).toMatch(new RegExp(`^unknown key "${k}" \\(valid keys: id, beat, card, hold, quiet\\)`));
+    }
+  });
+  it('keeps sec within 0.5–30 and hold within 0–10', () => {
+    expect(parses({ sec: 0.5 })).toBe(true);
+    expect(parses({ sec: 30 })).toBe(true);
+    expect(parses({ sec: 0.4 })).toBe(false);
+    expect(parses({ sec: 31 })).toBe(false);
+    expect(parses({}, { hold: 11 })).toBe(false);
+    expect(parses({ style: 'fancy' })).toBe(false);
+  });
+  it('an image card needs an image inside the project; mono and bold refuse one and need text', () => {
+    expect(parses({ style: 'image', text: '' })).toBe(false);
+    expect(parses({ style: 'image', image: 'a.jpg', text: 'Over it' })).toBe(true);
+    for (const bad of ['../a.png', 'pics/../../a.png', '/abs/a.png', 'C:\\pics\\a.png', 'pics\\..\\..\\a.png', '\\a.png']) expect(parses({ style: 'image', image: bad })).toBe(false);
+    expect(parses({ style: 'mono', image: 'a.png' })).toBe(false);
+    expect(parses({ style: 'bold', text: '' })).toBe(false);
+    expect(parses({ style: 'mono', text: '  \n ' })).toBe(false);
+    expect(parses({ style: 'mono', text: 'line 1\nline 2' })).toBe(true);
+    const r = EpisodeSchema.safeParse({ ...base, items: [card({ style: 'image' })] });
+    expect(firstIssue(r)).toEqual({ path: ['items', 0, 'card', 'image'], message: 'item k1: an image card needs an image (a PNG or JPEG in the project)' });
+  });
+  it('round-trips an existing clip-only episode byte for byte', () => {
+    const saved = {
+      version: 2, number: 3, title: 'Old one', output: { width: 1080, height: 1920, fps: 30 },
+      items: [
+        { id: 'i1', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 2 }, speed: 1, audio: 'keep', zoom: 1, frame: 'fit', focus: { x: 0.5, y: 0.5 }, hold: 0, quiet: false, onBeat: false },
+        { id: 'i2', beat: 'montage', clip: 'c002', src: { in: 1, out: 9 }, speed: 4, audio: 'mute', zoom: 1.2, frame: 'fill', focus: { x: 0.3, y: 0.5 }, move: { zoom: 1.4, ease: 'inOut', start: 0.5 }, hold: 0.4, quiet: true, onBeat: true, splitFrom: { item: 'i2', move: { zoom: 1.4, ease: 'inOut', start: 0.5 } } },
+      ],
+      overlays: [], music: [], slots: [], voiceover: null, loudnessLufs: -14,
+    };
+    const text = JSON.stringify(saved, null, 2);
+    expect(JSON.stringify(EpisodeSchema.parse(JSON.parse(text)), null, 2)).toBe(text);
   });
 });

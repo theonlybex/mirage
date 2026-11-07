@@ -27,7 +27,8 @@ export const MoveSchema = strictObject({
 }).refine((m) => m.start === undefined || m.end === undefined || m.end > m.start, { message: 'move: end must be after start' });
 export type Move = z.infer<typeof MoveSchema>;
 
-export const TimelineItemSchema = strictObject({
+/** A piece of a catalogued clip: `clip` from `src.in` to `src.out`. */
+export const ClipItemSchema = strictObject({
   id: z.string().min(1),
   beat: BeatSchema,
   clip: z.string().min(1),
@@ -64,7 +65,51 @@ export const TimelineItemSchema = strictObject({
 }).superRefine((it, ctx) => {
   if (it.src.out <= it.src.in) ctx.addIssue({ code: 'custom', path: ['src'], message: `item ${it.id}: src.out must be greater than src.in` });
 });
+export type ClipItem = z.infer<typeof ClipItemSchema>;
+
+/**
+ * A plain path inside the project: relative, with no `..` part. A backslash counts as a separator too (a Windows path
+ * written by hand), so `a\..\b`, `\x` and `C:\x` are refused.
+ */
+export const isProjectPath = (p: string): boolean =>
+  !/^[\\/]/.test(p) && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes('..');
+
+/**
+ * A full-screen card that takes its own time and has no footage: `sec` seconds (plus `hold`) of silence. mono = white
+ * monospace text on black, a line per `\n`; bold = big white text on black, wrapped; image = `image` (a PNG or JPEG
+ * inside the project) covering the frame, with `text` over it if any.
+ */
+export const CardItemSchema = strictObject({
+  id: z.string().min(1),
+  beat: BeatSchema,
+  card: strictObject({
+    text: z.string().default(''),
+    style: z.enum(['mono', 'bold', 'image']),
+    sec: z.number().min(0.5).max(30),
+    /** The picture of an `image` card: a path inside the project to a PNG or JPEG. */
+    image: z.string().min(1).optional(),
+  }),
+  /** Seconds the card stays on longer (set by voice-over fitting, which never splits a card). */
+  hold: z.number().min(0).max(10).default(0),
+  /** No narration over this card. */
+  quiet: z.boolean().default(false),
+}).superRefine((it, ctx) => {
+  const c = it.card;
+  if (c.style === 'image') {
+    if (c.image === undefined) ctx.addIssue({ code: 'custom', path: ['card', 'image'], message: `item ${it.id}: an image card needs an image (a PNG or JPEG in the project)` });
+    else if (!isProjectPath(c.image)) ctx.addIssue({ code: 'custom', path: ['card', 'image'], message: `item ${it.id}: card image ${c.image} must be a path inside the project (no .., not absolute)` });
+  } else {
+    if (c.image !== undefined) ctx.addIssue({ code: 'custom', path: ['card', 'image'], message: `item ${it.id}: only an image card takes an image (style is ${c.style})` });
+    if (!c.text.trim()) ctx.addIssue({ code: 'custom', path: ['card', 'text'], message: `item ${it.id}: a ${c.style} card needs text` });
+  }
+});
+export type CardItem = z.infer<typeof CardItemSchema>;
+
+/** A timeline item: a piece of a clip, or a card. Old episodes hold only clip items and parse (and save) exactly as before. */
+export const TimelineItemSchema = z.union([ClipItemSchema, CardItemSchema]);
 export type TimelineItem = z.infer<typeof TimelineItemSchema>;
+
+export const isCard = (item: TimelineItem): item is CardItem => 'card' in item;
 
 export const OverlaySchema = range(
   {

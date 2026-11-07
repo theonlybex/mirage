@@ -1,4 +1,4 @@
-import type { Catalog, Episode, Overlay, Slot, Transcript, VoiceLine, Word } from '@wordedits/shared';
+import { isCard, type Catalog, type Episode, type Overlay, type Slot, type Transcript, type VoiceLine, type Word } from '@wordedits/shared';
 import { isFiller, normalizeWord } from '../autoedit/takes.js';
 import { HIGHLIGHT_COLOR, type CaptionLine, type CaptionPart } from './captions.js';
 import { CAPTION_FONT } from './fonts.js';
@@ -93,7 +93,8 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
   const out: Word[] = [];
   for (const l of layoutTimeline(ep)) {
     const { item } = l;
-    if (item.audio !== 'keep' || item.speed !== 1) continue;
+    // A card has no speech.
+    if (isCard(item) || item.audio !== 'keep' || item.speed !== 1) continue;
     const words = catalog.clips.find((c) => c.id === item.clip)?.transcript?.words ?? [];
     const srcEnd = item.src.in + l.srcFrames / fps;
     for (const w of words) {

@@ -44,6 +44,17 @@ describe('LiveTimeline', () => {
     expect(at('picture', 'i1')?.querySelector('img')?.getAttribute('src')).toBe('/media/i1.jpg?k=secret');
   });
 
+  it('draws a card as its text on black, with no thumbnail, and says it is a card', () => {
+    const { clip: _, ...noClip } = item('k', 0, 2);
+    const card = { ...noClip, beat: 'title', thumb: null, card: { style: 'bold', label: 'Day 3' } };
+    render(<LiveTimeline view={view({ items: [card, item('i1', 2, 20)] })} />);
+    const tile = at('picture', 'k');
+    expect(tile?.getAttribute('data-card')).toBe('bold');
+    expect(tile?.querySelector('img')).toBeNull();
+    expect(tile?.querySelector('.tl-picture__card')?.textContent).toBe('Day 3');
+    expect(tile?.getAttribute('aria-label')).toContain('card: Day 3');
+  });
+
   it('marks new items as entering and keeps removed ones 200 ms as exiting', () => {
     vi.useFakeTimers();
     const { rerender } = render(<LiveTimeline view={view()} />);

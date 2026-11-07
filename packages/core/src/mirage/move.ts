@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import type { Move, TimelineItem } from '@wordedits/shared';
+import { isCard, type ClipItem, type Move, type TimelineItem } from '@wordedits/shared';
 import { ffNum } from './encode.js';
 import type { LaidItem } from './timeline.js';
 
@@ -41,7 +41,7 @@ export function ease(kind: Move['ease'], p: number): number {
  *
  * `clock` (`LaidItem.clock`, from moveClocks) replaces `a` and `b` for a part of a split shot.
  */
-export function moveFrames(item: TimelineItem, frames: number, fps: number, clock?: MoveClock): { zoom: number; x: number; y: number }[] {
+export function moveFrames(item: ClipItem, frames: number, fps: number, clock?: MoveClock): { zoom: number; x: number; y: number }[] {
   const m = item.move;
   const { z0, z1, x0, x1, y0, y1, a, b } = moveSpan(item, frames, fps, clock);
   const at = (p: number) => {
@@ -58,7 +58,7 @@ export function moveFrames(item: TimelineItem, frames: number, fps: number, cloc
 }
 
 /** Where a move starts and ends: its zoom and focus, and the frames it covers, `a` up to, not including, `b`. */
-function moveSpan(item: TimelineItem, frames: number, fps: number, clock?: MoveClock) {
+function moveSpan(item: ClipItem, frames: number, fps: number, clock?: MoveClock) {
   const m = item.move;
   return {
     z0: item.zoom,
@@ -78,13 +78,16 @@ export function sameMove(p: Move | undefined, q: Move | undefined): boolean {
   return p.zoom === q.zoom && p.ease === q.ease && p.start === q.start && p.end === q.end && p.focus?.x === q.focus?.x && p.focus?.y === q.focus?.y;
 }
 
+/** The split shot an item is a part of (a card never is). */
+const shotOf = (item: TimelineItem): string | undefined => (isCard(item) ? undefined : item.splitFrom?.item);
+
 /** The parts of each split shot: runs of two or more items next to each other with the same `splitFrom.item` (indices, inclusive). */
 export function splitShots(items: TimelineItem[]): { from: number; to: number }[] {
   const out: { from: number; to: number }[] = [];
   for (let i = 0; i < items.length; ) {
-    const shot = items[i].splitFrom?.item;
+    const shot = shotOf(items[i]);
     let j = i;
-    while (shot !== undefined && j + 1 < items.length && items[j + 1].splitFrom?.item === shot) j++;
+    while (shot !== undefined && j + 1 < items.length && shotOf(items[j + 1]) === shot) j++;
     if (j > i) out.push({ from: i, to: j });
     i = j + 1;
   }
@@ -104,7 +107,7 @@ export function moveClocks(laid: LaidItem[], fps: number): (MoveClock | undefine
   const out: (MoveClock | undefined)[] = laid.map(() => undefined);
   for (const { from, to } of splitShots(laid.map((l) => l.item))) {
     const parts = laid.slice(from, to + 1);
-    const m = parts[0].item.splitFrom!.move;
+    const m = (parts[0].item as ClipItem).splitFrom!.move;
     const offsets: number[] = [];
     const srcStarts: number[] = [];
     let frames = 0;
@@ -125,7 +128,7 @@ export function moveClocks(laid: LaidItem[], fps: number): (MoveClock | undefine
     const end = m.end === undefined ? undefined : Math.round(m.end * fps);
     const b = end === undefined ? frames : end <= 0 ? 0 : at(end - 1) + 1;
     parts.forEach((p, k) => {
-      if (sameMove(p.item.move, m)) out[from + k] = { a: a - offsets[k], b: b - offsets[k] };
+      if (sameMove((p.item as ClipItem).move, m)) out[from + k] = { a: a - offsets[k], b: b - offsets[k] };
     });
   }
   return out;
@@ -137,7 +140,7 @@ export function moveClocks(laid: LaidItem[], fps: number): (MoveClock | undefine
  * eased progress in slot 0 (st(0)); `zoom`, `x` and `y` read it back (ld(0)), so each goes after `e` in the same
  * expression: `${e};${zoom}`.
  */
-export function moveExprs(item: TimelineItem, frames: number, fps: number, n: string, first = 0, clock?: MoveClock): { e: string; zoom: string; x: string; y: string } {
+export function moveExprs(item: ClipItem, frames: number, fps: number, n: string, first = 0, clock?: MoveClock): { e: string; zoom: string; x: string; y: string } {
   const { z0, z1, x0, x1, y0, y1, a, b } = moveSpan(item, frames, fps, clock);
   const f = ffNum;
   const at = a + first;

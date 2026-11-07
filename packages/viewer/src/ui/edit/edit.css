@@ -359,6 +359,33 @@
   height: 100%;
   object-fit: cover;
 }
+/* A card is black on screen: the tile is too, with its text (or picture's name) in it. */
+.tl-picture[data-card] {
+  background: #000;
+}
+.tl-picture__card {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  overflow: hidden;
+  color: #fff;
+  font-size: var(--md-sys-typescale-label-small-size);
+  line-height: var(--md-sys-typescale-label-small-line-height);
+  font-weight: var(--md-sys-typescale-label-small-weight);
+  letter-spacing: var(--md-sys-typescale-label-small-tracking);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tl-picture[data-card='mono'] .tl-picture__card {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+.tl-picture[data-card='bold'] .tl-picture__card {
+  font-weight: 800;
+}
 .tl-picture[data-quiet]::after {
   content: '';
   position: absolute;

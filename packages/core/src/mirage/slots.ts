@@ -1,9 +1,16 @@
-import type { Catalog, Episode, Slot } from '@wordedits/shared';
+import { isCard, type Catalog, type Episode, type Slot, type TimelineItem } from '@wordedits/shared';
 import { MirageError } from './errors.js';
 import { speechWords } from './overlays.js';
 import { itemsFingerprint, layoutTimeline, timelineDuration } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * What an item shows of its source: a clip item its clip from `in` to `out` at its speed; a card its own time, 0 to
+ * `sec` at speed 1, with no clip (slots run over cards: they are picture time).
+ */
+const shown = (item: TimelineItem): { in: number; out: number; speed: number; clip?: string } =>
+  isCard(item) ? { in: 0, out: item.card.sec, speed: 1 } : { in: item.src.in, out: item.src.out, speed: item.speed, clip: item.clip };
 
 export function computeSlots(ep: Episode, catalog: Catalog, o: { minLen?: number; pad?: number; wpm?: number } = {}): Slot[] {
   const minLen = o.minLen ?? 2.5;
@@ -72,7 +79,11 @@ export type SlotsCut = NonNullable<Episode['slotsCut']>;
 export function cutOf(ep: Episode): SlotsCut {
   return {
     fingerprint: itemsFingerprint(ep.items),
-    items: layoutTimeline(ep).map((l) => ({ id: l.item.id, start: r3(l.start), end: r3(l.end), in: l.item.src.in, speed: l.item.speed, clip: l.item.clip, out: l.item.src.out })),
+    items: layoutTimeline(ep).map((l) => {
+      const at = { id: l.item.id, start: r3(l.start), end: r3(l.end) };
+      const s = shown(l.item);
+      return s.clip === undefined ? { ...at, in: s.in, speed: s.speed, out: s.out } : { ...at, in: s.in, speed: s.speed, clip: s.clip, out: s.out };
+    }),
   };
 }
 
@@ -100,9 +111,10 @@ function follow(span: Span, was: SlotsCut, ep: Episode): Span | null {
   const laid = layoutTimeline(ep);
   const pieces: [number, number][] = [];
   const place = (l: (typeof laid)[number], a: number, b: number) => {
-    const x = Math.max(a, l.item.src.in);
-    const y = Math.min(b, l.item.src.out);
-    if (y - x > 1e-6) pieces.push([l.start + (x - l.item.src.in) / l.item.speed, l.start + (y - l.item.src.in) / l.item.speed]);
+    const s = shown(l.item);
+    const x = Math.max(a, s.in);
+    const y = Math.min(b, s.out);
+    if (y - x > 1e-6) pieces.push([l.start + (x - s.in) / s.speed, l.start + (y - s.in) / s.speed]);
   };
   for (const o of was.items) {
     const a = Math.max(span.start, o.start);
@@ -113,15 +125,17 @@ function follow(span: Span, was: SlotsCut, ep: Episode): Span | null {
     const [sa, sb] = [srcAt(a), srcAt(b)];
     const same = laid.find((l) => l.item.id === o.id);
     let rest: [number, number][] = [[sa, sb]];
-    if (same && (o.clip === undefined || same.item.clip === o.clip)) {
+    // A card (no clip) follows the card with its id.
+    if (same && (o.clip === undefined || shown(same.item).clip === o.clip)) {
+      const s = shown(same.item);
       place(same, sa, sb);
-      rest = [[sa, Math.min(sb, same.item.src.in)], [Math.max(sa, same.item.src.out), sb]].filter(([x, y]) => y - x > 1e-6) as [number, number][];
+      rest = [[sa, Math.min(sb, s.in)], [Math.max(sa, s.out), sb]].filter(([x, y]) => y - x > 1e-6) as [number, number][];
     }
     if (o.clip === undefined) continue;
     for (const [x, y] of rest) {
-      const overlap = (l: (typeof laid)[number]) => Math.min(y, l.item.src.out) - Math.max(x, l.item.src.in);
+      const overlap = (l: (typeof laid)[number]) => Math.min(y, shown(l.item).out) - Math.max(x, shown(l.item).in);
       const best = laid
-        .filter((l) => l.item.clip === o.clip && l.item.id !== o.id && overlap(l) > 1e-6)
+        .filter((l) => shown(l.item).clip === o.clip && l.item.id !== o.id && overlap(l) > 1e-6)
         .sort((p, q) => overlap(q) - overlap(p) || Math.abs(p.start - o.start) - Math.abs(q.start - o.start))[0];
       if (best) place(best, x, y);
     }

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
-import { MusicLibrarySchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type MusicTrack, type TimelineItem } from '@wordedits/shared';
+import { isCard, MusicLibrarySchema, type Catalog, type ClipItem, type Episode, type MusicCue, type MusicLibrary, type MusicTrack } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 import { errorReason, MirageError } from './errors.js';
@@ -138,7 +138,7 @@ async function analyzeLocked(root: string, tools: MediaTools): Promise<LibraryRe
  * within the clip's video; when the clip runs out, the item is slowed — except an item that keeps its live audio, which
  * only plays at its own speed: it takes the nearest beat its footage reaches instead.
  */
-function snapItem(item: TimelineItem, t: number, oldDur: number, cue: MusicCue, beat: number, fps: number, catalog: Catalog): TimelineItem | null {
+function snapItem(item: ClipItem, t: number, oldDur: number, cue: MusicCue, beat: number, fps: number, catalog: Catalog): ClipItem | null {
   const probe = catalog.clips.find((c) => c.id === item.clip)?.probe;
   const avail = (probe ? (probe.videoDurationSec ?? probe.durationSec) : item.src.out) - item.src.in;
   if (!(avail > 0)) return null;
@@ -172,7 +172,7 @@ function snapItem(item: TimelineItem, t: number, oldDur: number, cue: MusicCue, 
 
 /**
  * Starts each cue on a beat of its track, then ends every onBeat item on a beat of the cue playing under
- * it (extending the source, or slowing it when the clip runs out; see snapItem). Item ends are snapped to the cue's
+ * it (extending the source, or slowing it when the clip runs out; see snapItem); cards are left alone. Item ends are snapped to the cue's
  * beat grid, not given a rounded duration, so frame rounding never accumulates into drift.
  * Everything after a changed item shifts with it. An episode with a fitted voice-over is returned unchanged.
  */
@@ -190,14 +190,14 @@ export function snapToBeats(ep: Episode, catalog: Catalog, lib: MusicLibrary): E
       return { ...c, offset: r6(t.beatOffset + k * beat) };
     }),
   };
-  if (cur.music.every((c, i) => c.offset === ep.music[i].offset) && !ep.items.some((it) => it.onBeat)) return ep;
+  if (cur.music.every((c, i) => c.offset === ep.music[i].offset) && !ep.items.some((it) => !isCard(it) && it.onBeat)) return ep;
 
   const fps = ep.output.fps;
   let t = 0;
   for (let i = 0; i < cur.items.length; i++) {
     const item = cur.items[i];
     const oldDur = itemFrames(item, fps).frames / fps;
-    if (item.onBeat) {
+    if (!isCard(item) && item.onBeat) {
       const cue = cur.music.find((c) => t >= c.start - 1e-6 && t < c.end);
       const tr = cue ? track(cue.track) : undefined;
       if (cue && tr?.bpm && tr.beatOffset !== null) {

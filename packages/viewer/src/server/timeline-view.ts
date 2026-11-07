@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { join, resolve } from 'node:path';
-import { layoutTimeline, timelineDuration } from '@wordedits/core';
-import { CatalogSchema, EpisodeSchema, type Catalog } from '@wordedits/shared';
+import { cardLabel, layoutTimeline, timelineDuration } from '@wordedits/core';
+import { CatalogSchema, EpisodeSchema, isCard, type Catalog } from '@wordedits/shared';
 import type { TimelineView } from '../view-types.js';
 import { mediaPath } from './media.js';
 
@@ -30,7 +30,8 @@ function thumbFor(project: string, catalog: Catalog | null, clipId: string, src:
 /**
  * The timeline as the page draws it, from the raw text of episode.json and catalog.json (null = no such file). A missing
  * episode is `empty`. One that doesn't parse or fails its schema (Claude is writing it) is `editing` and shows `previous`'s
- * lists, else empty ones. A catalog that is missing or broken only means no thumbnails.
+ * lists, else empty ones. A catalog that is missing or broken only means no thumbnails. A card shows its text (or its
+ * picture's file name), never a thumbnail.
  */
 export function buildTimelineView(project: string, raw: { episode: string | null; catalog: string | null }, previous: TimelineView | null): TimelineView {
   if (raw.episode === null) return emptyView('empty');
@@ -43,16 +44,20 @@ export function buildTimelineView(project: string, raw: { episode: string | null
     status: 'ok',
     title: ep.title,
     durationSec: timelineDuration(ep),
-    items: layoutTimeline(ep).map(({ item, start, end }) => ({
-      id: item.id,
-      beat: item.beat,
-      clip: item.clip,
-      start,
-      end,
-      thumb: thumbFor(project, catalog, item.clip, item.src),
-      quiet: item.quiet,
-      speed: item.speed,
-    })),
+    items: layoutTimeline(ep).map(({ item, start, end }) =>
+      isCard(item)
+        ? { id: item.id, beat: item.beat, card: { style: item.card.style, label: cardLabel(item) }, start, end, thumb: null, quiet: item.quiet, speed: 1 }
+        : {
+            id: item.id,
+            beat: item.beat,
+            clip: item.clip,
+            start,
+            end,
+            thumb: thumbFor(project, catalog, item.clip, item.src),
+            quiet: item.quiet,
+            speed: item.speed,
+          },
+    ),
     overlays: ep.overlays.map((o) => ({ kind: o.kind, text: o.text, tone: o.tone, start: o.start, end: o.end })),
     music: ep.music.map((m) => ({ track: m.track, start: m.start, end: m.end })),
     slots: ep.slots.map((s) => ({ id: s.id, start: s.start, end: s.end, line: s.line, maxWords: s.maxWords })),

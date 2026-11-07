@@ -133,12 +133,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve13, reject) {
+        return new Promise(function(resolve14, reject) {
           isexe(path6, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve13(is);
+              resolve14(is);
             }
           });
         });
@@ -204,27 +204,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve13, reject) => {
+      const step = (i2) => new Promise((resolve14, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve13(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve14(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path6.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve13(subStep(p, i2, 0));
+        resolve14(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve13, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve14, reject) => {
         if (ii === pathExt.length)
-          return resolve13(step(i2 + 1));
+          return resolve14(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve13(p + ext);
+              return resolve14(p + ext);
           }
-          return resolve13(subStep(p, i2, ii + 1));
+          return resolve14(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -3487,7 +3487,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve13.call(this, root, ref);
+      let _sch = resolve14.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3514,7 +3514,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s13, s22) {
       return s13.schema === s22.schema && s13.root === s22.root && s13.baseId === s22.baseId;
     }
-    function resolve13(root, ref) {
+    function resolve14(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -4378,7 +4378,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve13(baseURI, relativeURI, options) {
+    function resolve14(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4769,7 +4769,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve13,
+      resolve: resolve14,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -7759,7 +7759,7 @@ var require_dist = __commonJS({
 });
 
 // packages/mcp/src/main.ts
-import { resolve as resolve12 } from "node:path";
+import { resolve as resolve13 } from "node:path";
 
 // node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.2_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -12790,7 +12790,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve13) {
+function isRecursive(inst, stack, resolve14) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -12800,7 +12800,7 @@ function isRecursive(inst, stack, resolve13) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve13);
+      const answer = isRecursive(child, stack, resolve14);
       if (answer > result)
         result = answer;
     }
@@ -12811,7 +12811,7 @@ function isRecursive(inst, stack, resolve13) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve13) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve14) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -12875,7 +12875,7 @@ function isRecursive(inst, stack, resolve13) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve13 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve14 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -29056,12 +29056,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve13) => {
+    return new Promise((resolve14) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve13();
+        resolve14();
       } else {
-        this._stdout.once("drain", resolve13);
+        this._stdout.once("drain", resolve14);
       }
     });
   }
@@ -30690,8 +30690,8 @@ var disconnect = (anyProcess) => {
 // node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve13, reject) => {
-    Object.assign(methods, { resolve: resolve13, reject });
+  const promise2 = new Promise((resolve14, reject) => {
+    Object.assign(methods, { resolve: resolve14, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -35334,11 +35334,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve13 = promise2.resolve.bind(promise2);
-  return { resolve: resolve13, promises };
+  const resolve14 = promise2.resolve.bind(promise2);
+  return { resolve: resolve14, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve13, promises }, subprocess) => {
-  resolve13();
+var waitForConcurrentStreams = async ({ resolve: resolve14, promises }, subprocess) => {
+  resolve14();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -36203,7 +36203,7 @@ var MoveSchema = strictObject2({
   start: external_exports.number().min(0).optional(),
   end: external_exports.number().positive().optional()
 }).refine((m) => m.start === void 0 || m.end === void 0 || m.end > m.start, { message: "move: end must be after start" });
-var TimelineItemSchema = strictObject2({
+var ClipItemSchema = strictObject2({
   id: external_exports.string().min(1),
   beat: BeatSchema,
   clip: external_exports.string().min(1),
@@ -36240,6 +36240,33 @@ var TimelineItemSchema = strictObject2({
 }).superRefine((it, ctx) => {
   if (it.src.out <= it.src.in) ctx.addIssue({ code: "custom", path: ["src"], message: `item ${it.id}: src.out must be greater than src.in` });
 });
+var isProjectPath = (p) => !/^[\\/]/.test(p) && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes("..");
+var CardItemSchema = strictObject2({
+  id: external_exports.string().min(1),
+  beat: BeatSchema,
+  card: strictObject2({
+    text: external_exports.string().default(""),
+    style: external_exports.enum(["mono", "bold", "image"]),
+    sec: external_exports.number().min(0.5).max(30),
+    /** The picture of an `image` card: a path inside the project to a PNG or JPEG. */
+    image: external_exports.string().min(1).optional()
+  }),
+  /** Seconds the card stays on longer (set by voice-over fitting, which never splits a card). */
+  hold: external_exports.number().min(0).max(10).default(0),
+  /** No narration over this card. */
+  quiet: external_exports.boolean().default(false)
+}).superRefine((it, ctx) => {
+  const c3 = it.card;
+  if (c3.style === "image") {
+    if (c3.image === void 0) ctx.addIssue({ code: "custom", path: ["card", "image"], message: `item ${it.id}: an image card needs an image (a PNG or JPEG in the project)` });
+    else if (!isProjectPath(c3.image)) ctx.addIssue({ code: "custom", path: ["card", "image"], message: `item ${it.id}: card image ${c3.image} must be a path inside the project (no .., not absolute)` });
+  } else {
+    if (c3.image !== void 0) ctx.addIssue({ code: "custom", path: ["card", "image"], message: `item ${it.id}: only an image card takes an image (style is ${c3.style})` });
+    if (!c3.text.trim()) ctx.addIssue({ code: "custom", path: ["card", "text"], message: `item ${it.id}: a ${c3.style} card needs text` });
+  }
+});
+var TimelineItemSchema = external_exports.union([ClipItemSchema, CardItemSchema]);
+var isCard = (item) => "card" in item;
 var OverlaySchema = range(
   {
     kind: external_exports.enum(["callout", "counter", "badge", "label", "chapter", "before", "after"]),
@@ -37209,7 +37236,17 @@ function describeZodError(e) {
   const at2 = issuePath(issue2.path);
   return `${at2 ? `${at2}: ` : ""}${issue2.message}`;
 }
-var firstIssue = (e) => e.issues.find((i2) => i2.code === "unrecognized_keys") ?? e.issues[0];
+function flatIssues(issues) {
+  return issues.flatMap((i2) => {
+    if (i2.code !== "invalid_union" || !("errors" in i2) || !i2.errors.length) return [i2];
+    const branch = i2.errors.find((b) => !b.some((x) => x.code === "unrecognized_keys" && x.path.length === 0)) ?? i2.errors[0];
+    return flatIssues(branch.map((x) => ({ ...x, path: [...i2.path, ...x.path] })));
+  });
+}
+var firstIssue = (e) => {
+  const issues = flatIssues(e.issues);
+  return issues.find((i2) => i2.code === "unrecognized_keys") ?? issues[0];
+};
 var UNKNOWN_KEY_HINT = "Remove or rename that key (a misspelled key would be ignored).";
 function schemaError(display, e, hint) {
   return new JsonFileError(display, describeZodError(e), firstIssue(e).code === "unrecognized_keys" ? UNKNOWN_KEY_HINT : hint);
@@ -37336,12 +37373,13 @@ function sameMove(p, q) {
   if (!p || !q) return p === q;
   return p.zoom === q.zoom && p.ease === q.ease && p.start === q.start && p.end === q.end && p.focus?.x === q.focus?.x && p.focus?.y === q.focus?.y;
 }
+var shotOf = (item) => isCard(item) ? void 0 : item.splitFrom?.item;
 function splitShots(items) {
   const out = [];
   for (let i2 = 0; i2 < items.length; ) {
-    const shot = items[i2].splitFrom?.item;
+    const shot = shotOf(items[i2]);
     let j = i2;
-    while (shot !== void 0 && j + 1 < items.length && items[j + 1].splitFrom?.item === shot) j++;
+    while (shot !== void 0 && j + 1 < items.length && shotOf(items[j + 1]) === shot) j++;
     if (j > i2) out.push({ from: i2, to: j });
     i2 = j + 1;
   }
@@ -37397,7 +37435,7 @@ function moveExprs(item, frames, fps, n2, first = 0, clock) {
 
 // packages/core/src/mirage/timeline.ts
 function itemFrames(item, fps) {
-  const srcFrames = Math.max(1, Math.round((item.src.out - item.src.in) / item.speed * fps));
+  const srcFrames = isCard(item) ? Math.max(1, Math.round(item.card.sec * fps)) : Math.max(1, Math.round((item.src.out - item.src.in) / item.speed * fps));
   const holdFrames = Math.round(item.hold * fps);
   return { srcFrames, holdFrames, frames: srcFrames + holdFrames };
 }
@@ -37416,7 +37454,7 @@ function layoutTimeline(ep) {
   return laid;
 }
 function itemsFingerprint(items) {
-  const key = items.map((i2) => [i2.id, i2.clip, i2.src.in, i2.src.out, i2.speed, i2.hold]);
+  const key = items.map((i2) => isCard(i2) ? ["card", i2.id, i2.card.sec, i2.hold] : [i2.id, i2.clip, i2.src.in, i2.src.out, i2.speed, i2.hold]);
   return createHash("sha256").update(JSON.stringify(key)).digest("hex").slice(0, 16);
 }
 function timelineDuration(ep) {
@@ -38169,13 +38207,13 @@ function snapToBeats(ep, catalog, lib) {
       return { ...c3, offset: r6(t2.beatOffset + k * beat) };
     })
   };
-  if (cur.music.every((c3, i2) => c3.offset === ep.music[i2].offset) && !ep.items.some((it) => it.onBeat)) return ep;
+  if (cur.music.every((c3, i2) => c3.offset === ep.music[i2].offset) && !ep.items.some((it) => !isCard(it) && it.onBeat)) return ep;
   const fps = ep.output.fps;
   let t = 0;
   for (let i2 = 0; i2 < cur.items.length; i2++) {
     const item = cur.items[i2];
     const oldDur = itemFrames(item, fps).frames / fps;
-    if (item.onBeat) {
+    if (!isCard(item) && item.onBeat) {
       const cue = cur.music.find((c3) => t >= c3.start - 1e-6 && t < c3.end);
       const tr = cue ? track(cue.track) : void 0;
       if (cue && tr?.bpm && tr.beatOffset !== null) {
@@ -38340,7 +38378,7 @@ function speechWords(ep, catalog, vo) {
   const out = [];
   for (const l of layoutTimeline(ep)) {
     const { item } = l;
-    if (item.audio !== "keep" || item.speed !== 1) continue;
+    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
     const words = catalog.clips.find((c3) => c3.id === item.clip)?.transcript?.words ?? [];
     const srcEnd = item.src.in + l.srcFrames / fps;
     for (const w of words) {
@@ -38716,6 +38754,7 @@ function sfxVolumeDb(level, targetLufs) {
 
 // packages/core/src/mirage/slots.ts
 var r36 = (n2) => Math.round(n2 * 1e3) / 1e3;
+var shown = (item) => isCard(item) ? { in: 0, out: item.card.sec, speed: 1 } : { in: item.src.in, out: item.src.out, speed: item.speed, clip: item.clip };
 function computeSlots(ep, catalog, o2 = {}) {
   const minLen = o2.minLen ?? 2.5;
   const pad2 = o2.pad ?? 0.3;
@@ -38764,7 +38803,11 @@ function mergeSlots(prev, next, where = (p) => p) {
 function cutOf(ep) {
   return {
     fingerprint: itemsFingerprint(ep.items),
-    items: layoutTimeline(ep).map((l) => ({ id: l.item.id, start: r36(l.start), end: r36(l.end), in: l.item.src.in, speed: l.item.speed, clip: l.item.clip, out: l.item.src.out }))
+    items: layoutTimeline(ep).map((l) => {
+      const at2 = { id: l.item.id, start: r36(l.start), end: r36(l.end) };
+      const s = shown(l.item);
+      return s.clip === void 0 ? { ...at2, in: s.in, speed: s.speed, out: s.out } : { ...at2, in: s.in, speed: s.speed, clip: s.clip, out: s.out };
+    })
   };
 }
 function slotsStale(ep) {
@@ -38782,9 +38825,10 @@ function follow(span, was, ep) {
   const laid = layoutTimeline(ep);
   const pieces = [];
   const place = (l, a2, b) => {
-    const x2 = Math.max(a2, l.item.src.in);
-    const y2 = Math.min(b, l.item.src.out);
-    if (y2 - x2 > 1e-6) pieces.push([l.start + (x2 - l.item.src.in) / l.item.speed, l.start + (y2 - l.item.src.in) / l.item.speed]);
+    const s = shown(l.item);
+    const x2 = Math.max(a2, s.in);
+    const y2 = Math.min(b, s.out);
+    if (y2 - x2 > 1e-6) pieces.push([l.start + (x2 - s.in) / s.speed, l.start + (y2 - s.in) / s.speed]);
   };
   for (const o2 of was.items) {
     const a2 = Math.max(span.start, o2.start);
@@ -38794,14 +38838,15 @@ function follow(span, was, ep) {
     const [sa, sb] = [srcAt(a2), srcAt(b)];
     const same = laid.find((l) => l.item.id === o2.id);
     let rest = [[sa, sb]];
-    if (same && (o2.clip === void 0 || same.item.clip === o2.clip)) {
+    if (same && (o2.clip === void 0 || shown(same.item).clip === o2.clip)) {
+      const s = shown(same.item);
       place(same, sa, sb);
-      rest = [[sa, Math.min(sb, same.item.src.in)], [Math.max(sa, same.item.src.out), sb]].filter(([x2, y2]) => y2 - x2 > 1e-6);
+      rest = [[sa, Math.min(sb, s.in)], [Math.max(sa, s.out), sb]].filter(([x2, y2]) => y2 - x2 > 1e-6);
     }
     if (o2.clip === void 0) continue;
     for (const [x2, y2] of rest) {
-      const overlap = (l) => Math.min(y2, l.item.src.out) - Math.max(x2, l.item.src.in);
-      const best = laid.filter((l) => l.item.clip === o2.clip && l.item.id !== o2.id && overlap(l) > 1e-6).sort((p, q) => overlap(q) - overlap(p) || Math.abs(p.start - o2.start) - Math.abs(q.start - o2.start))[0];
+      const overlap = (l) => Math.min(y2, shown(l.item).out) - Math.max(x2, shown(l.item).in);
+      const best = laid.filter((l) => shown(l.item).clip === o2.clip && l.item.id !== o2.id && overlap(l) > 1e-6).sort((p, q) => overlap(q) - overlap(p) || Math.abs(p.start - o2.start) - Math.abs(q.start - o2.start))[0];
       if (best) place(best, x2, y2);
     }
   }
@@ -38899,6 +38944,13 @@ function openAt(ep, catalog, t, delta) {
   const srcEnd = l.start + l.srcFrames / fps;
   const atBoundary = Math.abs(l.end - t) < half || t > l.end;
   const splitFrames = Math.max(1, Math.round((t - l.start) * fps));
+  if (isCard(item)) {
+    const at3 = atBoundary ? l.end : t;
+    const next = checkHold({ ...item, hold: r62(item.hold + delta) });
+    items[l.index] = next;
+    const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
+    return { episode: { ...shiftAfter(ep, at3, grown), items }, hold: { at: r62(at3), sec: r62(grown), item: item.id, hold: r62(next.hold - item.hold) } };
+  }
   if (atBoundary) {
     const clipDur = catalog.clips.find((c3) => c3.id === item.clip)?.probe.durationSec ?? item.src.out;
     const available = Math.max(0, (clipDur - item.src.out) / item.speed);
@@ -38934,7 +38986,18 @@ function undoFitEdits(ep) {
     const i2 = out.items.findIndex((x) => x.id === h2.item);
     if (i2 < 0) continue;
     const laid = layoutTimeline(out);
-    const item = out.items[i2];
+    const it = out.items[i2];
+    if (isCard(it)) {
+      const next2 = { ...it, hold: r62(Math.max(0, it.hold - (h2.hold ?? 0))) };
+      const removed2 = (laid[i2].frames - itemFrames(next2, fps).frames) / fps;
+      const items3 = [...out.items];
+      items3[i2] = next2;
+      const { start, end: end2 } = laid[i2];
+      const close = h2.at >= start - 1e-6 && h2.at + removed2 <= end2 + 1e-6 ? h2.at + removed2 : end2;
+      out = { ...removed2 > 1e-9 ? shiftAfter(out, close, -removed2) : out, items: items3 };
+      continue;
+    }
+    const item = it;
     let next = { ...item, hold: r62(Math.max(0, item.hold - (h2.hold ?? 0))) };
     if (h2.outAdded && h2.out !== void 0 && Math.abs(item.src.out - h2.out) < 1e-6 && item.src.out - h2.outAdded > item.src.in) {
       next = { ...next, src: { in: item.src.in, out: r62(item.src.out - h2.outAdded) } };
@@ -38942,7 +39005,8 @@ function undoFitEdits(ep) {
     const items2 = [...out.items];
     const end = laid[i2].end;
     let frames = laid[i2].frames;
-    const b = out.items[i2 + 1];
+    const after = out.items[i2 + 1];
+    const b = after && !isCard(after) ? after : void 0;
     const same = (k) => b !== void 0 && b[k] === item[k];
     const sameFocus = b !== void 0 && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
     const asSplit = (x) => sameMove(x.move, x.splitFrom?.move);
@@ -38957,8 +39021,9 @@ function undoFitEdits(ep) {
     out = { ...removed > 1e-9 ? shiftAfter(out, end, -removed) : out, items: items2 };
   }
   const items = out.items;
-  const alone = (i2) => !items[i2].splitFrom || ![items[i2 - 1], items[i2 + 1]].some((x) => x?.splitFrom?.item === items[i2].splitFrom.item);
-  out = { ...out, items: items.map((x, i2) => x.splitFrom && alone(i2) ? withoutSplit(x) : x) };
+  const shot = (x) => x && !isCard(x) ? x.splitFrom?.item : void 0;
+  const alone = (i2) => ![items[i2 - 1], items[i2 + 1]].some((x) => shot(x) === shot(items[i2]));
+  out = { ...out, items: items.map((x, i2) => !isCard(x) && x.splitFrom && alone(i2) ? withoutSplit(x) : x) };
   return dropCollapsed(out, ep);
 }
 function withoutSplit(item) {
@@ -38967,6 +39032,9 @@ function withoutSplit(item) {
 }
 var LOOK = ["beat", "zoom", "frame", "focus", "move", "quiet", "onBeat"];
 function withLook(base, now) {
+  if (isCard(base) || isCard(now)) {
+    return isCard(base) && isCard(now) ? { ...base, beat: now.beat, quiet: now.quiet, card: { ...now.card, sec: base.card.sec } } : base;
+  }
   const out = { ...base };
   for (const k of LOOK) {
     if (now[k] === void 0) delete out[k];
@@ -39238,6 +39306,7 @@ var pad3 = (i2) => String(i2).padStart(3, "0");
 function sourcesFor(ep, catalog) {
   const map2 = /* @__PURE__ */ new Map();
   for (const item of ep.items) {
+    if (isCard(item)) continue;
     const clip = catalog.clips.find((c3) => c3.id === item.clip);
     if (!clip) throw new MirageError("BAD_ITEM", `item ${item.id}: clip ${item.clip} is not in the catalog`, "Run ingest, or fix the clip id in episode.json.");
     if (item.src.out > clip.probe.durationSec + 0.05) {
@@ -39296,8 +39365,7 @@ function framed(frame, at2, o2, k) {
   }
   return `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`;
 }
-function moveFilters(l, k, o2, src) {
-  const { item } = l;
+function moveFilters(l, item, k, o2, src) {
   const { width: W, height: H } = o2;
   const fill = item.frame === "fill";
   const zMax = Math.max(item.zoom, item.move.zoom);
@@ -39316,6 +39384,14 @@ function itemChunkArgs(laid, o2, sources, output2) {
   const labels = [];
   laid.forEach((l, k) => {
     const { item } = l;
+    const dur = ffNum(l.frames / o2.fps);
+    const silence = `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`;
+    if (isCard(item)) {
+      inputs.push("-f", "lavfi", "-i", `color=c=black:s=${o2.width}x${o2.height}:r=${ffNum(o2.fps)}:d=${ffNum((l.frames + 1) / o2.fps)}`);
+      chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
+      labels.push(`[v${k}][a${k}]`);
+      return;
+    }
     const src = sources.get(item.clip);
     inputs.push("-threads", item.speed <= 1 ? "1" : "4");
     if (item.src.in < (src.videoStartSec ?? 0)) inputs.push(...item.src.in > 0 ? ["-itsoffset", ffNum(-item.src.in)] : [], "-i", src.path);
@@ -39325,13 +39401,12 @@ function itemChunkArgs(laid, o2, sources, output2) {
     const head = `[${k}:v]setpts=(PTS-${frameTolerance(o2.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o2.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},`;
     const hold = `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},`;
     chains.push(
-      item.move ? `${head}${hold}${moveFilters(l, k, o2, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]` : `${head}${zoom}${framed(item.frame, at2, o2, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`
+      item.move ? `${head}${hold}${moveFilters(l, item, k, o2, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]` : `${head}${zoom}${framed(item.frame, at2, o2, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`
     );
-    const dur = ffNum(l.frames / o2.fps);
     if (item.audio === "keep" && item.speed === 1 && src.hasAudio) {
       chains.push(`[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o2.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
     } else {
-      chains.push(`anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`);
+      chains.push(silence);
     }
     labels.push(`[v${k}][a${k}]`);
   });
@@ -39369,7 +39444,7 @@ function previewSize(width, height) {
   return [even2(width), even2(height)];
 }
 function chunkTimeoutMs(chunk, fps) {
-  const srcSec = chunk.reduce((s, l) => s + (l.item.src.out - l.item.src.in), 0);
+  const srcSec = chunk.reduce((s, l) => s + (isCard(l.item) ? 0 : l.item.src.out - l.item.src.in), 0);
   const outSec = chunk.reduce((s, l) => s + l.frames / fps, 0);
   return Math.round(Math.max(120, srcSec * 3 + outSec * 30) * 1e3);
 }
@@ -39692,7 +39767,7 @@ async function renderLocked(o2) {
         musicWav,
         voiceRaw,
         sfxWav,
-        liveAudio: laid.some((l) => l.item.audio === "keep" && l.item.speed === 1 && sources.get(l.item.clip).hasAudio)
+        liveAudio: laid.some((l) => !isCard(l.item) && l.item.audio === "keep" && l.item.speed === 1 && sources.get(l.item.clip).hasAudio)
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(12e4, D * 20 * 1e3), signal: o2.signal, onProgress: (f) => report(0.7 + 0.3 * f) }
     );
@@ -40106,7 +40181,47 @@ async function speakNarration(o2) {
 }
 
 // packages/core/src/mirage/check.ts
-import { join as join14, resolve as resolve7 } from "node:path";
+import { join as join14, resolve as resolve8 } from "node:path";
+
+// packages/core/src/mirage/cards.ts
+import { closeSync, openSync, readSync, statSync as statSync4 } from "node:fs";
+import { resolve as resolve7 } from "node:path";
+function cardLabel(item) {
+  const text = item.card.text.trim().split("\n")[0].trim();
+  return text || (item.card.image ?? "").split(/[\\/]/).pop();
+}
+var CARD_IMAGE_HINT = "Put the picture in the project folder, or change the card's image.";
+var PNG = [137, 80, 78, 71, 13, 10, 26, 10];
+var JPEG = [255, 216, 255];
+function pngOrJpeg(file2) {
+  const head = Buffer.alloc(PNG.length);
+  const fd = openSync(file2, "r");
+  try {
+    const n2 = readSync(fd, head, 0, head.length, 0);
+    const starts = (sig) => n2 >= sig.length && sig.every((b, i2) => head[i2] === b);
+    return starts(PNG) || starts(JPEG);
+  } finally {
+    closeSync(fd);
+  }
+}
+var cardImageFile = (project2, item) => resolve7(project2, item.card.image);
+function checkCardImages(project2, ep) {
+  for (const item of ep.items) {
+    if (!isCard(item) || item.card.style !== "image") continue;
+    const file2 = cardImageFile(project2, item);
+    const isFile2 = (() => {
+      try {
+        return statSync4(file2).isFile();
+      } catch {
+        return false;
+      }
+    })();
+    if (!isFile2) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} is missing`, CARD_IMAGE_HINT);
+    if (!pngOrJpeg(file2)) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} isn't a PNG or JPEG`, CARD_IMAGE_HINT);
+  }
+}
+
+// packages/core/src/mirage/check.ts
 var OLD_DEFAULT_GAIN_DB = -18;
 var s12 = (n2) => n2.toFixed(1);
 var s2 = (n2) => n2.toFixed(2);
@@ -40126,21 +40241,22 @@ function timelineWarnings(ep, lib, snapped) {
   const laid = layoutTimeline(ep);
   const shotAt = new Map(splitShots(ep.items).map((s) => [s.to, s]));
   for (const l of laid) {
-    const m = l.item.move;
+    const m = isCard(l.item) ? void 0 : l.item.move;
     if (m && !l.clock) moveWarning(l.item.id, m, l.frames);
     const shot = shotAt.get(l.index);
     if (!shot) continue;
     const parts = laid.slice(shot.from, shot.to + 1);
     if (!parts.some((p) => p.clock)) continue;
     const frames = parts.reduce((s, p) => s + p.srcFrames, 0) + l.holdFrames;
-    moveWarning(l.item.splitFrom.item, l.item.splitFrom.move, frames);
+    const { splitFrom } = l.item;
+    moveWarning(splitFrom.item, splitFrom.move, frames);
   }
   ep.music.forEach((c3, i2) => {
     if (c3.start >= D - 1e-6) out.push(`music cue ${i2 + 1} (${c3.track}) starts at ${s2(c3.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never play`);
   });
   if (snapped) {
     for (const l of layoutTimeline(ep)) {
-      if (!l.item.onBeat) continue;
+      if (isCard(l.item) || !l.item.onBeat) continue;
       const cue = ep.music.find((c3) => l.start >= c3.start - 1e-6 && l.start < c3.end);
       const track = cue && lib ? findTrack(lib, cue.track) : void 0;
       if (!cue) out.push(`item ${l.item.id} is onBeat but no music plays under it \u2014 left unsnapped`);
@@ -40187,10 +40303,11 @@ function timelineWarnings(ep, lib, snapped) {
 var MAX_SFX_PER_MINUTE = 6;
 var SFX_WINDOW_SEC = 60;
 async function checkEpisode(project2, n2, tools) {
-  const root = resolve7(project2);
+  const root = resolve8(project2);
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n2);
   sourcesFor(ep, catalog);
+  checkCardImages(root, ep);
   const warnings = [];
   const notes = [];
   const musicDir = join14(root, "music");
@@ -40206,7 +40323,7 @@ async function checkEpisode(project2, n2, tools) {
     if (!p?.hasAudio) throw unreadableSfx(`sfx ${k + 1}`, src.path);
   }
   if (ep.voiceover) {
-    if (ep.items.some((i2) => i2.onBeat) || ep.music.length) notes.push("Montages were not snapped to the beat: the voice-over is fitted to this cut.");
+    if (ep.items.some((i2) => !isCard(i2) && i2.onBeat) || ep.music.length) notes.push("Montages were not snapped to the beat: the voice-over is fitted to this cut.");
   } else if (lib) {
     const snapped = dropCollapsed(snapToBeats(ep, catalog, lib), ep);
     ep = snapped.episode;
@@ -40221,7 +40338,7 @@ async function checkEpisode(project2, n2, tools) {
   }
   warnings.push(...lineChangeWarnings(ep, "check"));
   for (const item of ep.items) {
-    if (item.audio !== "keep" || item.speed !== 1) continue;
+    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
     const clip = catalog.clips.find((c3) => c3.id === item.clip);
     if (clip?.probe.hasAudio && clip.transcript === null) {
       warnings.push(`item ${item.id} keeps audio from ${clip.id}, which has no transcript \u2014 narration slots and captions won't see its speech`);
@@ -40235,11 +40352,11 @@ async function checkEpisode(project2, n2, tools) {
 import { existsSync as existsSync10 } from "node:fs";
 import { mkdir as mkdir6, writeFile as writeFile6 } from "node:fs/promises";
 import { homedir as homedir4 } from "node:os";
-import { join as join15, resolve as resolve8 } from "node:path";
+import { join as join15, resolve as resolve9 } from "node:path";
 function resolveUserPath(p, base = process.env.INIT_CWD ?? process.cwd(), home = homedir4()) {
   if (p === "~") return home;
   if (p.startsWith("~/")) return join15(home, p.slice(2));
-  return resolve8(base, p);
+  return resolve9(base, p);
 }
 async function initProject(project2, title) {
   const file2 = join15(project2, "mirage.json");
@@ -40414,7 +40531,7 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
 // packages/core/src/mirage/session-files.ts
 import { readFileSync as readFileSync4 } from "node:fs";
 import { appendFile, link as link2, mkdir as mkdir8, readdir as readdir6, readFile as readFile8, rename as rename6, rm as rm11, stat as stat5, utimes, writeFile as writeFile8 } from "node:fs/promises";
-import { dirname as dirname6, join as join17, resolve as resolve9 } from "node:path";
+import { dirname as dirname6, join as join17, resolve as resolve10 } from "node:path";
 var SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 function checkSessionId(id) {
   if (!SESSION_ID.test(id) || id.includes("..")) throw new MirageError("BAD_INPUT", `"${id}" is not a session id`, "A session id is letters, digits, dots, dashes and underscores.");
@@ -40487,7 +40604,7 @@ async function readWrittenControl(project2, n2) {
 async function readControl(project2, n2) {
   return await readWrittenControl(project2, n2) ?? defaultControl();
 }
-var sessionStatePath = (project2, sessionId) => join17(resolve9(project2), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
+var sessionStatePath = (project2, sessionId) => join17(resolve10(project2), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
 var emptySession = () => ({ video: null, overnight: null, awakePid: null });
 async function readSessionState(project2, sessionId) {
   try {
@@ -40506,7 +40623,7 @@ async function writeSessionState(project2, sessionId, patch) {
 }
 function claudeProcessPath(project2, pid) {
   if (!Number.isInteger(pid) || pid <= 0) throw new MirageError("BAD_INPUT", `"${pid}" is not a process id`, "A process id is a whole number above 0.");
-  return join17(resolve9(project2), ".mirage", "claude", `${pid}.json`);
+  return join17(resolve10(project2), ".mirage", "claude", `${pid}.json`);
 }
 function readClaudeProcess(project2, pid) {
   try {
@@ -40519,11 +40636,11 @@ function readClaudeProcess(project2, pid) {
 
 // packages/core/src/mirage/video.ts
 import { access as access4, mkdir as mkdir9, readdir as readdir7 } from "node:fs/promises";
-import { join as join18, resolve as resolve10 } from "node:path";
+import { join as join18, resolve as resolve11 } from "node:path";
 var videoPath = (project2, n2) => join18(episodeDir(project2, n2), "video.json");
 async function newVideo(project2, v) {
   const video2 = VideoSchema.parse({ ...v, version: 1, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
-  const root = join18(resolve10(project2), "episodes");
+  const root = join18(resolve11(project2), "episodes");
   await mkdir9(root, { recursive: true });
   for (; ; ) {
     const highest = (await readdir7(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
@@ -40578,7 +40695,8 @@ function checkReport({ episode: ep, warnings, notes }) {
   const lines = [];
   for (const l of layoutTimeline(ep)) {
     const it = l.item;
-    lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${it.clip}  ${it.src.in.toFixed(2)}\u2013${it.src.out.toFixed(2)}  \xD7${it.speed}  ${l.start.toFixed(2)}\u2013${l.end.toFixed(2)}${it.quiet ? "  quiet" : ""}`);
+    const what = isCard(it) ? `card ${it.card.style} "${cardLabel(it)}"` : `${it.clip}  ${it.src.in.toFixed(2)}\u2013${it.src.out.toFixed(2)}  \xD7${it.speed}`;
+    lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${what}  ${l.start.toFixed(2)}\u2013${l.end.toFixed(2)}${it.quiet ? "  quiet" : ""}`);
   }
   lines.push(`total ${formatTime(timelineDuration(ep))} \xB7 ${ep.items.length} items \xB7 ${ep.overlays.length} overlays \xB7 ${ep.music.length} music cues${ep.sfx ? ` \xB7 ${ep.sfx.length} sound effects` : ""}`);
   for (const m of notes) lines.push(`\u2022 ${m}`);
@@ -40684,9 +40802,9 @@ function startFallbackViewer(project2) {
 }
 
 // packages/mcp/src/server.ts
-import { existsSync as existsSync12, readdirSync as readdirSync2, realpathSync, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync12, readdirSync as readdirSync2, realpathSync, statSync as statSync5 } from "node:fs";
 import { readdir as readdir9 } from "node:fs/promises";
-import { isAbsolute as isAbsolute2, join as join22, relative as relative2, resolve as resolve11, sep } from "node:path";
+import { isAbsolute as isAbsolute2, join as join22, relative as relative2, resolve as resolve12, sep } from "node:path";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v3/helpers/util.js
 var util;
@@ -46662,7 +46780,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve13) => setTimeout(resolve13, pollInterval));
+        await new Promise((resolve14) => setTimeout(resolve14, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error62) {
@@ -46679,7 +46797,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve13, reject) => {
+    return new Promise((resolve14, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -46757,7 +46875,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve13(parseResult.data);
+            resolve14(parseResult.data);
           }
         } catch (error62) {
           reject(error62);
@@ -47019,12 +47137,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve13, reject) => {
+    return new Promise((resolve14, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve13, interval);
+      const timeoutId = setTimeout(resolve14, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -48164,7 +48282,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve13) => setTimeout(resolve13, pollInterval));
+      await new Promise((resolve14) => setTimeout(resolve14, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -48857,7 +48975,7 @@ async function runLong(o2) {
 // packages/mcp/src/server.ts
 var SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 function newestSessionId(project2) {
-  const dir = join22(resolve11(project2), ".mirage", "sessions");
+  const dir = join22(resolve12(project2), ".mirage", "sessions");
   let best = null;
   let names;
   try {
@@ -48870,7 +48988,7 @@ function newestSessionId(project2) {
     if (!id || id === "unknown" || id.includes("..")) continue;
     let mtime;
     try {
-      mtime = statSync4(join22(dir, name)).mtimeMs;
+      mtime = statSync5(join22(dir, name)).mtimeMs;
     } catch {
       continue;
     }
@@ -48880,7 +48998,7 @@ function newestSessionId(project2) {
 }
 function footageProblem(folder, project2) {
   if (!existsSync12(folder)) return `\u2716 ${folder} does not exist`;
-  if (!statSync4(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
+  if (!statSync5(folder).isDirectory()) return `\u2716 ${folder} isn't a folder.`;
   const rel = relative2(realpathSync(folder), realpathSync(project2));
   if (rel === "" || rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute2(rel)) {
     return `\u2716 ${folder} holds this project. Make a new folder for the series, open Claude Code there, and add the clips folder from there.`;
@@ -48913,7 +49031,7 @@ var alive2 = (pid) => {
 var video = external_exports.number().int().positive().describe("The video number, e.g. 1");
 var MODES = { cut: "rough", guide: "guide", render: "final" };
 function createEngineServer(ctx) {
-  const project2 = resolve11(ctx.project);
+  const project2 = resolve12(ctx.project);
   const { tools } = ctx;
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
@@ -49149,7 +49267,7 @@ function createEngineServer(ctx) {
 }
 
 // packages/mcp/src/main.ts
-var project = resolve12(process.env.MIRAGE_PROJECT || process.cwd());
+var project = resolve13(process.env.MIRAGE_PROJECT || process.cwd());
 createEngineServer({ project, tools: await realMediaTools() }).connect(new StdioServerTransport()).catch((e) => {
   console.error(`mirage engine: ${e instanceof Error ? e.message : String(e)}`);
   process.exit(1);

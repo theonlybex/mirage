@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { EpisodeSchema, TranscriptSchema, type Catalog, type Episode, type MusicCue, type MusicLibrary, type SfxCue, type TimelineItem, type Transcript, type VoiceLine } from '@wordedits/shared';
+import { EpisodeSchema, isCard, TranscriptSchema, type Catalog, type ClipItem, type Episode, type MusicCue, type MusicLibrary, type SfxCue, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { encodeArgs, ffNum } from './encode.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
@@ -38,9 +38,11 @@ export interface ClipSource {
   height?: number;
 }
 
+/** The catalogued clip behind each clip item, checked (cards have no footage). */
 export function sourcesFor(ep: Episode, catalog: Catalog): Map<string, ClipSource> {
   const map = new Map<string, ClipSource>();
   for (const item of ep.items) {
+    if (isCard(item)) continue;
     const clip = catalog.clips.find((c) => c.id === item.clip);
     if (!clip) throw new MirageError('BAD_ITEM', `item ${item.id}: clip ${item.clip} is not in the catalog`, 'Run ingest, or fix the clip id in episode.json.');
     if (item.src.out > clip.probe.durationSec + 0.05) {
@@ -110,7 +112,7 @@ const lufs = (n: number) => ffNum(Math.min(-5, Math.max(-70, n)));
 export const frameTolerance = (fps: number) => ffNum(1 / (4 * fps));
 
 /** A crop's offset that keeps `focus` in view; nothing for the centre (crop's own default). */
-function cropAt(focus: TimelineItem['focus']): string {
+function cropAt(focus: ClipItem['focus']): string {
   return Math.abs(focus.x - 0.5) < 1e-6 && Math.abs(focus.y - 0.5) < 1e-6 ? '' : `:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)}`;
 }
 
@@ -118,7 +120,7 @@ function cropAt(focus: TimelineItem['focus']): string {
  * Filters that bring a picture of any shape to the output size: fit letterboxes it, fill crops it around the focus,
  * blur puts it over a copy of itself filled, blurred and darkened (blurred at an eighth of the area, so it stays cheap).
  */
-function framed(frame: TimelineItem['frame'], at: string, o: { width: number; height: number }, k: number): string {
+function framed(frame: ClipItem['frame'], at: string, o: { width: number; height: number }, k: number): string {
   const { width: W, height: H } = o;
   if (frame === 'fill') return `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}${at}`;
   if (frame === 'blur') {
@@ -140,8 +142,7 @@ function framed(frame: TimelineItem['frame'], at: string, o: { width: number; he
  * about 1%). For fill the window is cut to the output's shape inside the move, placed by the focus as fill's crop
  * is, so the focus can pan it and the picture after it is only scaled to size.
  */
-function moveFilters(l: LaidItem, k: number, o: { width: number; height: number; fps: number }, src: ClipSource): string {
-  const { item } = l;
+function moveFilters(l: LaidItem, item: ClipItem, k: number, o: { width: number; height: number; fps: number }, src: ClipSource): string {
   const { width: W, height: H } = o;
   const fill = item.frame === 'fill';
   // perspective works on every pixel of the picture each frame: a picture larger than framing needs at the move's
@@ -168,6 +169,15 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
   const labels: string[] = [];
   laid.forEach((l, k) => {
     const { item } = l;
+    const dur = ffNum(l.frames / o.fps);
+    const silence = `anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`;
+    if (isCard(item)) {
+      // A card is black and silent for its length, at the chunk's size (its text and picture come later).
+      inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${o.width}x${o.height}:r=${ffNum(o.fps)}:d=${ffNum((l.frames + 1) / o.fps)}`);
+      chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
+      labels.push(`[v${k}][a${k}]`);
+      return;
+    }
     const src = sources.get(item.clip)!;
     // Real-time items decode on one thread each (a chunk opens up to 30 inputs); sped-up items read far more source
     // than they output, so they get four (all threads cost a 4K decoder over 1 GB; four keep most of the speed).
@@ -192,16 +202,15 @@ export function itemChunkArgs(laid: LaidItem[], o: { width: number; height: numb
     const hold = `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},`;
     chains.push(
       item.move
-        ? `${head}${hold}${moveFilters(l, k, o, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]`
+        ? `${head}${hold}${moveFilters(l, item, k, o, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]`
         : `${head}${zoom}${framed(item.frame, at, o, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`,
     );
-    const dur = ffNum(l.frames / o.fps);
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
       // aresample on the source clock drops what the seek read before src.in and pads silence before audio that
       // starts late (or across a gap), so sound stays with its picture. Cut at src.out before padding under a hold.
       chains.push(`[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS[a${k}]`);
     } else {
-      chains.push(`anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=${dur},${FLTP_STEREO}[a${k}]`);
+      chains.push(silence);
     }
     labels.push(`[v${k}][a${k}]`);
   });
@@ -225,7 +234,7 @@ export function previewSize(width: number, height: number): [number, number] {
 
 /** Time allowed for one chunk: decoding grows with the source seconds read, encoding with the output seconds written. */
 export function chunkTimeoutMs(chunk: LaidItem[], fps: number): number {
-  const srcSec = chunk.reduce((s, l) => s + (l.item.src.out - l.item.src.in), 0);
+  const srcSec = chunk.reduce((s, l) => s + (isCard(l.item) ? 0 : l.item.src.out - l.item.src.in), 0);
   const outSec = chunk.reduce((s, l) => s + l.frames / fps, 0);
   return Math.round(Math.max(120, srcSec * 3 + outSec * 30) * 1000);
 }
@@ -661,7 +670,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
         // /System/Library/Fonts), and it finds system fonts and fallbacks itself; buildAss names a font for the scripts
         // whose fallback it can't open.
         loudnessLufs: ep.loudnessLufs, assFile: 'overlays.ass', fontsDir, musicWav, voiceRaw, sfxWav,
-        liveAudio: laid.some((l) => l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
+        liveAudio: laid.some((l) => !isCard(l.item) && l.item.audio === 'keep' && l.item.speed === 1 && sources.get(l.item.clip)!.hasAudio),
       }),
       { cwd: work, expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 20 * 1000), signal: o.signal, onProgress: (f) => report(0.7 + 0.3 * f) },
     );

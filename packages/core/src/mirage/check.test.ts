@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EpisodeSchema, type Catalog } from '@wordedits/shared';
+import { EpisodeSchema, isCard, type Catalog, type ClipItem, type TimelineItem } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { realMediaTools } from '../media-tools.js';
 import { checkEpisode } from './check.js';
@@ -9,6 +9,12 @@ import { saveCatalog } from './ingest.js';
 import { saveEpisode } from './render-episode.js';
 import { cutOf } from './slots.js';
 import { fitVoiceover, holdAt } from './voiceover.js';
+
+/** The item as a clip item (a card here is a mistake in the test). */
+const clip = (i: TimelineItem): ClipItem => {
+  if (isCard(i)) throw new Error(`item ${i.id} is a card`);
+  return i;
+};
 
 async function project(transcript: Catalog['clips'][number]['transcript']) {
   const dir = await mkdtemp(join(tmpdir(), 'we-check-'));
@@ -50,7 +56,7 @@ describe('checkEpisode', () => {
     await saveEpisode(dir, base());
     const r = await checkEpisode(dir, 1);
     expect(r.warnings).toEqual([]);
-    expect(r.episode.items[0].src.out).not.toBe(1.3);
+    expect(clip(r.episode.items[0]).src.out).not.toBe(1.3);
   });
 
   it('drops an overlay that beat snapping squeezed to nothing, with a warning, instead of failing on every later check', async () => {
@@ -230,7 +236,7 @@ describe('checkEpisode', () => {
       music: [{ track: 'beat.wav', start: 0, end: 10 }],
     }));
     const r = await checkEpisode(dir, 1);
-    expect(r.episode.items.map((i) => [i.speed, i.src.out])).toEqual([[1, 30], [1, 30]]);
+    expect(r.episode.items.map((i) => [clip(i).speed, clip(i).src.out])).toEqual([[1, 30], [1, 30]]);
     expect(r.warnings).toEqual([
       'item a keeps its live audio, which plays only at normal speed, and c001 has no footage left to reach a beat — left unsnapped',
       'item b could not reach a beat: c001 has too little footage left — left unsnapped',
@@ -308,7 +314,7 @@ describe('checkEpisode', () => {
       const { dir } = await project({ words: [], segments: [], speech: [] });
       await saveEpisode(dir, base({ sfx: [{ sound: 'hit', at: 0.5 }, { sound: 'hit', at: 3 }], music: [{ track: 'beat.wav', start: 0, end: 6, dips: [{ start: 3, end: 3.5 }] }] }));
       const r = await checkEpisode(dir, 1);
-      const delta = r.episode.items[0].src.out - 1.3;
+      const delta = clip(r.episode.items[0]).src.out - 1.3;
       expect(Math.abs(delta)).toBeGreaterThan(0.01);
       const [hit1, hit2] = r.episode.sfx!;
       expect(hit1!.at).toBe(0.5);
@@ -318,5 +324,51 @@ describe('checkEpisode', () => {
       expect(dip!.end).toBeCloseTo(3.5 + delta, 6);
       expect(r.warnings).toEqual([]);
     });
+  });
+});
+
+describe('checkEpisode with cards', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);
+  const withCard = (c: object) =>
+    EpisodeSchema.parse({
+      version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
+      items: [{ id: 'k', beat: 'title', card: { style: 'image', sec: 2, ...c } }, { id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 10 } }],
+    });
+  const hint = "Put the picture in the project folder, or change the card's image.";
+
+  it('passes text cards and an image card whose picture is a PNG or JPEG (told by its content), saving the file unchanged', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await mkdir(join(dir, 'pics'));
+    await writeFile(join(dir, 'pics', 'a.png'), PNG);
+    await writeFile(join(dir, 'pics', 'photo.jpeg.bin'), JPEG);
+    for (const image of ['pics/a.png', 'pics/photo.jpeg.bin']) {
+      await saveEpisode(dir, withCard({ image }));
+      const before = await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8');
+      const r = await checkEpisode(dir, 1);
+      expect(r.warnings).toEqual([]);
+      expect(await readFile(join(dir, 'episodes', '1', 'episode.json'), 'utf8')).toBe(before);
+    }
+    await saveEpisode(dir, EpisodeSchema.parse({ ...withCard({ image: 'pics/a.png' }), items: [{ id: 'k', beat: 'title', card: { style: 'mono', sec: 2, text: 'one\ntwo' } }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+  });
+
+  it('✖ when an image card’s picture is missing', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, withCard({ image: 'pics/gone.png' }));
+    await expect(checkEpisode(dir, 1)).rejects.toMatchObject({ message: 'item k: card image pics/gone.png is missing', hint });
+    await mkdir(join(dir, 'pics', 'dir.png'), { recursive: true });
+    await saveEpisode(dir, withCard({ image: 'pics/dir.png' }));
+    await expect(checkEpisode(dir, 1)).rejects.toMatchObject({ message: 'item k: card image pics/dir.png is missing', hint });
+  });
+
+  it("✖ when an image card's picture isn't a PNG or JPEG, whatever its name says", async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await writeFile(join(dir, 'fake.png'), 'GIF89a not really');
+    await writeFile(join(dir, 'empty.jpg'), '');
+    for (const image of ['fake.png', 'empty.jpg']) {
+      await saveEpisode(dir, withCard({ image }));
+      await expect(checkEpisode(dir, 1)).rejects.toMatchObject({ message: `item k: card image ${image} isn't a PNG or JPEG`, hint });
+    }
   });
 });

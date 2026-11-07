@@ -1,9 +1,9 @@
-import { TimelineItemSchema } from '@wordedits/shared';
+import { ClipItemSchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { ease, moveExprs, moveFrames } from './move.js';
 
 const item = (extra: object = {}) =>
-  TimelineItemSchema.parse({ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 6 }, ...extra });
+  ClipItemSchema.parse({ id: 'a', beat: 'montage', clip: 'c001', src: { in: 0, out: 6 }, ...extra });
 
 describe('ease', () => {
   it('gives 0 at 0 and 1 at 1 for every kind', () => {

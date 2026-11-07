@@ -2,10 +2,10 @@
 import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MusicLibrarySchema } from '@wordedits/shared';
+import { EpisodeSchema, MusicLibrarySchema } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { JsonFileError, readJsonFile, writeJsonFile } from './json-file.js';
+import { describeZodError, JsonFileError, readJsonFile, writeJsonFile } from './json-file.js';
 
 const Schema = z.object({
   version: z.literal(1),
@@ -65,5 +65,21 @@ describe('readJsonFile errors', () => {
     await writeFile(p, '{ "version": 1, ');
     await expect(readJsonFile(p, Schema)).rejects.toMatchObject({ name: 'JsonFileError', file: p, message: expect.stringContaining(`${p}: `) });
     await expect(readJsonFile(join(root, 'nope.json'), Schema)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
+describe('describeZodError with timeline items (a clip item or a card)', () => {
+  const base = { version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 } };
+  const said = (item: object) => {
+    const r = EpisodeSchema.safeParse({ ...base, items: [item] });
+    return r.success ? 'ok' : describeZodError(r.error);
+  };
+  it('names the field of the kind of item it is, never just "Invalid input"', () => {
+    expect(said({ id: 'a', beat: 'title', clip: 'c', src: { in: 0, out: 'x' } })).toMatch(/^items\[0\]\.src\.out: Invalid input: expected number/);
+    expect(said({ id: 'a', beat: 'title', clip: 'c', src: { in: 0, out: 2 }, speed: 'x' })).toMatch(/^items\[0\]\.speed: /);
+    expect(said({ id: 'a', beat: 'title', card: { style: 'bold', sec: 'x', text: 'hi' } })).toMatch(/^items\[0\]\.card\.sec: /);
+    expect(said({ id: 'a', beat: 'title', card: { style: 'fancy', sec: 2, text: 'hi' } })).toMatch(/^items\[0\]\.card\.style: Invalid option/);
+    expect(said({ id: 'a', beat: 'title', card: { style: 'bold', sec: 2, text: 'hi' }, speed: 2 })).toBe('items[0]: unknown key "speed" (valid keys: id, beat, card, hold, quiet)');
+    expect(said({ id: 'a', beat: 'title' })).toMatch(/^items\[0\]\.clip: /);
   });
 });

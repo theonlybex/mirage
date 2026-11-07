@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Episode, TimelineItem } from '@wordedits/shared';
+import { isCard, type Episode, type TimelineItem } from '@wordedits/shared';
 import { moveClocks, type MoveClock } from './move.js';
 
 export interface LaidItem {
@@ -14,8 +14,9 @@ export interface LaidItem {
   clock?: MoveClock;
 }
 
+/** An item's frames: its source (a card's `sec`, a clip item's source range at its speed), then its held frames. */
 export function itemFrames(item: TimelineItem, fps: number): { srcFrames: number; holdFrames: number; frames: number } {
-  const srcFrames = Math.max(1, Math.round(((item.src.out - item.src.in) / item.speed) * fps));
+  const srcFrames = isCard(item) ? Math.max(1, Math.round(item.card.sec * fps)) : Math.max(1, Math.round(((item.src.out - item.src.in) / item.speed) * fps));
   const holdFrames = Math.round(item.hold * fps);
   return { srcFrames, holdFrames, frames: srcFrames + holdFrames };
 }
@@ -36,11 +37,11 @@ export function layoutTimeline(ep: Episode): LaidItem[] {
 }
 
 /**
- * Identifies a cut: sha256 (first 16 hex) of each item's id, clip, source range, speed and hold. Hold is included
- * because a changed hold moves everything after it just like a changed source range.
+ * Identifies a cut: sha256 (first 16 hex) of each item's id, clip, source range, speed and hold (a card's `['card', id,
+ * sec, hold]`). Hold is included because a changed hold moves everything after it just like a changed source range.
  */
 export function itemsFingerprint(items: TimelineItem[]): string {
-  const key = items.map((i) => [i.id, i.clip, i.src.in, i.src.out, i.speed, i.hold]);
+  const key = items.map((i) => (isCard(i) ? ['card', i.id, i.card.sec, i.hold] : [i.id, i.clip, i.src.in, i.src.out, i.speed, i.hold]));
   return createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 16);
 }
 

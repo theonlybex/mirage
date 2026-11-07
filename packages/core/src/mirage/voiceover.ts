@@ -1,4 +1,4 @@
-import { EpisodeSchema, type Catalog, type Episode, type Transcript, type VoiceLine } from '@wordedits/shared';
+import { EpisodeSchema, isCard, type Catalog, type ClipItem, type Episode, type TimelineItem, type Transcript, type VoiceLine } from '@wordedits/shared';
 import { isFiller, joinCompounds, matchTokens, normalizeWord, sentenceTokens, similarity, splitSentences, textTokens } from '../autoedit/takes.js';
 import { MirageError } from './errors.js';
 import { sameMove } from './move.js';
@@ -81,7 +81,7 @@ export function lineChangeWarnings(ep: Episode, command: 'check' | 'render'): st
 const MAX_HOLD = 10;
 const HOLD_HINT = 'Shorten the line, or give it a longer slot by extending the picture';
 
-function checkHold(item: Episode['items'][number]): typeof item {
+function checkHold<T extends TimelineItem>(item: T): T {
   if (item.hold > MAX_HOLD + 1e-9) {
     throw new MirageError('BAD_ITEM', `item ${item.id} would freeze its frame for ${r3(item.hold)}s (more than ${MAX_HOLD} s)`, HOLD_HINT);
   }
@@ -109,7 +109,8 @@ export interface FitReport {
 
 /**
  * Opens `delta` seconds at output time `t`. At an item boundary the item ending there grows (unused source first,
- * then frozen frames); inside an item, the item splits at `t` and its frame there is held. Everything after `t` shifts.
+ * then frozen frames); inside an item, the item splits at `t` and its frame there is held. A card is never split: it
+ * stays on longer (its hold grows). Everything after `t` shifts.
  */
 export function holdAt(ep: Episode, catalog: Catalog, t: number, delta: number): Episode {
   return openAt(ep, catalog, t, delta).episode;
@@ -128,6 +129,15 @@ function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { epis
   const srcEnd = l.start + l.srcFrames / fps;
   const atBoundary = Math.abs(l.end - t) < half || t > l.end;
   const splitFrames = Math.max(1, Math.round((t - l.start) * fps));
+
+  if (isCard(item)) {
+    // A card has no source to run on and is never split: it holds longer, the time opening where it was asked for.
+    const at = atBoundary ? l.end : t;
+    const next = checkHold({ ...item, hold: r6(item.hold + delta) });
+    items[l.index] = next;
+    const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
+    return { episode: { ...shiftAfter(ep, at, grown), items }, hold: { at: r6(at), sec: r6(grown), item: item.id, hold: r6(next.hold - item.hold) } };
+  }
 
   if (atBoundary) {
     const clipDur = catalog.clips.find((c) => c.id === item.clip)?.probe.durationSec ?? item.src.out;
@@ -178,7 +188,20 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
     const i = out.items.findIndex((x) => x.id === h.item);
     if (i < 0) continue;
     const laid = layoutTimeline(out);
-    const item = out.items[i];
+    const it = out.items[i];
+    if (isCard(it)) {
+      // A card only ever got more time (fitting never splits one), opened at `at` inside it: closed there again while
+      // that is still inside the card, so what sits on the card after it stays where it was; else at its end.
+      const next = { ...it, hold: r6(Math.max(0, it.hold - (h.hold ?? 0))) };
+      const removed = (laid[i].frames - itemFrames(next, fps).frames) / fps;
+      const items = [...out.items];
+      items[i] = next;
+      const { start, end } = laid[i];
+      const close = h.at >= start - 1e-6 && h.at + removed <= end + 1e-6 ? h.at + removed : end;
+      out = { ...(removed > 1e-9 ? shiftAfter(out, close, -removed) : out), items };
+      continue;
+    }
+    const item = it;
     let next = { ...item, hold: r6(Math.max(0, item.hold - (h.hold ?? 0))) };
     if (h.outAdded && h.out !== undefined && Math.abs(item.src.out - h.out) < 1e-6 && item.src.out - h.outAdded > item.src.in) {
       next = { ...next, src: { in: item.src.in, out: r6(item.src.out - h.outAdded) } };
@@ -187,7 +210,8 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
     // The frozen frame (and added source) sit at the end of this item, also when it was the first half of a split.
     const end = laid[i].end;
     let frames = laid[i].frames;
-    const b = out.items[i + 1];
+    const after = out.items[i + 1];
+    const b = after && !isCard(after) ? after : undefined;
     const same = (k: 'clip' | 'speed' | 'audio' | 'zoom' | 'frame' | 'quiet' | 'onBeat' | 'beat') => b !== undefined && b[k] === item[k];
     const sameFocus = b !== undefined && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
     // The halves' moves are as the split left them: the split shot's move, or none when the item had none (a move the
@@ -205,12 +229,13 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
   }
   // A split shot merged back whole is the item it was: no part of anything.
   const items = out.items;
-  const alone = (i: number) => !items[i].splitFrom || ![items[i - 1], items[i + 1]].some((x) => x?.splitFrom?.item === items[i].splitFrom!.item);
-  out = { ...out, items: items.map((x, i) => (x.splitFrom && alone(i) ? withoutSplit(x) : x)) };
+  const shot = (x: TimelineItem | undefined) => (x && !isCard(x) ? x.splitFrom?.item : undefined);
+  const alone = (i: number) => ![items[i - 1], items[i + 1]].some((x) => shot(x) === shot(items[i]));
+  out = { ...out, items: items.map((x, i) => (!isCard(x) && x.splitFrom && alone(i) ? withoutSplit(x) : x)) };
   return dropCollapsed(out, ep);
 }
 
-function withoutSplit(item: Episode['items'][number]): typeof item {
+function withoutSplit(item: ClipItem): ClipItem {
   const { splitFrom: _, ...rest } = item;
   return rest;
 }
@@ -221,8 +246,14 @@ function withoutSplit(item: Episode['items'][number]): typeof item {
  */
 const LOOK = ['beat', 'zoom', 'frame', 'focus', 'move', 'quiet', 'onBeat'] as const;
 
-/** `base` with the LOOK fields of `now` (a field absent from `now` is removed). */
-function withLook(base: Episode['items'][number], now: Episode['items'][number]): typeof base {
+/**
+ * `base` with the LOOK fields of `now` (a field absent from `now` is removed). A card keeps its length (`sec`) from
+ * `base` and takes the rest from `now`; an item that became a card, or a card that became a clip item, stays `base`.
+ */
+function withLook(base: TimelineItem, now: TimelineItem): TimelineItem {
+  if (isCard(base) || isCard(now)) {
+    return isCard(base) && isCard(now) ? { ...base, beat: now.beat, quiet: now.quiet, card: { ...now.card, sec: base.card.sec } } : base;
+  }
   const out: Record<string, unknown> = { ...base };
   for (const k of LOOK) {
     if (now[k] === undefined) delete out[k];

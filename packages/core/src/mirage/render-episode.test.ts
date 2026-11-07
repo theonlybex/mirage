@@ -101,6 +101,28 @@ describe('itemChunkArgs', () => {
   });
 });
 
+describe('itemChunkArgs with cards', () => {
+  const e = ep([
+    { id: 'k', beat: 'title', card: { style: 'bold', text: 'Day 3', sec: 1.5 }, hold: 0.5 },
+    { id: 'a', beat: 'cold-open', clip: 'c001', src: { in: 1, out: 3 }, audio: 'keep' },
+  ]);
+  const args = itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30 }, sourcesFor(e, cat), '/w/chunk-000.mov');
+  const graph = args[args.indexOf('-filter_complex') + 1];
+  it('reads no clip for a card: sourcesFor skips it', () => {
+    expect([...sourcesFor(e, cat).keys()]).toEqual(['c001']);
+    expect(sourcesFor(ep([{ id: 'k', beat: 'title', card: { style: 'mono', text: 'x', sec: 1 } }]), cat).size).toBe(0);
+  });
+  it('renders a card as black silence of its length, hold included, at the chunk size', () => {
+    expect(args.slice(0, 4)).toEqual(['-f', 'lavfi', '-i', 'color=c=black:s=960x540:r=30:d=2.033333']);
+    expect(args.slice(4, 11)).toEqual(['-threads', '1', '-noaccurate_seek', '-ss', '1', '-i', join(CLIPS, 'c001.mp4')]);
+    expect(graph).toContain('[0:v]trim=end_frame=60,setsar=1,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,aformat=sample_fmts=fltp:channel_layouts=stereo[a0];[1:v]setpts=');
+    expect(graph).toContain('[v0][a0][v1][a1]concat=n=2:v=1:a=1[vcat][acat]');
+  });
+  it('counts no source seconds for a card in the chunk time allowed', () => {
+    expect(chunkTimeoutMs(layoutTimeline(ep([{ id: 'k', beat: 'title', card: { style: 'mono', text: 'x', sec: 6 } }])), 30)).toBe(180_000);
+  });
+});
+
 describe('itemChunkArgs with a move', () => {
   const graphOf = (items: object[], o: { width: number; height: number }) => {
     const e = ep(items, { output: { ...o, fps: 30 } });
@@ -549,6 +571,20 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(r.outputPath.endsWith(join('episodes', '1', 'rough.mp4'))).toBe(true);
     expect((await readdir(join(project, 'episodes', '1'))).filter((f) => f.startsWith('.work-') || f.includes('.partial-'))).toEqual([]);
   }, 300_000);
+
+  it('renders cards as black silence of their exact length, at the start, two in a row and at the end', async () => {
+    const card = (id: string, sec: number) => ({ id, beat: 'title', card: { style: 'bold', text: id, sec } });
+    const e = ep([card('k0', 1), { id: 'talk', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1 }, audio: 'keep' }, card('k1', 0.5), card('k2', 0.7)]);
+    const work = await mkdtemp(join(tmpdir(), 'we-cards-'));
+    const out = join(work, 'chunk.mov');
+    await tools.runFfmpeg(['-y', ...itemChunkArgs(layoutTimeline(e), { width: 320, height: 180, fps: 30 }, sourcesFor(e, await loadCatalog(project)), out)], { expectedDurationSec: timelineDuration(e) });
+    const { stdout } = await run('ffprobe', ['-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames,width,height', '-of', 'csv=p=0', out]);
+    expect(stdout.trim()).toBe(`320,180,${Math.round(timelineDuration(e) * 30)}`);
+    // The first card is black and silent.
+    const { stderr } = await run('ffmpeg', ['-hide_banner', '-t', '0.9', '-i', out, '-vf', 'signalstats,metadata=print:key=lavfi.signalstats.YMAX', '-af', 'volumedetect', '-f', 'null', '-']);
+    expect(Math.max(...[...stderr.matchAll(/YMAX=(\d+)/g)].map((m) => Number(m[1])))).toBeLessThanOrEqual(16);
+    expect(stderr).toMatch(/max_volume: -(inf|9\d(\.\d)?) dB/);
+  }, 120_000);
 
   it('ends a looping cue with an offset on time: it fades out and is silent after its end', async () => {
     const out = join(project, 'loop-offset.wav');
