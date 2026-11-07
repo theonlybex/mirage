@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { EpisodeSchema, type Catalog, type MusicLibrary } from '@wordedits/shared';
-import { run, SidecarError, wordsFromWhisperJson } from '@wordedits/sidecars';
+import { locate, run, runPath, SidecarError, wordsFromWhisperJson } from '@wordedits/sidecars';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { ingestClips, loadCatalog, sha256File } from './ingest.js';
@@ -140,10 +140,10 @@ describe('itemChunkArgs with picture cards', () => {
     // FFmpeg's own rotation is off: Mirage turns the photo upright itself (EXIF 6: a quarter turn clockwise), the same
     // with every FFmpeg.
     expect(args.slice(0, 7)).toEqual(['-noautorotate', '-f', 'jpeg_pipe', '-framerate', '30', '-i', '/proj/pics/a b.jpg']);
-    expect(graph).toContain('[0:v]transpose=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,');
+    expect(graph).toContain('[0:v]sidedata=mode=delete:type=DISPLAYMATRIX,transpose=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=60,setpts=PTS-STARTPTS[v0];anullsrc=channel_layout=stereo:sample_rate=48000,atrim=end=2,');
     expect(args.slice(11, 18)).toEqual(['-noautorotate', '-f', 'png_pipe', '-framerate', '30', '-i', '/proj/logo.png']);
     // A PNG is laid on black first (its transparent parts black); hold included.
-    expect(graph).toContain('[2:v]format=rgba,premultiply=inplace=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=30,setpts=PTS-STARTPTS[v2]');
+    expect(graph).toContain('[2:v]sidedata=mode=delete:type=DISPLAYMATRIX,format=rgba,premultiply=inplace=1,scale=960:540:force_original_aspect_ratio=increase,crop=960:540,setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=30,setpts=PTS-STARTPTS[v2]');
   });
   it('keeps a text card black', () => {
     expect(args.slice(7, 11)).toEqual(['-f', 'lavfi', '-i', 'color=c=black:s=960x540:r=30:d=1.033333']);
@@ -154,7 +154,8 @@ describe('itemChunkArgs with picture cards', () => {
       const a = itemChunkArgs(layoutTimeline(one), { width: 960, height: 540, fps: 30, cardImages: new Map([['p', { path: '/a.jpg', format: 'jpeg' as const, orientation }]]) }, new Map(), '/w/c.mov');
       return a[a.indexOf('-filter_complex') + 1].split('scale=')[0];
     };
-    expect([1, 2, 3, 4, 5, 6, 7, 8].map(turn)).toEqual(['[0:v]', '[0:v]hflip,', '[0:v]hflip,vflip,', '[0:v]vflip,', '[0:v]transpose=0,', '[0:v]transpose=1,', '[0:v]transpose=3,', '[0:v]transpose=2,']);
+    const head = '[0:v]sidedata=mode=delete:type=DISPLAYMATRIX,';
+    expect([1, 2, 3, 4, 5, 6, 7, 8].map(turn)).toEqual(['', 'hflip,', 'hflip,vflip,', 'vflip,', 'transpose=0,', 'transpose=1,', 'transpose=3,', 'transpose=2,'].map((f) => head + f));
   });
   it('refuses a picture card whose picture was not looked at first', () => {
     expect(() => itemChunkArgs(layoutTimeline(e), { width: 960, height: 540, fps: 30 }, new Map(), '/w/c.mov')).toThrow(/item p: card image pics\/a b\.jpg/);
@@ -1505,6 +1506,54 @@ describe('cards (real ffmpeg)', () => {
       expect(isBlue(px(20, H - 20)) && isBlue(px(W - 20, H - 20)), `orientation ${o}: blue at the bottom`).toBe(true);
     }
   }, 120_000);
+
+  it('leaves no rotation tag on a chunk that opens with a turned photo, so the episode is never turned as a whole', async () => {
+    // FFmpeg 7.1 and newer pass a JPEG's EXIF rotation on to the chunk even with -noautorotate; the final pass reads the
+    // chunks with the concat demuxer, which takes the first file's settings, and would then turn the whole episode.
+    // Run with the FFmpeg Mirage finds and with Homebrew's, which is newer.
+    const exif = (o: number) => {
+      const tiff = Buffer.from([0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, o, 0, 0, 0, 0, 0, 0]);
+      const payload = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff]);
+      const len = Buffer.alloc(2);
+      len.writeUInt16BE(payload.length + 2);
+      return Buffer.concat([Buffer.from([0xff, 0xe1]), len, payload]);
+    };
+    for (const o of [6, 8]) {
+      const plain = join(project, 'pics', `first-plain-${o}.jpg`);
+      await gen(['-f', 'lavfi', '-i', 'color=c=blue:s=45x80', '-frames:v', '1', '-q:v', '2', plain]);
+      const jpg = await readFile(plain);
+      await writeFile(join(project, 'pics', `first-${o}.jpg`), Buffer.concat([jpg.subarray(0, 2), exif(o), jpg.subarray(2)]));
+    }
+    const e = (o: number, number = 1) => ep([
+      { id: 'p', beat: 'title', card: { style: 'image', image: `pics/first-${o}.jpg`, sec: 0.5 } },
+      { id: 'k', beat: 'title', card: { style: 'mono', text: 'after', sec: 0.5 } },
+    ], { number });
+    const ffmpegs = [await locate('ffmpeg'), ...(existsSync('/opt/homebrew/bin/ffmpeg') ? ['/opt/homebrew/bin/ffmpeg'] : [])];
+    const [W, H] = [320, 180];
+    for (const ffmpeg of ffmpegs) {
+      const ffprobe = join(dirname(ffmpeg), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+      const look = async (file: string) => (await runPath('ffprobe', ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-of', 'json', file])).stdout;
+      for (const o of [6, 8]) {
+        const dir = await mkdtemp(join(tmpdir(), 'we-first-turned-'));
+        await runPath('ffmpeg', ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', ...itemChunkArgs(layoutTimeline(e(o)), { width: W, height: H, fps: 30, cardImages: cardImagesFor(project, e(o)) }, new Map(), join(dir, 'chunk-000.mov'))]);
+        const chunk = await look(join(dir, 'chunk-000.mov'));
+        expect(chunk, `${ffmpeg}, orientation ${o}: chunk`).not.toMatch(/Display Matrix|rotation/i);
+        expect(JSON.parse(chunk).streams[0], `${ffmpeg}, orientation ${o}`).toMatchObject({ width: W, height: H });
+        // Read back the way the final pass reads chunks.
+        await writeFile(join(dir, 'chunks.txt'), "file 'chunk-000.mov'\n");
+        await runPath('ffmpeg', ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', 'chunks.txt', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'out.mp4'], { cwd: dir });
+        const final = await look(join(dir, 'out.mp4'));
+        expect(final, `${ffmpeg}, orientation ${o}: read back`).not.toMatch(/Display Matrix|rotation/i);
+        expect(JSON.parse(final).streams[0], `${ffmpeg}, orientation ${o}: read back`).toMatchObject({ width: W, height: H });
+      }
+    }
+    // And the whole render, with the FFmpeg Mirage uses.
+    await saveEpisode(project, e(6, 3));
+    const r = await renderEpisode({ project, episode: 3, mode: 'final', tools });
+    const p = await tools.probe(r.outputPath);
+    expect([p.width, p.height]).toEqual([1920, 1080]);
+    expect((await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_streams', '-of', 'json', r.outputPath])).stdout).not.toMatch(/Display Matrix|rotation/i);
+  }, 180_000);
 
   it('lays a transparent picture on black: clear parts black, half-clear parts half as bright', async () => {
     // White everywhere, opaque on the left third, half transparent in the middle, fully transparent on the right.

@@ -199,7 +199,9 @@ export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<stri
         inputs.push('-noautorotate', '-f', `${pic.format}_pipe`, '-framerate', ffNum(o.fps), '-i', pic.path);
         // A PNG's colour times its alpha is the picture over black: clear parts black, not whatever colour they hold.
         const flat = pic.format === 'png' ? 'format=rgba,premultiply=inplace=1,' : '';
-        chains.push(`[${k}:v]${UPRIGHT[pic.orientation ?? 1] ?? ''}${flat}${framed('fill', '', o, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        // FFmpeg 7.1 and newer still pass the JPEG's rotation on to the chunk with -noautorotate; as the first frame of
+        // the first chunk, the concat demuxer would carry it into the final pass, which would turn the whole episode.
+        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ''}${flat}${framed('fill', '', o, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         // A text card is black for its length, at the chunk's size (its text comes in the final pass); all cards are silent.
         inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${o.width}x${o.height}:r=${ffNum(o.fps)}:d=${ffNum((l.frames + 1) / o.fps)}`);

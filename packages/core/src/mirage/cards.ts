@@ -16,7 +16,10 @@ const CARD_IMAGE_HINT = "Put the picture in the project folder, or change the ca
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const JPEG = [0xff, 0xd8, 0xff];
 
-/** How much of a JPEG is read for its EXIF: the APP1 segment is at most 64 KB and comes near the start. */
+/**
+ * How much of a JPEG is read for its EXIF: the APP1 segment is at most 64 KB and comes near the start. An orientation
+ * tag past the first 128 KB (after unusually large earlier segments) is not seen, and the picture is taken as stored.
+ */
 const HEAD_BYTES = 128 * 1024;
 
 /**
@@ -62,7 +65,7 @@ export function jpegOrientation(b: Buffer): number {
         for (let i = 0; i < count; i++) {
           const entry = ifd + 2 + i * 12;
           if (u16(entry) !== 0x0112) continue;
-          // A SHORT, held in the first two bytes of the value field.
+          // A SHORT, held in the first two bytes of the value field (EXIF says SHORT; any other type is taken as 1).
           const v = u16(entry + 2) === 3 ? u16(entry + 8) : 0;
           return v >= 1 && v <= 8 ? v : 1;
         }

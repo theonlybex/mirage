@@ -32748,7 +32748,7 @@ function itemChunkArgs(laid, o2, sources, output2) {
         if (!pic) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} was not checked before rendering`, "Run check, then render again.");
         inputs.push("-noautorotate", "-f", `${pic.format}_pipe`, "-framerate", ffNum(o2.fps), "-i", pic.path);
         const flat = pic.format === "png" ? "format=rgba,premultiply=inplace=1," : "";
-        chains.push(`[${k}:v]${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", "", o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", "", o2, k)},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         inputs.push("-f", "lavfi", "-i", `color=c=black:s=${o2.width}x${o2.height}:r=${ffNum(o2.fps)}:d=${ffNum((l.frames + 1) / o2.fps)}`);
         chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
