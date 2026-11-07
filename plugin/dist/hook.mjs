@@ -8693,7 +8693,8 @@ async function locate(tool) {
     const p = join3(override, exe(tool));
     return await exists(p) ? p : overrideMissing(tool, override);
   }
-  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+  const dirs = [...(process.env.PATH ?? "").split(delimiter).filter(Boolean), ...process.platform === "win32" ? [] : kegDirs];
+  for (const dir of dirs) {
     const p = join3(dir, exe(tool));
     if (await exists(p)) return p;
   }

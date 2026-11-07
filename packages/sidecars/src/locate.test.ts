@@ -229,6 +229,18 @@ sh('ffmpegCaptions', () => {
     expect(await locate('ffprobe')).toBe(join(plain, 'ffprobe'));
   });
 
+  it('takes ffprobe from the keg folders, after PATH, when the chosen ffmpeg has none beside it', async () => {
+    const bare = await fake('bare', withAss, false);
+    const keg = await fake('keg', withoutAss);
+    process.env.PATH = bare;
+    _setCaptionsCheck({ kegDirs: [keg], noStatic: true });
+    expect(await locate('ffmpeg')).toBe(join(bare, 'ffmpeg'));
+    expect(await locate('ffprobe')).toBe(join(keg, 'ffprobe'));
+    const onPath = await fake('on-path', withoutAss);
+    process.env.PATH = `${bare}:${onPath}`;
+    expect(await locate('ffprobe')).toBe(join(onPath, 'ffprobe'));
+  });
+
   it('throws NOT_FOUND when there is no FFmpeg to ask', async () => {
     process.env.PATH = join(root, 'empty');
     _setCaptionsCheck({ kegDirs: [], noStatic: true });

@@ -146,6 +146,8 @@ describe('the plugin skills', () => {
     expect(step3).toContain('- macOS: `brew install ffmpeg-full`');
     expect(step3).toContain('/opt/homebrew/opt/ffmpeg-full/bin');
     expect(step3).toContain('ffmpeg -hide_banner -filters | grep -w ass');
+    expect(step3).toContain('On a Mac, installing needs no restart (Mirage looks in the ffmpeg-full folder itself); on Windows, start a new Claude Code session first so Mirage sees the new PATH.');
+    expect(step3).not.toContain('Installing needs no restart.');
     expect(step3).not.toMatch(/brew install ffmpeg(?!-full)/);
     expect(setup).not.toMatch(/brew install ffmpeg(?!-full)/);
     const step0 = setup.slice(setup.indexOf('## Step 0 ·'), setup.indexOf('## Step 1 ·'));

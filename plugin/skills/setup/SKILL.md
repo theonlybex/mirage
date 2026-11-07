@@ -122,7 +122,7 @@ ffmpeg -hide_banner -filters | grep -w ass    # prints a line when captions can 
 - macOS: `brew install ffmpeg-full`. It's keg-only, so Homebrew doesn't link it onto PATH; that's fine. Mirage finds it in `/opt/homebrew/opt/ffmpeg-full/bin` (`/usr/local/opt/ffmpeg-full/bin` on an Intel Mac) by itself, so there's nothing to put on PATH. Leave a plain `ffmpeg` that's already installed alone.
 - Windows: `winget install --id Gyan.FFmpeg -e`, then open a new terminal so it's on PATH. This build can draw captions.
 
-**Then:** call `status` again: `ffmpeg: ok`. Installing needs no restart.
+**Then:** call `status` again: `ffmpeg: ok`. On a Mac, installing needs no restart (Mirage looks in the ffmpeg-full folder itself); on Windows, start a new Claude Code session first so Mirage sees the new PATH.
 
 ---
 

@@ -166,7 +166,7 @@ export async function ffmpegCaptions(): Promise<CaptionsCheck> {
  * Resolution order for ffmpeg: WORDEDITS_FFMPEG_DIR (if set, it is the only place looked and must contain the binary), else PATH,
  * then Homebrew's keg-only ffmpeg-full; the first that can draw captions wins, and if none can the first found is used. Then the
  * ffmpeg-static package when nothing else is there. ffprobe comes from the chosen ffmpeg's folder when it has one there, otherwise
- * from the same places in turn (override, PATH, ffprobe-static).
+ * from the same places in turn (override, PATH, the keg folders, ffprobe-static).
  */
 export async function locate(tool: Tool): Promise<string> {
   if (tool === 'ffmpeg') return (await resolveFfmpeg()).path;
@@ -180,7 +180,10 @@ export async function locate(tool: Tool): Promise<string> {
     return (await exists(p)) ? p : overrideMissing(tool, override);
   }
 
-  for (const dir of (process.env.PATH ?? '').split(delimiter).filter(Boolean)) {
+  // PATH first, then Homebrew's keg-only ffmpeg-full folders (as the SessionStart hook does), so a captions-capable ffmpeg on PATH
+  // with no ffprobe beside it still finds the keg's ffprobe.
+  const dirs = [...(process.env.PATH ?? '').split(delimiter).filter(Boolean), ...(process.platform === 'win32' ? [] : kegDirs)];
+  for (const dir of dirs) {
     const p = join(dir, exe(tool));
     if (await exists(p)) return p;
   }
