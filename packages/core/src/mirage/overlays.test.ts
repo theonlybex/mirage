@@ -49,6 +49,42 @@ describe('speechWords', () => {
   });
 });
 
+describe('speechWords with leadIn and tailOut', () => {
+  // c002's words: "early" before the lead, "Hey" in it, "there" in the shot, "after", a filler and "cut" in the tail
+  // ("cut" runs past it), "gone" after it.
+  const spoken = tx([w('early', 2, 2.3), w('Hey', 3.3, 3.6), w('there', 4, 4.4), w('after', 6.1, 6.4), w('um', 6.5, 6.7), w('cut', 6.8, 7.3), w('gone', 7.5, 7.8)]);
+  const cat: Catalog = { version: 1, clips: [catalog.clips[0], { ...catalog.clips[0], id: 'c002', transcript: spoken }] };
+  const spilled = (extra: object, b: object = {}) =>
+    EpisodeSchema.parse({
+      version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
+      items: [
+        { id: 'x', beat: 'problem', clip: 'c001', src: { in: 5, out: 7 } },
+        { id: 'b', beat: 'problem', clip: 'c002', src: { in: 4, out: 6 }, audio: 'keep', ...extra, ...b },
+        { id: 'y', beat: 'problem', clip: 'c001', src: { in: 5, out: 7 } },
+      ],
+    });
+
+  it('includes the words a lead and a tail carry, at their output times', () => {
+    // b starts at 2 s: its 1 s lead plays source 3–4 from 1 s, its 1 s tail source 6–7 from 4 s.
+    expect(speechWords(spilled({ leadIn: 1, tailOut: 1 }), cat, null).map((x) => [x.w, x.start, x.end])).toEqual([
+      ['Hey', 1.3, 1.6],
+      ['there', 2, 2.4],
+      ['after', 4.1, 4.4],
+      ['cut', 4.8, 5],
+    ]);
+  });
+
+  it('includes only the shortened part of a lead, and nothing for an item that does not keep its sound', () => {
+    expect(speechWords(spilled({ leadIn: 0.5 }), cat, null).map((x) => x.w)).toEqual(['there']);
+    expect(speechWords(spilled({ leadIn: 1, tailOut: 1 }, { audio: 'mute' }), cat, null)).toEqual([]);
+  });
+
+  it('without the fields: only the shot\'s own words, exactly as before', () => {
+    expect(speechWords(spilled({}), cat, null).map((x) => [x.w, x.start, x.end])).toEqual([['there', 2, 2.4]]);
+    expect(speechWords(spilled({ leadIn: 0, tailOut: 0 }), cat, null)).toEqual(speechWords(spilled({}), cat, null));
+  });
+});
+
 describe('keptSegments', () => {
   it('splits a line around its cuts with running output offsets', () => {
     expect(keptSegments({ slot: 'n1', at: 0, src: { in: 10, out: 12 }, cuts: [[10.5, 11]] })).toEqual([

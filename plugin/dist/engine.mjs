@@ -3511,8 +3511,8 @@ var require_compile = __commonJS({
       }
     }
     exports.getCompilingSchema = getCompilingSchema;
-    function sameSchemaEnv(s13, s22) {
-      return s13.schema === s22.schema && s13.root === s22.root && s13.baseId === s22.baseId;
+    function sameSchemaEnv(s13, s23) {
+      return s13.schema === s23.schema && s13.root === s23.root && s13.baseId === s23.baseId;
     }
     function resolve15(root, ref) {
       let sch;
@@ -7558,11 +7558,11 @@ var require_formats = __commonJS({
         return (utcHr === 23 || utcHr === -1) && (utcMin === 59 || utcMin === -1) && sec < 61;
       };
     }
-    function compareTime(s13, s22) {
-      if (!(s13 && s22))
+    function compareTime(s13, s23) {
+      if (!(s13 && s23))
         return void 0;
       const t1 = (/* @__PURE__ */ new Date("2020-01-01T" + s13)).valueOf();
-      const t2 = (/* @__PURE__ */ new Date("2020-01-01T" + s22)).valueOf();
+      const t2 = (/* @__PURE__ */ new Date("2020-01-01T" + s23)).valueOf();
       if (!(t1 && t2))
         return void 0;
       return t1 - t2;
@@ -36231,6 +36231,18 @@ var ClipItemSchema = strictObject2({
   /** Snap this item's length to whole beats of the music under it. */
   onBeat: external_exports.boolean().default(false),
   /**
+   * A J-cut: seconds of the clip's own sound from before `src.in` that start playing under the end of the shot before,
+   * while that shot's sound fades out. Only with `audio: "keep"` at speed 1; shortened to the sound the clip has and to
+   * the shot before's length. Absent = none.
+   */
+  leadIn: external_exports.number().min(0).max(3).optional(),
+  /**
+   * An L-cut: seconds of the clip's own sound from after the shot that carry on under the start of the shot after (after
+   * any held frames), while that shot's sound fades in. Only with `audio: "keep"` at speed 1; shortened to the sound the
+   * clip has and to the shot after's length. Absent = none.
+   */
+  tailOut: external_exports.number().min(0).max(3).optional(),
+  /**
    * Written by voice-over fitting, never by hand: fitting split item `item`, which had a move, to freeze its picture
    * partway, and this item is one of its parts; `move` is that item's move as it was. The parts (the items next to each
    * other with the same `splitFrom.item`) play the move on one clock, as the item would have with the frozen frames in
@@ -38348,9 +38360,61 @@ function bundledFontsDir(from = import.meta.url) {
   return dir;
 }
 
+// packages/core/src/mirage/spill.ts
+var r62 = (n2) => Math.round(n2 * 1e6) / 1e6;
+var s2 = (n2) => n2.toFixed(2);
+var EPS3 = 1e-6;
+function soundOf(sources, clip) {
+  if (sources instanceof Map) return sources.get(clip);
+  return sources.clips.find((c3) => c3.id === clip)?.probe;
+}
+var hasSpill = (item) => !isCard(item) && (item.leadIn !== void 0 || item.tailOut !== void 0);
+var playsOwnSound = (item) => !!item && !isCard(item) && item.audio === "keep" && item.speed === 1;
+function keepsOwnSound(item, sources) {
+  return playsOwnSound(item) && soundOf(sources, item.clip)?.hasAudio === true;
+}
+function spills(ep, sources, laid) {
+  const out = [];
+  const shortened = [];
+  if (!ep.items.some(hasSpill)) return { spills: out, shortened };
+  const fps = ep.output.fps;
+  const lay = laid ?? layoutTimeline(ep);
+  const length = (l) => l.frames / fps;
+  lay.forEach((l, i2) => {
+    const item = l.item;
+    if (!hasSpill(item) || !keepsOwnSound(item, sources)) return;
+    const duration3 = soundOf(sources, item.clip).durationSec;
+    const srcEnd = item.src.in + l.srcFrames / fps;
+    const sides = [
+      { field: "leadIn", asked: item.leadIn, neighbour: lay[i2 - 1], source: item.src.in, edge: "it's the first shot", side: "before" },
+      { field: "tailOut", asked: item.tailOut, neighbour: lay[i2 + 1], source: Math.max(0, duration3 - srcEnd), edge: "it's the last shot", side: "after" }
+    ];
+    for (const s of sides) {
+      if (s.asked === void 0 || s.asked <= 0) continue;
+      let got;
+      let reason = "";
+      if (!s.neighbour) {
+        got = 0;
+        reason = s.edge;
+      } else {
+        const room = length(s.neighbour);
+        got = Math.min(s.asked, s.source, room);
+        if (got < s.asked - EPS3) reason = s.source <= room ? `${item.clip} has only ${s2(s.source)} s of sound ${s.side} the shot` : `the shot ${s.side} it is only ${s2(room)} s long`;
+      }
+      got = r62(got);
+      if (reason) shortened.push({ item: item.id, field: s.field, asked: s.asked, got, reason });
+      if (got <= EPS3) continue;
+      out.push(
+        s.field === "leadIn" ? { item: item.id, kind: "lead", clip: item.clip, srcIn: r62(item.src.in - got), srcOut: item.src.in, at: r62(l.start - got), sec: got } : { item: item.id, kind: "tail", clip: item.clip, srcIn: r62(srcEnd), srcOut: r62(srcEnd + got), at: r62(l.end), sec: got }
+      );
+    }
+  });
+  return { spills: out, shortened };
+}
+
 // packages/core/src/mirage/overlays.ts
 var r35 = (n2) => Math.round(n2 * 1e3) / 1e3;
-var EPS3 = 1e-6;
+var EPS4 = 1e-6;
 function keptSegments(line) {
   const clamp = (t) => Math.min(line.src.out, Math.max(line.src.in, t));
   const cuts = line.cuts.map(([a2, b]) => [clamp(Math.min(a2, b)), clamp(Math.max(a2, b))]).filter(([a2, b]) => b > a2).sort((a2, b) => a2[0] - b[0]);
@@ -38410,14 +38474,22 @@ function alignWritten(spoken, text) {
 function speechWords(ep, catalog, vo) {
   const fps = ep.output.fps;
   const out = [];
-  for (const l of layoutTimeline(ep)) {
+  const laid = layoutTimeline(ep);
+  for (const l of laid) {
     const { item } = l;
     if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
     const words = catalog.clips.find((c3) => c3.id === item.clip)?.transcript?.words ?? [];
     const srcEnd = item.src.in + l.srcFrames / fps;
     for (const w of words) {
-      if (w.start < item.src.in - EPS3 || w.start >= srcEnd || isFiller(w)) continue;
+      if (w.start < item.src.in - EPS4 || w.start >= srcEnd || isFiller(w)) continue;
       out.push({ ...w, start: r35(l.start + w.start - item.src.in), end: r35(l.start + Math.min(w.end, srcEnd) - item.src.in) });
+    }
+  }
+  for (const s of spills(ep, catalog, laid).spills) {
+    const words = catalog.clips.find((c3) => c3.id === s.clip)?.transcript?.words ?? [];
+    for (const w of words) {
+      if (w.start < s.srcIn - EPS4 || w.start >= s.srcOut || isFiller(w)) continue;
+      out.push({ ...w, start: r35(s.at + w.start - s.srcIn), end: r35(s.at + Math.min(w.end, s.srcOut) - s.srcIn) });
     }
   }
   if (vo && ep.voiceover) {
@@ -38429,7 +38501,7 @@ function speechWords(ep, catalog, vo) {
       for (const w of tx.words) {
         if (isFiller(w)) continue;
         const mid = (w.start + Math.max(w.start, w.end)) / 2;
-        const seg = segs.find((g) => mid >= g.in - EPS3 && mid < g.out);
+        const seg = segs.find((g) => mid >= g.in - EPS4 && mid < g.out);
         if (!seg) continue;
         const start = Math.max(w.start, seg.in);
         spoken.push({ ...w, start: r35(line.at + seg.offset + start - seg.in), end: r35(line.at + seg.offset + Math.min(w.end, seg.out) - seg.in) });
@@ -38471,7 +38543,7 @@ function groupSpans(groups, o2) {
     const start = prev ? Math.max(raw[i2].start, prev.end) : raw[i2].start;
     const limit = i2 + 1 < raw.length ? raw[i2 + 1].start : o2.durationSec;
     const end = r35(Math.max(raw[i2].end, Math.min(start + o2.minDur, limit)));
-    if (end <= start + EPS3) continue;
+    if (end <= start + EPS4) continue;
     spans.push({ start, end, group: raw[i2].group });
   }
   return spans;
@@ -39130,7 +39202,7 @@ function carrySlots(ep, next) {
 
 // packages/core/src/mirage/voiceover.ts
 var r37 = (n2) => Math.round(n2 * 1e3) / 1e3;
-var r62 = (n2) => Math.round(n2 * 1e6) / 1e6;
+var r63 = (n2) => Math.round(n2 * 1e6) / 1e6;
 function cutChanged(ep) {
   const fp = ep.voiceover?.fittedItemsFingerprint;
   return fp !== void 0 && fp !== itemsFingerprint(ep.items);
@@ -39194,38 +39266,40 @@ function openAt(ep, catalog, t, delta) {
   const splitFrames = Math.max(1, Math.round((t - l.start) * fps));
   if (isCard(item)) {
     const at3 = atBoundary ? l.end : t;
-    const next = checkHold({ ...item, hold: r62(item.hold + delta) });
+    const next = checkHold({ ...item, hold: r63(item.hold + delta) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    return { episode: { ...shiftAfter(ep, at3, grown), items }, hold: { at: r62(at3), sec: r62(grown), item: item.id, hold: r62(next.hold - item.hold) } };
+    return { episode: { ...shiftAfter(ep, at3, grown), items }, hold: { at: r63(at3), sec: r63(grown), item: item.id, hold: r63(next.hold - item.hold) } };
   }
   if (atBoundary) {
     const clipDur = catalog.clips.find((c3) => c3.id === item.clip)?.probe.durationSec ?? item.src.out;
     const available = Math.max(0, (clipDur - item.src.out) / item.speed);
     const useSource = Math.min(delta, available);
-    const next = checkHold({ ...item, src: { in: item.src.in, out: r62(item.src.out + useSource * item.speed) }, hold: r62(item.hold + (delta - useSource)) });
+    const next = checkHold({ ...item, src: { in: item.src.in, out: r63(item.src.out + useSource * item.speed) }, hold: r63(item.hold + (delta - useSource)) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    const source = useSource > 0 ? { out: next.src.out, outAdded: r62(next.src.out - item.src.out) } : {};
-    return { episode: { ...shiftAfter(ep, l.end, grown), items }, hold: { at: r62(l.end), sec: r62(grown), item: item.id, hold: r62(next.hold - item.hold), ...source } };
+    const source = useSource > 0 ? { out: next.src.out, outAdded: r63(next.src.out - item.src.out) } : {};
+    return { episode: { ...shiftAfter(ep, l.end, grown), items }, hold: { at: r63(l.end), sec: r63(grown), item: item.id, hold: r63(next.hold - item.hold), ...source } };
   }
   if (t >= srcEnd - 1e-9 || splitFrames >= l.srcFrames) {
-    const next = checkHold({ ...item, hold: r62(item.hold + delta) });
+    const next = checkHold({ ...item, hold: r63(item.hold + delta) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    return { episode: { ...shiftAfter(ep, t, grown), items }, hold: { at: r62(t), sec: r62(grown), item: item.id, hold: r62(delta) } };
+    return { episode: { ...shiftAfter(ep, t, grown), items }, hold: { at: r63(t), sec: r63(grown), item: item.id, hold: r63(delta) } };
   }
-  const splitSrc = r62(item.src.in + splitFrames / fps * item.speed);
+  const splitSrc = r63(item.src.in + splitFrames / fps * item.speed);
   const ids = new Set(ep.items.map((x) => x.id));
   let suffix = "b";
   while (ids.has(`${item.id}-${suffix}`)) suffix = String.fromCharCode(suffix.charCodeAt(0) + 1);
   const own2 = item.move && !(item.splitFrom && sameMove(item.move, item.splitFrom.move));
   const parts = own2 ? { splitFrom: { item: item.id, move: item.move } } : {};
-  const first = checkHold({ ...item, ...parts, src: { in: item.src.in, out: splitSrc }, hold: r62(delta) });
-  const second = { ...item, ...parts, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
+  const { tailOut: _tail, ...head } = item;
+  const { leadIn: _lead, ...rest } = item;
+  const first = checkHold({ ...head, ...parts, src: { in: item.src.in, out: splitSrc }, hold: r63(delta) });
+  const second = { ...rest, ...parts, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
   const at2 = l.start + splitFrames / fps;
-  return { episode: { ...shiftAfter(ep, at2, delta), items }, hold: { at: r62(at2), sec: r62(delta), item: item.id, hold: first.hold, split: second.id } };
+  return { episode: { ...shiftAfter(ep, at2, delta), items }, hold: { at: r63(at2), sec: r63(delta), item: item.id, hold: first.hold, split: second.id } };
 }
 function undoFitEdits(ep) {
   const fps = ep.output.fps;
@@ -39236,7 +39310,7 @@ function undoFitEdits(ep) {
     const laid = layoutTimeline(out);
     const it = out.items[i2];
     if (isCard(it)) {
-      const next2 = { ...it, hold: r62(Math.max(0, it.hold - (h2.hold ?? 0))) };
+      const next2 = { ...it, hold: r63(Math.max(0, it.hold - (h2.hold ?? 0))) };
       const removed2 = (laid[i2].frames - itemFrames(next2, fps).frames) / fps;
       const items3 = [...out.items];
       items3[i2] = next2;
@@ -39246,9 +39320,9 @@ function undoFitEdits(ep) {
       continue;
     }
     const item = it;
-    let next = { ...item, hold: r62(Math.max(0, item.hold - (h2.hold ?? 0))) };
+    let next = { ...item, hold: r63(Math.max(0, item.hold - (h2.hold ?? 0))) };
     if (h2.outAdded && h2.out !== void 0 && Math.abs(item.src.out - h2.out) < 1e-6 && item.src.out - h2.outAdded > item.src.in) {
-      next = { ...next, src: { in: item.src.in, out: r62(item.src.out - h2.outAdded) } };
+      next = { ...next, src: { in: item.src.in, out: r63(item.src.out - h2.outAdded) } };
     }
     const items2 = [...out.items];
     const end = laid[i2].end;
@@ -39259,8 +39333,9 @@ function undoFitEdits(ep) {
     const sameFocus = b !== void 0 && b.focus.x === item.focus.x && b.focus.y === item.focus.y;
     const asSplit = (x) => sameMove(x.move, x.splitFrom?.move);
     const sameMoves = b !== void 0 && b.splitFrom?.item === item.splitFrom?.item && sameMove(b.splitFrom?.move, item.splitFrom?.move) && asSplit(item) && asSplit(b);
-    if (h2.split && next.hold === 0 && b?.id === h2.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && ["clip", "speed", "audio", "zoom", "frame", "quiet", "onBeat", "beat"].every(same)) {
-      next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold };
+    const noSpillAtSeam = item.tailOut === void 0 && b?.leadIn === void 0;
+    if (h2.split && next.hold === 0 && b?.id === h2.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && noSpillAtSeam && ["clip", "speed", "audio", "zoom", "frame", "quiet", "onBeat", "beat"].every(same)) {
+      next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold, ...b.tailOut !== void 0 ? { tailOut: b.tailOut } : {} };
       items2.splice(i2 + 1, 1);
       frames += laid[i2 + 1].frames;
     }
@@ -39278,8 +39353,8 @@ function withoutSplit(item) {
   const { splitFrom: _, ...rest } = item;
   return rest;
 }
-var LOOK = ["beat", "zoom", "frame", "focus", "move", "quiet", "onBeat"];
-function withLook(base, now) {
+var LOOK = ["beat", "zoom", "frame", "focus", "move", "quiet", "onBeat", "leadIn"];
+function withLook(base, now, last = now) {
   if (isCard(base) || isCard(now)) {
     return isCard(base) && isCard(now) ? { ...base, beat: now.beat, quiet: now.quiet, card: { ...now.card, sec: base.card.sec } } : base;
   }
@@ -39288,6 +39363,20 @@ function withLook(base, now) {
     if (now[k] === void 0) delete out[k];
     else out[k] = now[k];
   }
+  const tail = isCard(last) ? void 0 : last.tailOut;
+  if (tail === void 0) delete out.tailOut;
+  else out.tailOut = tail;
+  return out;
+}
+function lastParts(ep, holds) {
+  const out = /* @__PURE__ */ new Map();
+  for (const [i2, item] of ep.items.entries()) {
+    const parts = /* @__PURE__ */ new Set([item.id]);
+    for (const h2 of holds) if (h2.split && h2.item !== void 0 && parts.has(h2.item)) parts.add(h2.split);
+    let j = i2;
+    while (j + 1 < ep.items.length && parts.has(ep.items[j + 1].id) && ep.items[j + 1].id !== item.id) j++;
+    out.set(item.id, ep.items[j]);
+  }
   return out;
 }
 function revertHolds(ep) {
@@ -39295,14 +39384,15 @@ function revertHolds(ep) {
   if (!vo?.baseItems) return { episode: ep, dropped: [] };
   let out = ep;
   for (const h2 of [...vo.holds ?? []].reverse()) out = shiftAfter(out, h2.at + h2.sec, -h2.sec);
-  const r6s = (x) => ({ ...x, start: r62(x.start), end: r62(x.end) });
+  const r6s = (x) => ({ ...x, start: r63(x.start), end: r63(x.end) });
   const now = new Map(ep.items.map((x) => [x.id, x]));
-  const items = vo.baseItems.map((x) => now.has(x.id) ? withLook(x, now.get(x.id)) : x);
+  const last = lastParts(ep, vo.holds ?? []);
+  const items = vo.baseItems.map((x) => now.has(x.id) ? withLook(x, now.get(x.id), last.get(x.id)) : x);
   const music = out.music.map((c3) => {
     const m = r6s(c3);
     return c3.dips ? { ...m, dips: c3.dips.map(r6s) } : m;
   });
-  out = { ...out, items, overlays: out.overlays.map(r6s), music, slots: out.slots.map(r6s), ...out.sfx ? { sfx: out.sfx.map((x) => ({ ...x, at: r62(x.at) })) } : {}, voiceover: null };
+  out = { ...out, items, overlays: out.overlays.map(r6s), music, slots: out.slots.map(r6s), ...out.sfx ? { sfx: out.sfx.map((x) => ({ ...x, at: r63(x.at) })) } : {}, voiceover: null };
   return dropCollapsed(out, ep);
 }
 function lcsLength(a2, b) {
@@ -39528,8 +39618,8 @@ function fitVoiceover(o2) {
       const held = withoutOld(opened.episode);
       const grown = timelineDuration(held) - before;
       const holds = [...held.voiceover.holds ?? [], opened.hold];
-      ep = { ...held, slots: held.slots.map((x) => x.id === slot.id ? { ...x, end: r62(slot.end + grown) } : x), voiceover: { ...held.voiceover, holds } };
-      report.extendedSec = r62(report.extendedSec + grown);
+      ep = { ...held, slots: held.slots.map((x) => x.id === slot.id ? { ...x, end: r63(slot.end + grown) } : x), voiceover: { ...held.voiceover, holds } };
+      report.extendedSec = r63(report.extendedSec + grown);
     } else {
       ep = withoutOld(ep);
       overrun = 0;
@@ -40791,12 +40881,12 @@ async function videoStage(project2, n2) {
 // packages/core/src/mirage/check.ts
 var OLD_DEFAULT_GAIN_DB = -18;
 var s12 = (n2) => n2.toFixed(1);
-var s2 = (n2) => n2.toFixed(2);
+var s22 = (n2) => n2.toFixed(2);
 function timelineWarnings(ep, lib, snapped) {
   const out = [];
   const D = timelineDuration(ep);
   ep.overlays.forEach((o2, i2) => {
-    if (o2.start >= D - 1e-6) out.push(`overlay ${i2 + 1} ("${o2.text}") starts at ${s2(o2.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never show`);
+    if (o2.start >= D - 1e-6) out.push(`overlay ${i2 + 1} ("${o2.text}") starts at ${s22(o2.start)} s, after the episode ends (${s22(D)} s) \u2014 it will never show`);
     if (undrawable(o2.text)) out.push(`overlay ${i2 + 1} ("${o2.text}") has emoji, which can't be drawn \u2014 they are left out`);
     if (o2.sub && undrawable(o2.sub)) out.push(`overlay ${i2 + 1} ("${o2.sub}") has emoji, which can't be drawn \u2014 they are left out`);
     const auto = (ep.captions?.style ?? "phrase") !== "chosen" && ep.captions?.style !== "off";
@@ -40805,8 +40895,8 @@ function timelineWarnings(ep, lib, snapped) {
   const fps = ep.output.fps;
   const moveWarning = (id, m, frames) => {
     const len = frames / fps;
-    if (m.start !== void 0 && Math.round(m.start * fps) >= frames) out.push(`item ${id}'s move starts at ${s2(m.start)} s, after the shot ends (${s2(len)} s) \u2014 it never plays`);
-    else if (m.end !== void 0 && m.end > len + 0.5 / fps) out.push(`item ${id}'s move ends at ${s2(m.end)} s, after the shot ends (${s2(len)} s) \u2014 it stops at the end of the shot`);
+    if (m.start !== void 0 && Math.round(m.start * fps) >= frames) out.push(`item ${id}'s move starts at ${s22(m.start)} s, after the shot ends (${s22(len)} s) \u2014 it never plays`);
+    else if (m.end !== void 0 && m.end > len + 0.5 / fps) out.push(`item ${id}'s move ends at ${s22(m.end)} s, after the shot ends (${s22(len)} s) \u2014 it stops at the end of the shot`);
   };
   const laid = layoutTimeline(ep);
   const shotAt = new Map(splitShots(ep.items).map((s) => [s.to, s]));
@@ -40822,7 +40912,7 @@ function timelineWarnings(ep, lib, snapped) {
     moveWarning(splitFrom.item, splitFrom.move, frames);
   }
   ep.music.forEach((c3, i2) => {
-    if (c3.start >= D - 1e-6) out.push(`music cue ${i2 + 1} (${c3.track}) starts at ${s2(c3.start)} s, after the episode ends (${s2(D)} s) \u2014 it will never play`);
+    if (c3.start >= D - 1e-6) out.push(`music cue ${i2 + 1} (${c3.track}) starts at ${s22(c3.start)} s, after the episode ends (${s22(D)} s) \u2014 it will never play`);
   });
   if (snapped) {
     for (const l of layoutTimeline(ep)) {
@@ -40852,7 +40942,7 @@ function timelineWarnings(ep, lib, snapped) {
   });
   const sfx = ep.sfx ?? [];
   sfx.forEach((x, k) => {
-    if (x.at > D + 1e-6) out.push(`sfx ${k + 1} (${x.sound}) is at ${s2(x.at)} s, after the episode ends (${s2(D)} s) \u2014 it will never play`);
+    if (x.at > D + 1e-6) out.push(`sfx ${k + 1} (${x.sound}) is at ${s22(x.at)} s, after the episode ends (${s22(D)} s) \u2014 it will never play`);
   });
   const times = sfx.map((x) => x.at).filter((t) => t <= D + 1e-6).sort((a2, b) => a2 - b);
   let busiest = { n: 0, from: 0 };
@@ -40865,9 +40955,34 @@ function timelineWarnings(ep, lib, snapped) {
   }
   ep.music.forEach((c3, i2) => {
     for (const d of c3.dips ?? []) {
-      if (d.end <= c3.start || d.start >= c3.end) out.push(`music cue ${i2 + 1} has a dip at ${s2(d.start)}\u2013${s2(d.end)} s outside the cue (${s2(c3.start)}\u2013${s2(c3.end)} s) \u2014 it does nothing`);
+      if (d.end <= c3.start || d.start >= c3.end) out.push(`music cue ${i2 + 1} has a dip at ${s22(d.start)}\u2013${s22(d.end)} s outside the cue (${s22(c3.start)}\u2013${s22(c3.end)} s) \u2014 it does nothing`);
     }
   });
+  return out;
+}
+function spillWarnings(ep, catalog) {
+  if (!ep.items.some(hasSpill)) return [];
+  const out = [];
+  const { spills: played, shortened } = spills(ep, catalog);
+  for (const item of ep.items) {
+    if (!hasSpill(item)) continue;
+    if (!keepsOwnSound(item, catalog)) {
+      out.push(`item ${item.id} has leadIn/tailOut but doesn't keep its own sound (audio "keep" at speed 1) \u2014 it does nothing`);
+      continue;
+    }
+    for (const x of shortened) if (x.item === item.id) out.push(`item ${x.item}'s ${x.field} of ${s22(x.asked)} s is shortened to ${s22(x.got)} s \u2014 ${x.reason}`);
+  }
+  for (const line of ep.voiceover?.lines ?? []) {
+    const segs = keptSegments(line);
+    const last = segs[segs.length - 1];
+    if (!last) continue;
+    const end = line.at + last.offset + last.out - last.in;
+    for (const s of played) {
+      if (Math.min(end, s.at + s.sec) - Math.max(line.at, s.at) > 1e-6) {
+        out.push(`voice-over line ${line.slot} plays over item ${s.item}'s carried-over sound (${s22(s.at)}\u2013${s22(s.at + s.sec)} s) \u2014 shorten the leadIn/tailOut or move the line`);
+      }
+    }
+  }
   return out;
 }
 var MAX_SFX_PER_MINUTE = 6;
@@ -41009,6 +41124,7 @@ async function checkEpisode(project2, n2, tools, opts = {}) {
     }
   }
   warnings.push(...timelineWarnings(ep, lib, !ep.voiceover));
+  warnings.push(...spillWarnings(ep, catalog));
   const { video: video2, format: format2, formatted, problems } = await videoFormat(root, n2, opts.formatsDir);
   if (format2) warnings.push(...formatWarnings(ep, catalog, video2, format2, formatted));
   return { episode: ep, warnings, notes, problems };

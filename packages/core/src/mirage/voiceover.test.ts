@@ -630,6 +630,46 @@ describe('a move across voice-over fits', () => {
   });
 });
 
+describe('leadIn and tailOut across voice-over fits', () => {
+  const short = tx([...said('This is the first line.', 2), ...said('And here is the second one.', 4, 0.2)]);
+  const tail = { id: 'c', beat: 'outro' as const, clip: 'c001', src: { in: 0, out: 2 }, speed: 1, audio: 'mute' as const, zoom: 1, frame: 'fit' as const, focus: { x: 0.5, y: 0.5 }, hold: 0, quiet: false, onBeat: false };
+  const spilled = (extra: object) => EpisodeSchema.parse({ ...episode(SLOTS), items: [{ ...episode(SLOTS).items[0], audio: 'keep', ...extra }] });
+  const sound = (e: Episode) => e.items.map((i) => [i.id, clip(i).leadIn, clip(i).tailOut, 'leadIn' in i, 'tailOut' in i]);
+
+  it('a split keeps the leadIn on the first half and the tailOut on the second', () => {
+    const held = holdAt(spilled({ leadIn: 0.5, tailOut: 1 }), catalog(20), 4, 1);
+    expect(sound(held)).toEqual([['a', 0.5, undefined, true, false], ['a-b', undefined, 1, false, true]]);
+    // Split again, in either half: the lead stays on the first part and the tail on the last.
+    const twice = holdAt(holdAt(held, catalog(20), 2, 0.5), catalog(20), 9, 0.5);
+    expect(sound(twice)).toEqual([['a', 0.5, undefined, true, false], ['a-c', undefined, undefined, false, false], ['a-b', undefined, undefined, false, false], ['a-b-b', undefined, 1, false, true]]);
+  });
+
+  it('a fit that splits the item does the same, and the fitted voice-over stays fitted when they change', () => {
+    const first = fitVoiceover({ episode: spilled({ leadIn: 0.5, tailOut: 1 }), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    expect(sound(first)).toEqual([['a', 0.5, undefined, true, false], ['a-b', undefined, 1, false, true]]);
+    const edited = { ...first, items: first.items.map((i) => ({ ...i, ...(i.id === 'a' ? { leadIn: 0.2 } : { tailOut: 2 }) })) };
+    expect(cutChanged(edited)).toBe(false);
+  });
+
+  it('a full re-fit gives back the item with the leadIn of its first part and the tailOut of its last', () => {
+    const first = fitVoiceover({ episode: spilled({ leadIn: 0.5, tailOut: 1 }), catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    const edited = { ...first, items: first.items.map((i) => ({ ...i, ...(i.id === 'a' ? { leadIn: 0.2 } : { tailOut: 2 }) })) };
+    const again = fitVoiceover({ episode: edited, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
+    expect(again.items).toStrictEqual([{ ...spilled({}).items[0], leadIn: 0.2, tailOut: 2 }]);
+    // Removed after the fit: removed after the re-fit too.
+    const removed = { ...first, items: first.items.map((i) => { const { leadIn: _, tailOut: __, ...x } = clip(i); return x; }) };
+    expect(sound(fitVoiceover({ episode: removed, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode)).toEqual([['a', undefined, undefined, false, false]]);
+  });
+
+  it('after a re-cut, the halves merge back into the item with its leadIn and tailOut', () => {
+    const ep0 = spilled({ leadIn: 0.5, tailOut: 1 });
+    const first = fitVoiceover({ episode: ep0, catalog: catalog(20), recording: 'vo.m4a', transcript: RECORDING }).episode;
+    const recut = { ...first, items: [...first.items, tail] };
+    const refit = fitVoiceover({ episode: { ...recut, slotsCut: cutOf(recut) }, catalog: catalog(20), recording: 'short.m4a', transcript: short }).episode;
+    expect(refit.items).toEqual([ep0.items[0], tail]);
+  });
+});
+
 describe('lines with no words', () => {
   it('count as unwritten: not missing, not fitted', () => {
     const slots = [SLOTS[0], { id: 'n2', start: 10, end: 12, maxWords: 4, line: '🚀🚀 …' }, { id: 'n3', start: 14, end: 18, maxWords: 4, line: 'Um.' }];

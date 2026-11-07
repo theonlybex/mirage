@@ -2,6 +2,7 @@ import { isCard, type CardItem, type Catalog, type Episode, type Overlay, type S
 import { isFiller, normalizeWord } from '../autoedit/takes.js';
 import { HIGHLIGHT_COLOR, type CaptionLine, type CaptionPart } from './captions.js';
 import { CAPTION_FONT, MONO_FONT } from './fonts.js';
+import { spills } from './spill.js';
 import { layoutTimeline } from './timeline.js';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -87,11 +88,15 @@ export function alignWritten(spoken: Word[], text: string): Word[] {
 /** Voice-over transcripts: one for every line, or one per recording path. */
 export type VoTranscripts = Transcript | Map<string, Transcript>;
 
-/** Every spoken (non-filler) word on the output timeline: live audio of kept real-time items, plus the fitted voice-over. */
+/**
+ * Every spoken (non-filler) word on the output timeline: live audio of kept real-time items, the words their leads and
+ * tails carry outside their shots (spills), plus the fitted voice-over.
+ */
 export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | null): Word[] {
   const fps = ep.output.fps;
   const out: Word[] = [];
-  for (const l of layoutTimeline(ep)) {
+  const laid = layoutTimeline(ep);
+  for (const l of laid) {
     const { item } = l;
     // A card has no speech.
     if (isCard(item) || item.audio !== 'keep' || item.speed !== 1) continue;
@@ -100,6 +105,14 @@ export function speechWords(ep: Episode, catalog: Catalog, vo: VoTranscripts | n
     for (const w of words) {
       if (w.start < item.src.in - EPS || w.start >= srcEnd || isFiller(w)) continue;
       out.push({ ...w, start: r3(l.start + w.start - item.src.in), end: r3(l.start + Math.min(w.end, srcEnd) - item.src.in) });
+    }
+  }
+  // A word belongs to a lead or a tail when it starts inside it, as a word belongs to its shot.
+  for (const s of spills(ep, catalog, laid).spills) {
+    const words = catalog.clips.find((c) => c.id === s.clip)?.transcript?.words ?? [];
+    for (const w of words) {
+      if (w.start < s.srcIn - EPS || w.start >= s.srcOut || isFiller(w)) continue;
+      out.push({ ...w, start: r3(s.at + w.start - s.srcIn), end: r3(s.at + Math.min(w.end, s.srcOut) - s.srcIn) });
     }
   }
   if (vo && ep.voiceover) {

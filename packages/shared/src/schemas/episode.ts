@@ -58,6 +58,18 @@ export const ClipItemSchema = strictObject({
   /** Snap this item's length to whole beats of the music under it. */
   onBeat: z.boolean().default(false),
   /**
+   * A J-cut: seconds of the clip's own sound from before `src.in` that start playing under the end of the shot before,
+   * while that shot's sound fades out. Only with `audio: "keep"` at speed 1; shortened to the sound the clip has and to
+   * the shot before's length. Absent = none.
+   */
+  leadIn: z.number().min(0).max(3).optional(),
+  /**
+   * An L-cut: seconds of the clip's own sound from after the shot that carry on under the start of the shot after (after
+   * any held frames), while that shot's sound fades in. Only with `audio: "keep"` at speed 1; shortened to the sound the
+   * clip has and to the shot after's length. Absent = none.
+   */
+  tailOut: z.number().min(0).max(3).optional(),
+  /**
    * Written by voice-over fitting, never by hand: fitting split item `item`, which had a move, to freeze its picture
    * partway, and this item is one of its parts; `move` is that item's move as it was. The parts (the items next to each
    * other with the same `splitFrom.item`) play the move on one clock, as the item would have with the frozen frames in

@@ -27,6 +27,17 @@ describe('computeSlots', () => {
   });
 });
 
+describe('computeSlots with a tail', () => {
+  it("keeps narration off the words a shot's tailOut carries under the next shot", () => {
+    // "Ha!" comes right after the talk shot's src.out: a 1.5 s tail plays it over the start of the screen shot.
+    const words = [...catalog.clips[0].transcript!.words, { w: 'Ha!', start: 3.4, end: 3.9, conf: 1 }];
+    const laughing: Catalog = { version: 1, clips: [{ ...catalog.clips[0], transcript: { words, segments: [], speech: [] } }] };
+    expect(computeSlots(ep, laughing)).toEqual([{ id: 'n1', start: 2.8, end: 9, maxWords: 16, line: '' }]);
+    const tailed = { ...ep, items: ep.items.map((i) => (i.id === 'talk' ? { ...i, tailOut: 1.5 } : i)) };
+    expect(computeSlots(tailed, laughing)).toEqual([{ id: 'n1', start: 4.2, end: 9, maxWords: 12, line: '' }]);
+  });
+});
+
 describe('computeSlots rounding', () => {
   it('sizes maxWords from rounded bounds without float loss (2.8 to 9.2 -> 17)', () => {
     const ep2 = EpisodeSchema.parse({

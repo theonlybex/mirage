@@ -107,7 +107,7 @@ describe('EpisodeSchema unknown keys', () => {
   it('rejects a misspelled key anywhere, naming it and the valid keys', () => {
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [item, { ...item, id: 'i2', speeed: 2 }] }))).toEqual({
       path: ['items', 1],
-      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, frame, focus, move, hold, quiet, onBeat, splitFrom)',
+      message: 'unknown key "speeed" (valid keys: id, beat, clip, src, speed, audio, zoom, frame, focus, move, hold, quiet, onBeat, leadIn, tailOut, splitFrom)',
     });
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, extra: 1 }))?.message).toMatch(/^unknown key "extra" \(valid keys: version, number, title, /);
     expect(firstIssue(EpisodeSchema.safeParse({ ...base, items: [{ ...item, src: { in: 0, out: 2, end: 3 } }] }))?.path).toEqual(['items', 0, 'src']);
@@ -167,6 +167,33 @@ describe('EpisodeSchema sound effects and dips', () => {
     expect(dip({ start: 3, end: 2 })).toBe(false);
     expect(dip({ start: -1, end: 2 })).toBe(false);
     expect(dip({ start: 1, end: 2, fade: 0.1 })).toBe(false);
+  });
+});
+
+describe('EpisodeSchema leadIn and tailOut', () => {
+  const withSound = (extra: object) => EpisodeSchema.safeParse({ ...base, items: [{ ...item, audio: 'keep', ...extra }] });
+  it('stays absent when absent: parses undefined and stringifies without the keys', () => {
+    const ep = EpisodeSchema.parse(base);
+    expect(clip(ep.items[0]).leadIn).toBeUndefined();
+    expect(clip(ep.items[0]).tailOut).toBeUndefined();
+    expect(JSON.stringify(ep)).not.toMatch(/leadIn|tailOut/);
+  });
+  it('takes 0–3 seconds of each on a clip item, and round-trips them', () => {
+    const r = withSound({ leadIn: 0.5, tailOut: 3 });
+    expect(r.success).toBe(true);
+    expect(clip(r.data!.items[0])).toMatchObject({ leadIn: 0.5, tailOut: 3 });
+    expect(EpisodeSchema.parse(JSON.parse(JSON.stringify(r.data)))).toEqual(r.data);
+    expect(withSound({ leadIn: 0 }).success).toBe(true);
+  });
+  it('refuses more than 3 s, a negative value or a string', () => {
+    for (const bad of [{ leadIn: 3.01 }, { tailOut: 4 }, { leadIn: -0.1 }, { tailOut: '1' }]) expect(withSound(bad).success, JSON.stringify(bad)).toBe(false);
+  });
+  it('a card item refuses them, naming the key', () => {
+    for (const k of ['leadIn', 'tailOut']) {
+      const r = EpisodeSchema.safeParse({ ...base, items: [item, { id: 'k1', beat: 'title', card: { style: 'bold', sec: 2, text: 'Hi' }, [k]: 1 }] });
+      expect(r.success).toBe(false);
+      expect(firstIssue(r)?.message).toMatch(new RegExp(`^unknown key "${k}"`));
+    }
   });
 });
 

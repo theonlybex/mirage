@@ -349,6 +349,60 @@ describe('checkEpisode', () => {
   });
 });
 
+describe('checkEpisode with leadIn and tailOut', () => {
+  const live = (id: string, from: number, to: number, extra: object = {}) => ({ id, beat: 'problem', clip: 'c001', src: { in: from, out: to }, audio: 'keep', ...extra });
+
+  it('warns when a value is shortened, saying why, and when it does nothing', async () => {
+    const { dir } = await project({ words: [], segments: [], speech: [] });
+    await saveEpisode(dir, base({
+      music: [],
+      items: [
+        live('a', 0.3, 3, { leadIn: 1, tailOut: 0.5 }),
+        live('b', 10, 10.4, { audio: 'mute', leadIn: 0.5 }),
+        live('c', 0.3, 2, { leadIn: 1 }),
+        live('d', 12, 12.5, { audio: 'mute' }),
+        live('e', 5, 8, { leadIn: 1, tailOut: 0.2 }),
+        live('f', 28, 29.5, { tailOut: 1 }),
+        live('h', 20, 24, { speed: 2, tailOut: 1 }),
+        live('g', 15, 17, { tailOut: 1 }),
+      ],
+    }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([
+      "item a's leadIn of 1.00 s is shortened to 0.00 s — it's the first shot",
+      "item a's tailOut of 0.50 s is shortened to 0.40 s — the shot after it is only 0.40 s long",
+      'item b has leadIn/tailOut but doesn\'t keep its own sound (audio "keep" at speed 1) — it does nothing',
+      "item c's leadIn of 1.00 s is shortened to 0.30 s — c001 has only 0.30 s of sound before the shot",
+      "item e's leadIn of 1.00 s is shortened to 0.50 s — the shot before it is only 0.50 s long",
+      "item f's tailOut of 1.00 s is shortened to 0.50 s — c001 has only 0.50 s of sound after the shot",
+      'item h has leadIn/tailOut but doesn\'t keep its own sound (audio "keep" at speed 1) — it does nothing',
+      "item g's tailOut of 1.00 s is shortened to 0.00 s — it's the last shot",
+    ]);
+  });
+
+  it('warns when the clip has no sound', async () => {
+    const { dir, catalog } = await project({ words: [], segments: [], speech: [] });
+    const silent = { ...catalog.clips[0], probe: { ...catalog.clips[0].probe, hasAudio: false } };
+    await saveCatalog(dir, { version: 1, clips: [silent] });
+    await saveEpisode(dir, base({ music: [], items: [live('a', 0, 2), live('b', 5, 7, { leadIn: 0.5 })] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['item b has leadIn/tailOut but doesn\'t keep its own sound (audio "keep" at speed 1) — it does nothing']);
+  });
+
+  it('a voice-over line over carried-over sound: the fit stays fitted, and check says which line and where', async () => {
+    const { dir, catalog } = await project({ words: [], segments: [], speech: [] });
+    const words = 'This is the line.'.split(' ').map((w, i) => ({ w, start: i * 0.3, end: i * 0.3 + 0.25, conf: 1 }));
+    const cut = base({ music: [], items: [live('a', 0, 2), live('b', 10, 16, { audio: 'mute' })], slots: [{ id: 'n1', start: 1.5, end: 5, maxWords: 8, line: 'This is the line.' }] });
+    const fitted = fitVoiceover({ episode: cut, catalog, recording: 'vo.wav', transcript: { words, segments: [], speech: [] } }).episode;
+    await saveEpisode(dir, fitted);
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    await saveEpisode(dir, { ...fitted, items: fitted.items.map((i) => (i.id === 'a' ? { ...i, tailOut: 1 } : i)) });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["voice-over line n1 plays over item a's carried-over sound (2.00–3.00 s) — shorten the leadIn/tailOut or move the line"]);
+    // A tail that ends before the line starts: nothing to say.
+    const at = fitted.voiceover!.lines[0].at;
+    await saveEpisode(dir, { ...fitted, items: fitted.items.map((i) => (i.id === 'a' ? { ...i, src: { in: 0, out: 1 }, tailOut: Math.max(0.1, Math.floor((at - 1.05) * 10) / 10) } : i)) });
+    expect((await checkEpisode(dir, 1)).warnings.filter((x) => x.startsWith('voice-over line'))).toEqual([]);
+  });
+});
+
 describe('checkEpisode with cards', () => {
   const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
   const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16]);

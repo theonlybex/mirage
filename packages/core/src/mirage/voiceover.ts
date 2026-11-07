@@ -167,8 +167,11 @@ function openAt(ep: Episode, catalog: Catalog, t: number, delta: number): { epis
   // person changed is a shot of its own.
   const own = item.move && !(item.splitFrom && sameMove(item.move, item.splitFrom.move));
   const parts = own ? { splitFrom: { item: item.id, move: item.move! } } : {};
-  const first = checkHold({ ...item, ...parts, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) });
-  const second = { ...item, ...parts, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
+  // The sound before the shot leads into the first half, the sound after it trails from the second.
+  const { tailOut: _tail, ...head } = item;
+  const { leadIn: _lead, ...rest } = item;
+  const first = checkHold({ ...head, ...parts, src: { in: item.src.in, out: splitSrc }, hold: r6(delta) });
+  const second = { ...rest, ...parts, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
   const at = l.start + splitFrames / fps;
   return { episode: { ...shiftAfter(ep, at, delta), items }, hold: { at: r6(at), sec: r6(delta), item: item.id, hold: first.hold, split: second.id } };
@@ -218,8 +221,10 @@ export function undoFitEdits(ep: Episode): { episode: Episode; dropped: string[]
     // person changed or added on either half keeps them apart, like a changed zoom on one).
     const asSplit = (x: typeof item) => sameMove(x.move, x.splitFrom?.move);
     const sameMoves = b !== undefined && b.splitFrom?.item === item.splitFrom?.item && sameMove(b.splitFrom?.move, item.splitFrom?.move) && asSplit(item) && asSplit(b);
-    if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && (['clip', 'speed', 'audio', 'zoom', 'frame', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
-      next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold };
+    // Sound carried across the seam (a tail on the first half, a lead on the second) keeps the halves apart too.
+    const noSpillAtSeam = item.tailOut === undefined && b?.leadIn === undefined;
+    if (h.split && next.hold === 0 && b?.id === h.split && Math.abs(b.src.in - next.src.out) < 1e-6 && sameFocus && sameMoves && noSpillAtSeam && (['clip', 'speed', 'audio', 'zoom', 'frame', 'quiet', 'onBeat', 'beat'] as const).every(same)) {
+      next = { ...next, src: { in: next.src.in, out: b.src.out }, hold: b.hold, ...(b.tailOut !== undefined ? { tailOut: b.tailOut } : {}) };
       items.splice(i + 1, 1);
       frames += laid[i + 1].frames;
     }
@@ -242,15 +247,17 @@ function withoutSplit(item: ClipItem): ClipItem {
 
 /**
  * The item fields that don't change the timing (the schema's others: id, clip, src, speed, audio and hold do, and
- * splitFrom is fitting's): a full re-fit keeps the person's current ones.
+ * splitFrom is fitting's): a full re-fit keeps the person's current ones. leadIn and tailOut don't move the picture
+ * either (the fingerprint leaves them out).
  */
-const LOOK = ['beat', 'zoom', 'frame', 'focus', 'move', 'quiet', 'onBeat'] as const;
+const LOOK = ['beat', 'zoom', 'frame', 'focus', 'move', 'quiet', 'onBeat', 'leadIn'] as const;
 
 /**
- * `base` with the LOOK fields of `now` (a field absent from `now` is removed). A card keeps its length (`sec`) from
- * `base` and takes the rest from `now`; an item that became a card, or a card that became a clip item, stays `base`.
+ * `base` with the LOOK fields of `now` and the tailOut of `last` (a field absent there is removed): `last` is the last
+ * part of a split item, where its tailOut is (the item itself when it wasn't split). A card keeps its length (`sec`)
+ * from `base` and takes the rest from `now`; an item that became a card, or a card that became a clip item, stays `base`.
  */
-function withLook(base: TimelineItem, now: TimelineItem): TimelineItem {
+function withLook(base: TimelineItem, now: TimelineItem, last: TimelineItem = now): TimelineItem {
   if (isCard(base) || isCard(now)) {
     return isCard(base) && isCard(now) ? { ...base, beat: now.beat, quiet: now.quiet, card: { ...now.card, sec: base.card.sec } } : base;
   }
@@ -259,15 +266,34 @@ function withLook(base: TimelineItem, now: TimelineItem): TimelineItem {
     if (now[k] === undefined) delete out[k];
     else out[k] = now[k];
   }
+  const tail = isCard(last) ? undefined : last.tailOut;
+  if (tail === undefined) delete out.tailOut;
+  else out.tailOut = tail;
   return out as typeof base;
+}
+
+/**
+ * The last part of each item a fit split, by the item's id: the run of parts that starts at the item and goes on while
+ * the next item is one of its splits (a split of the item or of one of its parts).
+ */
+function lastParts(ep: Episode, holds: Hold[]): Map<string, TimelineItem> {
+  const out = new Map<string, TimelineItem>();
+  for (const [i, item] of ep.items.entries()) {
+    const parts = new Set([item.id]);
+    for (const h of holds) if (h.split && h.item !== undefined && parts.has(h.item)) parts.add(h.split);
+    let j = i;
+    while (j + 1 < ep.items.length && parts.has(ep.items[j + 1].id) && ep.items[j + 1].id !== item.id) j++;
+    out.set(item.id, ep.items[j]);
+  }
+  return out;
 }
 
 /**
  * The episode as it was before its voice-over's fits held the picture: the items before the first fit, and every
  * overlay, cue and slot moved back by closing the time each hold opened (newest first). Ranges that were inside a
  * frozen frame shrink to nothing and are dropped (named in `dropped`). The voice-over is cleared. Each item keeps the
- * look the person gave it since (LOOK: move, zoom, focus, frame, …, from the item with its id now — for a split
- * item, its first part).
+ * look the person gave it since (LOOK: move, zoom, focus, frame, leadIn, …, from the item with its id now — for a split
+ * item, its first part — and its tailOut from its last part).
  */
 export function revertHolds(ep: Episode): { episode: Episode; dropped: string[] } {
   const vo = ep.voiceover;
@@ -276,7 +302,8 @@ export function revertHolds(ep: Episode): { episode: Episode; dropped: string[] 
   for (const h of [...(vo.holds ?? [])].reverse()) out = shiftAfter(out, h.at + h.sec, -h.sec);
   const r6s = <T extends { start: number; end: number }>(x: T): T => ({ ...x, start: r6(x.start), end: r6(x.end) });
   const now = new Map(ep.items.map((x) => [x.id, x]));
-  const items = vo.baseItems.map((x) => (now.has(x.id) ? withLook(x, now.get(x.id)!) : x));
+  const last = lastParts(ep, vo.holds ?? []);
+  const items = vo.baseItems.map((x) => (now.has(x.id) ? withLook(x, now.get(x.id)!, last.get(x.id)) : x));
   const music = out.music.map((c) => {
     const m = r6s(c);
     return c.dips ? { ...m, dips: c.dips.map(r6s) } : m;
