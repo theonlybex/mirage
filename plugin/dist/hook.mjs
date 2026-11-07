@@ -32218,6 +32218,21 @@ function chunkItems(laid, size = CHUNK_ITEMS) {
 function chunkSize(sources) {
   return [...sources.values()].some((s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
 }
+function episodeChunks(laid, o2, sources, output2) {
+  const out = [];
+  for (const group of chunkItems(laid, chunkSize(sources))) {
+    let chunk = [];
+    for (const l of group) {
+      if (chunk.length && commandLength(itemChunkArgs([...chunk, l], o2, sources, output2)) > MAX_COMMAND) {
+        out.push(chunk);
+        chunk = [];
+      }
+      chunk.push(l);
+    }
+    out.push(chunk);
+  }
+  return out;
+}
 function cropAt(focus) {
   return Math.abs(focus.x - 0.5) < 1e-6 && Math.abs(focus.y - 0.5) < 1e-6 ? "" : `:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)}`;
 }
@@ -32487,7 +32502,7 @@ async function renderLocked(o2) {
   await mkdir2(work, { recursive: true });
   const report = (f) => o2.onProgress?.(Math.min(1, Math.max(0, f)));
   try {
-    const chunks = chunkItems(laid, chunkSize(sources));
+    const chunks = episodeChunks(laid, { width: W, height: H, fps }, sources, join10(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i2, chunk] of chunks.entries()) {
       o2.signal?.throwIfAborted();
@@ -32593,7 +32608,7 @@ async function renderLocked(o2) {
     });
   }
 }
-var CHUNK_ITEMS, CHUNK_ITEMS_LARGE, pad3, FLTP_STEREO, LOUDNORM_MIN_SEC, lufs, frameTolerance, filterValue, episodeDir, noEpisode, wrongNumber, COMMAND;
+var CHUNK_ITEMS, CHUNK_ITEMS_LARGE, pad3, MAX_COMMAND, commandLength, FLTP_STEREO, LOUDNORM_MIN_SEC, lufs, frameTolerance, filterValue, episodeDir, noEpisode, wrongNumber, COMMAND;
 var init_render_episode = __esm({
   "packages/core/src/mirage/render-episode.ts"() {
     "use strict";
@@ -32615,6 +32630,8 @@ var init_render_episode = __esm({
     CHUNK_ITEMS = 30;
     CHUNK_ITEMS_LARGE = 12;
     pad3 = (i2) => String(i2).padStart(3, "0");
+    MAX_COMMAND = 24e3;
+    commandLength = (args) => args.reduce((n2, a2) => n2 + a2.length + 3, 0);
     FLTP_STEREO = "aformat=sample_fmts=fltp:channel_layouts=stereo";
     LOUDNORM_MIN_SEC = 3.1;
     lufs = (n2) => ffNum(Math.min(-5, Math.max(-70, n2)));
@@ -33878,6 +33895,7 @@ __export(src_exports2, {
   JsonFileError: () => JsonFileError,
   MAX_BACKUPS: () => MAX_BACKUPS,
   MAX_CHECKPOINTS: () => MAX_CHECKPOINTS,
+  MAX_COMMAND: () => MAX_COMMAND,
   MAX_SPEEDUP: () => MAX_SPEEDUP,
   MirageError: () => MirageError,
   NARRATION_GAPS: () => NARRATION_GAPS,
@@ -33902,6 +33920,7 @@ __export(src_exports2, {
   chunkSize: () => chunkSize,
   chunkTimeoutMs: () => chunkTimeoutMs,
   clearProgress: () => clearProgress,
+  commandLength: () => commandLength,
   computeSlots: () => computeSlots,
   cueTrack: () => cueTrack,
   cutChanged: () => cutChanged,
@@ -33916,6 +33935,7 @@ __export(src_exports2, {
   dropCollapsed: () => dropCollapsed,
   encodeArgs: () => encodeArgs,
   englishOnlyError: () => englishOnlyError,
+  episodeChunks: () => episodeChunks,
   episodeDir: () => episodeDir,
   episodeFinalArgs: () => episodeFinalArgs,
   errorReason: () => errorReason,

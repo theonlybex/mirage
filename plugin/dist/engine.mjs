@@ -38991,6 +38991,23 @@ function chunkItems(laid, size = CHUNK_ITEMS) {
 function chunkSize(sources) {
   return [...sources.values()].some((s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
 }
+var MAX_COMMAND = 24e3;
+var commandLength = (args) => args.reduce((n2, a2) => n2 + a2.length + 3, 0);
+function episodeChunks(laid, o2, sources, output2) {
+  const out = [];
+  for (const group of chunkItems(laid, chunkSize(sources))) {
+    let chunk = [];
+    for (const l of group) {
+      if (chunk.length && commandLength(itemChunkArgs([...chunk, l], o2, sources, output2)) > MAX_COMMAND) {
+        out.push(chunk);
+        chunk = [];
+      }
+      chunk.push(l);
+    }
+    out.push(chunk);
+  }
+  return out;
+}
 var FLTP_STEREO = "aformat=sample_fmts=fltp:channel_layouts=stereo";
 var LOUDNORM_MIN_SEC = 3.1;
 var lufs = (n2) => ffNum(Math.min(-5, Math.max(-70, n2)));
@@ -39269,7 +39286,7 @@ async function renderLocked(o2) {
   await mkdir3(work, { recursive: true });
   const report = (f) => o2.onProgress?.(Math.min(1, Math.max(0, f)));
   try {
-    const chunks = chunkItems(laid, chunkSize(sources));
+    const chunks = episodeChunks(laid, { width: W, height: H, fps }, sources, join10(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i2, chunk] of chunks.entries()) {
       o2.signal?.throwIfAborted();

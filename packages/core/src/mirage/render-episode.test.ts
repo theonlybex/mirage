@@ -12,7 +12,7 @@ import { bundledFontsDir, CAPTION_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
-import { buildVoiceTrack, chunkItems, type ClipSource, chunkSize, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkItems, chunkSize, type ClipSource, commandLength, episodeChunks, MAX_COMMAND, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover } from './voiceover.js';
 
@@ -170,6 +170,35 @@ describe('chunkSize', () => {
     expect(chunkSize(new Map([['a', src(1920, 1080)], ['b', src(1080, 1920)]]))).toBe(30);
     expect(chunkSize(new Map([['a', src(1920, 1080)], ['b', src(3840, 2160)]]))).toBe(12);
     expect(chunkItems(layoutTimeline(ep(Array.from({ length: 25 }, (_, i) => ({ id: `i${i}`, beat: 'montage', clip: 'c001', src: { in: 0, out: 1 } })))), 12).map((c) => c.length)).toEqual([12, 12, 1]);
+  });
+});
+
+describe('episodeChunks', () => {
+  const o = { width: 1080, height: 1920, fps: 30 };
+  const items = (n: number, move: boolean) =>
+    Array.from({ length: n }, (_, i) => ({ id: `i${i}`, beat: 'montage', clip: 'c002', src: { in: i, out: i + 2 }, audio: 'keep', frame: 'fill', focus: { x: 0.3, y: 0.5 }, ...(move ? { move: { zoom: 1.25, focus: { x: 0.6 }, start: 0.5 } } : {}) }));
+  const chunks = (n: number, move: boolean) => {
+    const e = ep(items(n, move), { output: o });
+    const sources = sourcesFor(e, cat);
+    return { sources, chunks: episodeChunks(layoutTimeline(e), o, sources, '/w/.work-0123/chunk-000.mov') };
+  };
+  it('counts a command as Windows writes it: each argument quoted, with a space before it', () => {
+    expect(commandLength(['-i', 'a b.mp4'])).toBe(2 + 3 + 7 + 3);
+    expect(MAX_COMMAND).toBe(24_000);
+  });
+  it('cuts a chunk early when its FFmpeg command would pass 24,000 characters', () => {
+    const { sources, chunks: c } = chunks(30, true);
+    expect(c.length).toBeGreaterThan(1);
+    expect(c.flat()).toHaveLength(30);
+    for (const chunk of c) {
+      const args = itemChunkArgs(chunk, o, sources, '/w/.work-0123/chunk-000.mov');
+      expect(commandLength(args)).toBeLessThanOrEqual(24_000);
+      // Each chunk is as full as the limit allows: one more item would pass it.
+      if (chunk !== c.at(-1)) expect(commandLength(itemChunkArgs([...chunk, c[c.indexOf(chunk) + 1][0]], o, sources, '/w/c.mov'))).toBeGreaterThan(24_000);
+    }
+  });
+  it('keeps the item counts for an episode without moves', () => {
+    expect(chunks(65, false).chunks.map((x) => x.length)).toEqual([30, 30, 5]);
   });
 });
 
@@ -380,6 +409,21 @@ describe('renderEpisode (real ffmpeg)', () => {
     return { calls, tools: { ...tools, runFfmpeg: async (args: string[], opts?: object) => { calls.push(args); return tools.runFfmpeg(args, opts); } } };
   };
   const one = [{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 } }];
+
+  it('renders an episode of 15 moving items, in chunks short enough for Windows, at the right length', async () => {
+    const items = Array.from({ length: 15 }, (_, i) => ({ id: `z${i}`, beat: 'montage', clip: 'c003', src: { in: i, out: i + 0.5 }, frame: 'fill', move: { zoom: 1.2 + (i % 3) * 0.1, focus: { x: (i % 5) / 4 } } }));
+    const e = ep(items, { number: 4, output: { width: 1080, height: 1920, fps: 30 } });
+    await saveEpisode(project, e);
+    const { calls, tools: t } = counting();
+    const r = await renderEpisode({ project, episode: 4, mode: 'rough', tools: t });
+    const chunkCalls = calls.filter((a) => a.at(-1)!.endsWith('.mov'));
+    console.log(`15 moving items: chunk commands of ${chunkCalls.map((a) => commandLength(a)).join(', ')} characters`);
+    expect(chunkCalls.length).toBeGreaterThan(1);
+    for (const a of chunkCalls) expect(commandLength(a)).toBeLessThanOrEqual(24_000);
+    const p = await tools.probe(r.outputPath);
+    expect(Math.abs(p.durationSec - timelineDuration(e))).toBeLessThanOrEqual(0.1);
+    expect(Math.abs((p.videoDurationSec ?? p.durationSec) - 7.5)).toBeLessThanOrEqual(0.1);
+  }, 300_000);
 
   it('fails instead of finishing when the rendered picture is shorter than the timeline', async () => {
     await saveEpisode(project, ep([{ id: 'v', beat: 'problem', clip: 'c001', src: { in: 0, out: 1 }, audio: 'keep' }], { number: 9 }));

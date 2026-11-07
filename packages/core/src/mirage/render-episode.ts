@@ -70,6 +70,35 @@ export function chunkSize(sources: Map<string, ClipSource>): number {
   return [...sources.values()].some((s) => (s.width ?? 0) * (s.height ?? 0) > 1920 * 1080) ? CHUNK_ITEMS_LARGE : CHUNK_ITEMS;
 }
 
+/**
+ * The longest FFmpeg command a chunk may run, in characters, on every platform: Windows refuses a command line over
+ * 32,767, and this leaves room for FFmpeg's path and the options runFfmpeg adds. An item with a move adds about 1,200.
+ */
+export const MAX_COMMAND = 24_000;
+
+/** A command's length as Windows writes it: each argument quoted, with a space before it. */
+export const commandLength = (args: string[]) => args.reduce((n, a) => n + a.length + 3, 0);
+
+/**
+ * The episode's chunks: chunkSize's count of items each, cut early when a chunk's command (itemChunkArgs to `output`)
+ * would pass MAX_COMMAND. An item alone is always a chunk.
+ */
+export function episodeChunks(laid: LaidItem[], o: { width: number; height: number; fps: number }, sources: Map<string, ClipSource>, output: string): LaidItem[][] {
+  const out: LaidItem[][] = [];
+  for (const group of chunkItems(laid, chunkSize(sources))) {
+    let chunk: LaidItem[] = [];
+    for (const l of group) {
+      if (chunk.length && commandLength(itemChunkArgs([...chunk, l], o, sources, output)) > MAX_COMMAND) {
+        out.push(chunk);
+        chunk = [];
+      }
+      chunk.push(l);
+    }
+    out.push(chunk);
+  }
+  return out;
+}
+
 const FLTP_STEREO = 'aformat=sample_fmts=fltp:channel_layouts=stereo';
 /** Shorter than this, loudnorm turns digital silence into NaN (and the AAC encoder then fails). */
 const LOUDNORM_MIN_SEC = 3.1;
@@ -466,7 +495,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   const report = (f: number) => o.onProgress?.(Math.min(1, Math.max(0, f)));
 
   try {
-    const chunks = chunkItems(laid, chunkSize(sources));
+    const chunks = episodeChunks(laid, { width: W, height: H, fps }, sources, join(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i, chunk] of chunks.entries()) {
       o.signal?.throwIfAborted();
