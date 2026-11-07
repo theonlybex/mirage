@@ -64,7 +64,7 @@ describe('engine tools', () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names.sort()).toEqual([...TOOL_NAMES].sort());
     expect([...TOOL_NAMES]).toEqual([
-      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status',
+      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later',
     ]);
   });
 
@@ -448,6 +448,35 @@ describe('engine tools', () => {
     expect((await later.call('status')).text.split('\n')).toContain('tts: not downloaded yet — speak downloads it');
     const never = await connect(dir, { preflightDeps: deps({ tts: async () => ({ state: 'missing', text: 'npm was not found.' }) }) });
     expect((await never.call('status')).text.split('\n')).toContain('tts: missing — npm was not found.');
+  });
+
+  it('setup_later holds off asking about setup for 7 days, in a folder that is not a project too', async () => {
+    const data = await mkdtemp(join(tmpdir(), 'mirage-data-'));
+    const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')), { pluginData: data, now: () => new Date('2026-11-06T10:30:00.000Z') });
+    expect(await call('setup_later')).toEqual({
+      isError: false,
+      text: "OK — Mirage won't ask about setup again until 2026-11-13. /mirage:setup installs the tools any time.",
+    });
+    expect(JSON.parse(await readFile(join(data, 'setup.json'), 'utf8'))).toEqual({ laterUntil: '2026-11-13T10:30:00.000Z' });
+  });
+
+  it('setup_later keeps what else setup.json holds', async () => {
+    const data = await mkdtemp(join(tmpdir(), 'mirage-data-'));
+    await writeFile(join(data, 'setup.json'), JSON.stringify({ askedVersion: '0.3.0' }));
+    const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')), { pluginData: data, now: () => new Date('2026-12-28T00:00:00.000Z') });
+    expect((await call('setup_later')).text).toContain('until 2027-01-04.');
+    expect(JSON.parse(await readFile(join(data, 'setup.json'), 'utf8'))).toEqual({ askedVersion: '0.3.0', laterUntil: '2027-01-04T00:00:00.000Z' });
+  });
+
+  it('setup_later without a data folder says it cannot remember, and that Mirage will ask again', async () => {
+    const was = process.env.MIRAGE_PLUGIN_DATA;
+    delete process.env.MIRAGE_PLUGIN_DATA;
+    try {
+      const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')));
+      expect(await call('setup_later')).toEqual({ isError: true, text: "✖ Mirage has no data folder here, so it can't remember that.\n  It will ask again next session." });
+    } finally {
+      if (was !== undefined) process.env.MIRAGE_PLUGIN_DATA = was;
+    }
   });
 
   it('status on a folder that is not a project yet says so', async () => {

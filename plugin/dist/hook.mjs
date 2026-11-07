@@ -176,7 +176,7 @@ var init_policy = __esm({
     FILE_TOOLS = /* @__PURE__ */ new Set([...SAVE_TOOLS, "NotebookEdit"]);
     READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log"]);
     STAGES = /* @__PURE__ */ new Set(["ingest", "check", "cut", "slots", "guide", "vo", "speak", "render"]);
-    NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video"]);
+    NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video", "setup_later"]);
     ENGINE_LABELS = {
       new_project: ["Starting the project", "Project started"],
       new_video: ["Setting up the video", "Video set up"],
@@ -195,7 +195,8 @@ var init_policy = __esm({
       get_notes: ["Reading your notes", "Read your notes"],
       note_status: ["Updating a note", "Note updated"],
       log: ["Making a note for you", "Noted"],
-      overnight: ["Getting ready for overnight", "Ready for overnight"]
+      overnight: ["Getting ready for overnight", "Ready for overnight"],
+      setup_later: ["Noting that for later", "Noted for later"]
     };
     record = (input2) => input2 !== null && typeof input2 === "object" && !Array.isArray(input2) ? input2 : {};
     baseName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;

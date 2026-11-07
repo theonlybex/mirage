@@ -9,6 +9,18 @@ description: "Check and install what Mirage needs (Node, FFmpeg, whisper.cpp and
 
 **For Claude:**
 
+**Asking first**
+
+When the session start says tools are missing (or that Node is), ask before doing anything else. Ask in one message, with one plain sentence per missing tool, from this list:
+- **Node.js** — runs Mirage itself: its engine and the viewer you watch your videos in.
+- **FFmpeg** — does the actual video work: cutting, joining, captions, music and the final export.
+- **whisper.cpp and its speech model (about 574 MB)** — lets Claude hear what's said in your clips, so it can pick the best takes and write captions; it runs on your computer, nothing is uploaded.
+- **Kokoro AI voice (about 260 MB, optional)** — reads narration aloud if you don't record your own; it downloads the first time you use it, so there's nothing to install now.
+
+Add what the person has to do themselves, for example pasting the Homebrew installer into Terminal.
+- On yes: do the steps below for those tools only.
+- On "not now": call `mcp__plugin_mirage_engine__setup_later`, then say `/mirage:setup` works any time. Mirage doesn't ask again for 7 days.
+
 **How to work through it**
 - Work through the steps in order.
 - Run every check first. Skip whatever already works.

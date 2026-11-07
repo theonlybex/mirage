@@ -5,6 +5,8 @@
 # Looked at in order: PATH, /opt/homebrew/bin/node, /usr/local/bin/node, the newest ~/.nvm/versions/node/*/bin/node,
 # ~/.volta/bin/node, ~/.local/node/bin/node.
 # MIRAGE_NODE_FIXED replaces the two fixed locations (a space-separated list); the tests use it.
+# With no usable Node, the hook at the start of a session (last argument "session-start") can't run, so this tells Claude to ask
+# about installing Node instead: in a Mirage project every time, elsewhere once (a node-notice-shown file in the data folder).
 
 # Whether $1 is a Node of version 22 or later.
 usable() {
@@ -45,6 +47,23 @@ find_node() {
 
 if find_node; then
   exec "$NODE" "$@"
+fi
+
+# No Node. At the start of a session, say so to Claude (the text has no double quotes or backslashes, so it is valid JSON as is).
+for last; do :; done
+if [ "$last" = session-start ]; then
+  show=
+  if [ -e "${CLAUDE_PROJECT_DIR:-$PWD}/mirage.json" ]; then
+    show=1
+  elif [ -n "${CLAUDE_PLUGIN_DATA:-}" ] && [ ! -e "$CLAUDE_PLUGIN_DATA/node-notice-shown" ]; then
+    show=1
+    mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null && : >"$CLAUDE_PLUGIN_DATA/node-notice-shown" 2>/dev/null
+  fi
+  if [ -n "$show" ]; then
+    notice="Mirage, the video-editing plugin, needs Node.js 22 or later, and this computer doesn't have it, so none of Mirage works yet. At the start of your first reply, before anything else, ask the person whether to install Node now, and say it runs Mirage itself: its engine and the viewer they watch their videos in. Use the mirage:setup skill (step 1) to install it. After Node is installed they need to start a new Claude Code session."
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"'"$notice"'"}}'
+  fi
+  exit 0
 fi
 echo 'Mirage needs Node.js 22 or later. Run /mirage:setup.' >&2
 exit 1

@@ -82,8 +82,8 @@ describe('the plugin skills', () => {
     ['notes', ['get_notes', 'note_status', 'cut', 'guide', 'render']],
     ['voiceover', ['vo', 'render']],
     ['overnight', ['overnight', 'log']],
-    ['setup', ['status']],
-    ['status', ['status']],
+    ['setup', ['status', 'setup_later']],
+    ['status', ['status', 'setup_later']],
   ] as const)('%s names the engine tools it runs', (name, tools) => {
     const named = toolsNamed(read(name));
     for (const tool of tools) expect(named).toContain(tool);
@@ -112,6 +112,18 @@ describe('the plugin skills', () => {
     expect(read('setup')).toContain('brew install whisper-cpp');
     expect(read('setup')).toContain('https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin');
     expect(read('setup')).not.toMatch(/xcode-select|Parakeet/);
+  });
+
+  it('setup asks first, with a reason for each missing tool, and calls setup_later on "not now"', () => {
+    const setup = read('setup');
+    for (const line of [
+      "- **Node.js** — runs Mirage itself: its engine and the viewer you watch your videos in.",
+      "- **FFmpeg** — does the actual video work: cutting, joining, captions, music and the final export.",
+      "- **whisper.cpp and its speech model (about 574 MB)** — lets Claude hear what's said in your clips, so it can pick the best takes and write captions; it runs on your computer, nothing is uploaded.",
+      "- **Kokoro AI voice (about 260 MB, optional)** — reads narration aloud if you don't record your own; it downloads the first time you use it, so there's nothing to install now.",
+    ]) expect(setup.split('\n')).toContain(line);
+    expect(setup.indexOf('**Asking first**')).toBeLessThan(setup.indexOf('**How to work through it**'));
+    expect(setup).toContain('`/mirage:setup` works any time');
   });
 
   it('the skills that run on engine output say to use the tool when a message suggests a command', () => {

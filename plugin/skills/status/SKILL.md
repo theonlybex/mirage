@@ -23,3 +23,5 @@ Call `mcp__plugin_mirage_engine__status` (no input) and explain what it says in 
   - `tts: ok`: AI narration (the Kokoro voice) is ready. `tts: not downloaded yet …`: fine; the first AI narration downloads it (the line says how much). `tts: missing — …`: AI narration can't be set up; say what the line says and suggest `/mirage:setup`.
 
 If everything is fine, say so in one line.
+
+Mirage asks at the start of a session whether to install what's missing. When the person says "not now", `mcp__plugin_mirage_engine__setup_later` stops that for 7 days, so it doesn't nag. If they ask why Mirage stopped asking, that is why; `/mirage:setup` works any time.

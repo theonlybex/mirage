@@ -6,6 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZodRawShape } from 'zod';
 import { z } from 'zod';
 import { ViewerInfoSchema } from '@wordedits/shared';
+import { LATER_DAYS, writeSetupState } from '@wordedits/shared/setup-state';
 import {
   analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, ingestClips, ingestReport, initProject, listVersions,
   MirageError, musicReport, newVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
@@ -16,7 +17,7 @@ import { preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } fro
 import { runLong } from './run-long.js';
 
 export const TOOL_NAMES: readonly string[] = [
-  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status',
+  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later',
 ];
 
 export interface EngineContext {
@@ -36,6 +37,10 @@ export interface EngineContext {
   startAwake?: () => number | null;
   /** The AI narration voice for `speak`. Default: Kokoro in the plugin's data folder. */
   speaker?: Speaker;
+  /** Mirage's data folder, where it remembers things across sessions. Default: MIRAGE_PLUGIN_DATA. */
+  pluginData?: string;
+  /** The clock for `setup_later`. Default: the real time. */
+  now?: () => Date;
 }
 
 const SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
@@ -122,6 +127,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   const startAwake = ctx.startAwake ?? startCaffeinate;
   const speaker = ctx.speaker ?? kokoroSpeaker();
   const ppid = ctx.ppid ?? process.ppid;
+  const now = ctx.now ?? (() => new Date());
   const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project, ppid) ?? newestSessionId(project));
   const sid = () => knownSession() ?? 'unknown';
   const server = new McpServer({ name: 'engine', version: '0.0.1' });
@@ -359,6 +365,14 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     lines.push(tts.state === 'ok' ? 'tts: ok' : `tts: ${tts.state === 'missing' ? 'missing — ' : ''}${tts.text}`);
     lines.push(Number(process.versions.node.split('.')[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
+  }, false);
+
+  tool('setup_later', 'The person said "not now" to installing the tools Mirage needs: stop asking about setup for 7 days.', {}, async () => {
+    const dataDir = ctx.pluginData ?? process.env.MIRAGE_PLUGIN_DATA;
+    if (!dataDir) throw new MirageError('BAD_INPUT', "Mirage has no data folder here, so it can't remember that.", 'It will ask again next session.');
+    const until = new Date(now().getTime() + LATER_DAYS * 24 * 60 * 60 * 1000);
+    writeSetupState(dataDir, { laterUntil: until.toISOString() });
+    return ok(`OK — Mirage won't ask about setup again until ${until.toISOString().slice(0, 10)}. /mirage:setup installs the tools any time.`);
   }, false);
 
   return server;

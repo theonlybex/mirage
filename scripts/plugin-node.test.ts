@@ -26,11 +26,11 @@ async function fakeNode(path: string, version: string, name = version): Promise<
 }
 
 /** Runs the launcher with a PATH of just the system tools plus `path`, no fixed Node locations, and an empty home. */
-async function run(o: { path?: string[]; fixed?: string[]; home?: string } = {}) {
+async function run(o: { path?: string[]; fixed?: string[]; home?: string; args?: string[]; env?: Record<string, string> } = {}) {
   const home = o.home ?? (await tmp());
-  const r = spawnSync('/bin/sh', [LAUNCHER, 'a script.mjs', 'two'], {
+  const r = spawnSync('/bin/sh', [LAUNCHER, ...(o.args ?? ['a script.mjs', 'two'])], {
     encoding: 'utf8',
-    env: { PATH: [...(o.path ?? []), '/usr/bin', '/bin'].join(':'), HOME: home, MIRAGE_NODE_FIXED: (o.fixed ?? []).join(' ') },
+    env: { PATH: [...(o.path ?? []), '/usr/bin', '/bin'].join(':'), HOME: home, MIRAGE_NODE_FIXED: (o.fixed ?? []).join(' '), ...o.env },
   });
   return { out: r.stdout, err: r.stderr, code: r.status };
 }
@@ -98,5 +98,58 @@ describe('plugin/scripts/node', () => {
     const bin = await tmp();
     await fakeNode(join(bin, 'node'), 'banana');
     expect((await run({ path: [bin] })).code).toBe(1);
+  });
+
+  describe('with no Node, at the start of a session', () => {
+    const NOTICE =
+      "Mirage, the video-editing plugin, needs Node.js 22 or later, and this computer doesn't have it, so none of Mirage works yet. At the start of your first reply, before anything else, ask the person whether to install Node now, and say it runs Mirage itself: its engine and the viewer they watch their videos in. Use the mirage:setup skill (step 1) to install it. After Node is installed they need to start a new Claude Code session.";
+    const JSON_LINE = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: NOTICE } }) + '\n';
+    const start = (env: Record<string, string>) => run({ args: ['hook.mjs', 'session-start'], env });
+
+    it('tells Claude to ask about installing Node, once, outside a project', async () => {
+      const data = await tmp();
+      const project = await tmp();
+      const env = { CLAUDE_PLUGIN_DATA: join(data, 'plugin-data'), CLAUDE_PROJECT_DIR: project };
+      expect(await start(env)).toEqual({ out: JSON_LINE, err: '', code: 0 });
+      expect(await start(env)).toEqual({ out: '', err: '', code: 0 });
+    });
+
+    it('is valid SessionStart JSON carrying the notice', async () => {
+      const r = await start({ CLAUDE_PLUGIN_DATA: await tmp(), CLAUDE_PROJECT_DIR: await tmp() });
+      expect(JSON.parse(r.out)).toEqual({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: NOTICE } });
+    });
+
+    it('says it every time in a Mirage project', async () => {
+      const data = await tmp();
+      const project = await tmp();
+      await writeFile(join(project, 'mirage.json'), '{}');
+      const env = { CLAUDE_PLUGIN_DATA: data, CLAUDE_PROJECT_DIR: project };
+      expect((await start(env)).out).toBe(JSON_LINE);
+      expect(await start(env)).toEqual({ out: JSON_LINE, err: '', code: 0 });
+    });
+
+    it('says nothing outside a project when there is no data folder to remember in', async () => {
+      expect(await start({ CLAUDE_PROJECT_DIR: await tmp() })).toEqual({ out: '', err: '', code: 0 });
+    });
+
+    it('looks in the current folder for mirage.json when CLAUDE_PROJECT_DIR is not set', async () => {
+      const project = await tmp();
+      await writeFile(join(project, 'mirage.json'), '{}');
+      const r = spawnSync('/bin/sh', [LAUNCHER, 'hook.mjs', 'session-start'], { encoding: 'utf8', cwd: project, env: { PATH: '/usr/bin:/bin', HOME: await tmp(), MIRAGE_NODE_FIXED: '' } });
+      expect(r.stdout).toBe(JSON_LINE);
+    });
+
+    it('keeps the old message for every other command', async () => {
+      const env = { CLAUDE_PLUGIN_DATA: await tmp(), CLAUDE_PROJECT_DIR: await tmp() };
+      expect(await run({ args: ['engine.mjs'], env })).toEqual({ out: '', err: 'Mirage needs Node.js 22 or later. Run /mirage:setup.\n', code: 1 });
+      expect(await run({ args: ['hook.mjs', 'pre-tool'], env })).toEqual({ out: '', err: 'Mirage needs Node.js 22 or later. Run /mirage:setup.\n', code: 1 });
+    });
+
+    it('still runs the hook with a Node, and prints no notice', async () => {
+      const bin = await tmp();
+      await fakeNode(join(bin, 'node'), 'v22.4.1');
+      const r = await run({ path: [bin], args: ['hook.mjs', 'session-start'], env: { CLAUDE_PLUGIN_DATA: await tmp(), CLAUDE_PROJECT_DIR: await tmp() } });
+      expect(r).toEqual({ out: 'v22.4.1 hook.mjs session-start\n', err: '', code: 0 });
+    });
   });
 });

@@ -39968,7 +39968,7 @@ function startFallbackViewer(project2) {
 // packages/mcp/src/server.ts
 import { existsSync as existsSync10, readdirSync as readdirSync2, realpathSync, statSync as statSync3 } from "node:fs";
 import { readdir as readdir9 } from "node:fs/promises";
-import { isAbsolute as isAbsolute2, join as join19, relative as relative2, resolve as resolve10, sep } from "node:path";
+import { isAbsolute as isAbsolute2, join as join20, relative as relative2, resolve as resolve10, sep } from "node:path";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v3/helpers/util.js
 var util;
@@ -48014,10 +48014,40 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// packages/shared/src/setup-state.ts
+import { mkdirSync, readFileSync as readFileSync4, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join18 } from "node:path";
+var SETUP_FILE = "setup.json";
+var LATER_DAYS = 7;
+function readSetupState(dataDir) {
+  try {
+    const raw = JSON.parse(readFileSync4(join18(dataDir, SETUP_FILE), "utf8"));
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+    const { askedVersion, laterUntil } = raw;
+    const state = {};
+    if (typeof askedVersion === "string") state.askedVersion = askedVersion;
+    if (typeof laterUntil === "string") state.laterUntil = laterUntil;
+    return state;
+  } catch {
+    return {};
+  }
+}
+function writeSetupState(dataDir, patch) {
+  try {
+    const next = { ...readSetupState(dataDir) };
+    if (patch.askedVersion !== void 0) next.askedVersion = patch.askedVersion;
+    if (patch.laterUntil !== void 0) next.laterUntil = patch.laterUntil;
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync2(join18(dataDir, SETUP_FILE), `${JSON.stringify(next, null, 2)}
+`);
+  } catch {
+  }
+}
+
 // packages/mcp/src/preflight.ts
 import { execFile, spawn as spawn3 } from "node:child_process";
 import { readdir as readdir8, stat as stat5, statfs } from "node:fs/promises";
-import { join as join18 } from "node:path";
+import { join as join19 } from "node:path";
 import { promisify as promisify3 } from "node:util";
 var GB = 1024 ** 3;
 async function preflight(o2) {
@@ -48042,7 +48072,7 @@ var execFileAsync = promisify3(execFile);
 async function folderBytes(dir) {
   let total = 0;
   for (const e of await readdir8(dir, { withFileTypes: true }).catch(() => [])) {
-    const path6 = join18(dir, e.name);
+    const path6 = join19(dir, e.name);
     if (e.isDirectory()) total += await folderBytes(path6);
     else if (e.isFile()) total += (await stat5(path6).catch(() => null))?.size ?? 0;
   }
@@ -48133,7 +48163,7 @@ async function runLong(o2) {
 // packages/mcp/src/server.ts
 var SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 function newestSessionId(project2) {
-  const dir = join19(resolve10(project2), ".mirage", "sessions");
+  const dir = join20(resolve10(project2), ".mirage", "sessions");
   let best = null;
   let names;
   try {
@@ -48146,7 +48176,7 @@ function newestSessionId(project2) {
     if (!id || id === "unknown" || id.includes("..")) continue;
     let mtime;
     try {
-      mtime = statSync3(join19(dir, name)).mtimeMs;
+      mtime = statSync3(join20(dir, name)).mtimeMs;
     } catch {
       continue;
     }
@@ -48195,6 +48225,7 @@ function createEngineServer(ctx) {
   const startAwake = ctx.startAwake ?? startCaffeinate;
   const speaker = ctx.speaker ?? kokoroSpeaker();
   const ppid = ctx.ppid ?? process.ppid;
+  const now = ctx.now ?? (() => /* @__PURE__ */ new Date());
   const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project2, ppid) ?? newestSessionId(project2));
   const sid = () => knownSession() ?? "unknown";
   const server = new McpServer({ name: "engine", version: "0.0.1" });
@@ -48209,7 +48240,7 @@ function createEngineServer(ctx) {
     }));
   }
   async function newestVideo() {
-    const numbers = (await readdir9(join19(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+    const numbers = (await readdir9(join20(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }
   async function report(n2, lines) {
@@ -48261,7 +48292,7 @@ function createEngineServer(ctx) {
     }
   });
   tool("music", "Find the tempo and mood of the tracks in the project's music folder.", {}, async () => {
-    const dir = join19(project2, "music");
+    const dir = join20(project2, "music");
     if (!existsSync10(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
     return report(await sessionVideo(), musicReport(dir, await analyzeLibrary(dir, tools)));
   });
@@ -48353,7 +48384,7 @@ function createEngineServer(ctx) {
       inRound.map((x) => [
         `Note ${x.id} at ${x.t.toFixed(1)} s: ${x.text}`,
         ...x.box ? [`(about the area ${pct(x.box.x)}%\u2013${pct(x.box.x + x.box.w)}% across, ${pct(x.box.y)}%\u2013${pct(x.box.y + x.box.h)}% down)`] : [],
-        `Still: ${join19(episodeDir(project2, n2), x.still)}`
+        `Still: ${join20(episodeDir(project2, n2), x.still)}`
       ].join("\n")).join("\n\n")
     );
   });
@@ -48393,13 +48424,13 @@ function createEngineServer(ctx) {
     });
     if (meta3 === null) lines.push(`No Mirage project here yet (${project2}). Use new_project to start one.`);
     else if (meta3) lines.push(`Project: ${meta3.title}`);
-    const numbers = (await readdir9(join19(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+    const numbers = (await readdir9(join20(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
     for (const n2 of numbers) {
       const { stage, deliveries } = await videoStage(project2, n2);
       const title = (await readVideo(project2, n2).catch(() => null))?.title;
       lines.push(`Video ${n2}${title ? ` \u201C${title}\u201D` : ""}: ${stage} \xB7 ${deliveries} ${deliveries === 1 ? "delivery" : "deliveries"}`);
     }
-    const viewer = await readJsonFile(join19(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
+    const viewer = await readJsonFile(join20(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
     lines.push(viewer && alive2(viewer.pid) ? `Viewer: running at ${viewer.url}` : "Viewer: not running");
     for (const t of ["ffmpeg", "ffprobe"]) lines.push(`${t}: ${await deps.which(t) ? "ok" : "missing"}`);
     const speech = await deps.transcriber();
@@ -48408,6 +48439,13 @@ function createEngineServer(ctx) {
     lines.push(tts.state === "ok" ? "tts: ok" : `tts: ${tts.state === "missing" ? "missing \u2014 " : ""}${tts.text}`);
     lines.push(Number(process.versions.node.split(".")[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
+  }, false);
+  tool("setup_later", 'The person said "not now" to installing the tools Mirage needs: stop asking about setup for 7 days.', {}, async () => {
+    const dataDir = ctx.pluginData ?? process.env.MIRAGE_PLUGIN_DATA;
+    if (!dataDir) throw new MirageError("BAD_INPUT", "Mirage has no data folder here, so it can't remember that.", "It will ask again next session.");
+    const until = new Date(now().getTime() + LATER_DAYS * 24 * 60 * 60 * 1e3);
+    writeSetupState(dataDir, { laterUntil: until.toISOString() });
+    return ok(`OK \u2014 Mirage won't ask about setup again until ${until.toISOString().slice(0, 10)}. /mirage:setup installs the tools any time.`);
   }, false);
   return server;
 }

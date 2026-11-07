@@ -30,6 +30,7 @@ describe('stepLabel', () => {
     [E('note_status'), { video: 1 }, 'Updating a note', 'Note updated'],
     [E('log'), { video: 1 }, 'Making a note for you', 'Noted'],
     [E('overnight'), {}, 'Getting ready for overnight', 'Ready for overnight'],
+    [E('setup_later'), {}, 'Noting that for later', 'Noted for later'],
     ['Read', { file_path: '/p/frames/c001/0001.jpg' }, 'Looking at clips', 'Looked at clips'],
     ['Read', { file_path: '/p/episodes/1/summary.md' }, 'Reading summary.md', 'Read summary.md'],
     ['Write', { file_path: '/p/episodes/1/episode.json' }, 'Writing the timeline', 'Timeline written'],
@@ -69,6 +70,7 @@ describe('videoOf', () => {
   it('gives no video to the tools that make one', () => {
     expect(videoOf(E('new_project'), { title: 'x' }, p, session(2))).toBeNull();
     expect(videoOf(E('new_video'), { title: 'x' }, p, session(2))).toBeNull();
+    expect(videoOf(E('setup_later'), {}, p, session(2))).toBeNull();
   });
 
   it('ignores odd input', () => {
@@ -97,7 +99,7 @@ describe('isChanging and isStage', () => {
 
   it('isStage is true only for the engine stages', () => {
     for (const t of ['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']) expect(isStage(E(t))).toBe(true);
-    for (const t of ['new_project', 'new_video', 'music', 'versions', 'restore', 'status', 'log', 'overnight']) expect(isStage(E(t))).toBe(false);
+    for (const t of ['new_project', 'new_video', 'music', 'versions', 'restore', 'status', 'log', 'overnight', 'setup_later']) expect(isStage(E(t))).toBe(false);
     expect(isStage('check')).toBe(false);
     expect(isStage('Write')).toBe(false);
   });

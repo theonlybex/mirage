@@ -16,8 +16,8 @@ const SAVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 const FILE_TOOLS = new Set([...SAVE_TOOLS, 'NotebookEdit']);
 const READ_ONLY = new Set(['versions', 'status', 'get_notes', 'log']);
 const STAGES = new Set(['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']);
-/** Engine tools that make a project or a video: they belong to no video yet. */
-const NO_VIDEO = new Set(['new_project', 'new_video']);
+/** Engine tools that make a project or a video, or are about Mirage and not a video (setup_later): they belong to no video. */
+const NO_VIDEO = new Set(['new_project', 'new_video', 'setup_later']);
 
 const ENGINE_LABELS: Record<string, [string, string]> = {
   new_project: ['Starting the project', 'Project started'],
@@ -38,6 +38,7 @@ const ENGINE_LABELS: Record<string, [string, string]> = {
   note_status: ['Updating a note', 'Note updated'],
   log: ['Making a note for you', 'Noted'],
   overnight: ['Getting ready for overnight', 'Ready for overnight'],
+  setup_later: ['Noting that for later', 'Noted for later'],
 };
 
 const record = (input: unknown): Record<string, unknown> =>
