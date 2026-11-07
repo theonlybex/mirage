@@ -38002,13 +38002,12 @@ import { dirname as dirname3, join as join8, resolve as resolve3 } from "node:pa
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var CAPTION_FONT = "Montserrat ExtraBold";
 var CAPTION_FONT_FILE = "Montserrat-ExtraBold.ttf";
+var SOURCE_LAYOUT = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
 function bundledFontsDir(from = import.meta.url) {
   const here = dirname3(from.startsWith("file:") ? fileURLToPath3(from) : resolve3(from));
-  const candidates = [resolve3(here, "..", "fonts", "files"), resolve3(here, "..", "..", "..", "..", "plugin", "fonts", "files")];
-  const found = candidates.find((d) => existsSync5(join8(d, CAPTION_FONT_FILE)));
-  if (found) return found;
-  const folder = candidates.find((d) => existsSync5(d)) ?? candidates[0];
-  throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${folder}`, "Reinstall the Mirage plugin.");
+  const dir = SOURCE_LAYOUT.test(here) ? resolve3(here, "..", "..", "..", "..", "plugin", "fonts", "files") : resolve3(here, "..", "fonts", "files");
+  if (!existsSync5(join8(dir, CAPTION_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${dir}`, "Reinstall the Mirage plugin.");
+  return dir;
 }
 
 // packages/core/src/mirage/overlays.ts

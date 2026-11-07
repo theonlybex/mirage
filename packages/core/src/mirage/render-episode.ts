@@ -242,7 +242,7 @@ export interface FinalEpisodeOptions {
  * A filter option's value as it must be written in a filter graph: escaped for the option list (\ ' :), then for the
  * graph (\ ' [ ] , ;). Spaces inside need nothing.
  */
-const filterValue = (v: string) => v.replace(/[\\':]/g, '\\$&').replace(/[\\'[\],;]/g, '\\$&');
+export const filterValue = (v: string) => v.replace(/[\\':]/g, '\\$&').replace(/[\\'[\],;]/g, '\\$&');
 
 export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   const inputs = ['-f', 'concat', '-safe', '0', '-i', o.chunkList];

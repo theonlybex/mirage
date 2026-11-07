@@ -31176,19 +31176,18 @@ import { dirname as dirname3, join as join9, resolve as resolve4 } from "node:pa
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function bundledFontsDir(from = import.meta.url) {
   const here = dirname3(from.startsWith("file:") ? fileURLToPath3(from) : resolve4(from));
-  const candidates = [resolve4(here, "..", "fonts", "files"), resolve4(here, "..", "..", "..", "..", "plugin", "fonts", "files")];
-  const found2 = candidates.find((d) => existsSync5(join9(d, CAPTION_FONT_FILE)));
-  if (found2) return found2;
-  const folder = candidates.find((d) => existsSync5(d)) ?? candidates[0];
-  throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${folder}`, "Reinstall the Mirage plugin.");
+  const dir = SOURCE_LAYOUT.test(here) ? resolve4(here, "..", "..", "..", "..", "plugin", "fonts", "files") : resolve4(here, "..", "fonts", "files");
+  if (!existsSync5(join9(dir, CAPTION_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${dir}`, "Reinstall the Mirage plugin.");
+  return dir;
 }
-var CAPTION_FONT, CAPTION_FONT_FILE;
+var CAPTION_FONT, CAPTION_FONT_FILE, SOURCE_LAYOUT;
 var init_fonts = __esm({
   "packages/core/src/mirage/fonts.ts"() {
     "use strict";
     init_errors4();
     CAPTION_FONT = "Montserrat ExtraBold";
     CAPTION_FONT_FILE = "Montserrat-ExtraBold.ttf";
+    SOURCE_LAYOUT = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
   }
 });
 
@@ -33721,6 +33720,7 @@ __export(src_exports2, {
   episodeFinalArgs: () => episodeFinalArgs,
   errorReason: () => errorReason,
   ffNum: () => ffNum,
+  filterValue: () => filterValue,
   findTrack: () => findTrack,
   fitRecording: () => fitRecording,
   fitVoiceover: () => fitVoiceover,

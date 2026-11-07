@@ -11,7 +11,7 @@ import { bundledFontsDir, CAPTION_FONT_FILE } from './fonts.js';
 import { acquireLock, LOCK_FILE } from './lock.js';
 import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
-import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { buildVoiceTrack, chunkItems, chunkSize, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover } from './voiceover.js';
 
@@ -25,6 +25,11 @@ const clipOf = (id: string, dur: number, hasAudio: boolean) => ({
   kind: 'screen' as const, transcript: null, frames: [], notes: '', moments: [],
 });
 const cat: Catalog = { version: 1, clips: [clipOf('c001', 10, true), clipOf('c002', 600, false)] };
+/** libass's "Loading font file" line for `file` in `dir`: it joins them with '/', whatever the platform's separator. */
+const loadedFont = (dir: string, file: string) => {
+  const re = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`Loading font file '${re(dir)}[\\\\/]${re(file)}'`);
+};
 const ep = (items: object[], extra: object = {}) =>
   EpisodeSchema.parse({ version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 }, items, ...extra });
 
@@ -229,7 +234,7 @@ describe('episodeFinalArgs', () => {
     const g = a[a.indexOf('-filter_complex') + 1];
     const chain = g.slice(0, g.indexOf('[vout]') + 6);
     const { stderr } = await run('ffmpeg', ['-hide_banner', '-v', 'verbose', '-f', 'lavfi', '-i', 'color=gray:s=320x180:d=0.5', '-filter_complex', chain, '-map', '[vout]', '-frames:v', '1', '-f', 'null', '-'], { cwd: root });
-    expect(stderr).toContain(`Loading font file '${join(fonts, CAPTION_FONT_FILE)}'`);
+    expect(stderr).toMatch(loadedFont(fonts, CAPTION_FONT_FILE));
     expect(stderr).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
   }, 60_000);
 });
@@ -491,9 +496,9 @@ describe('renderEpisode (real ffmpeg)', () => {
     const r = await renderEpisode({ project, episode: 15, mode: 'final', tools: verbose });
     const p = await tools.probe(r.outputPath);
     expect([p.width, p.height]).toEqual([1080, 1920]);
-    expect(logs[0]).toContain(`Loading font file '${join(bundledFontsDir(), CAPTION_FONT_FILE)}'`);
+    expect(logs[0]).toMatch(loadedFont(bundledFontsDir(), CAPTION_FONT_FILE));
     expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
-    expect(graphs[0]).toMatch(/\[0:v\]ass=overlays\.ass:fontsdir=.*fonts\/files\[vout\]/);
+    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout];`)).toBe(true);
     // Only font files in the folder libass reads: it opens no licence or readme as a font.
     expect(logs[0]).not.toContain('Error opening memory font');
     const zebra = 'captions.highlight "zebra" is never said in this video — check the spelling or remove it';
