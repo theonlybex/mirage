@@ -11,7 +11,7 @@ export const SETUP_FILE = 'setup.json';
 export const LATER_DAYS = 7;
 
 export interface SetupState {
-  /** The plugin version the person was last asked about, outside a Mirage project. */
+  /** The plugin version the person was last asked about, wherever the notice shows. */
   askedVersion?: string;
   /** An ISO date: no asking before then, because the person said "not now". */
   laterUntil?: string;

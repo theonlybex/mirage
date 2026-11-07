@@ -566,6 +566,16 @@ describe('main.ts', () => {
     expect(run('nonsense', '{}')).toBe('');
   });
 
+  it('after /compact the project line stays but the setup notice does not; outside a project nothing is printed', async () => {
+    const { dir } = await project('Lamp series');
+    const env = { PATH: '', CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), HOME: await tmp('mirage-home-'), CLAUDE_PROJECT_DIR: '' };
+    const start = (cwd: string, source: string) => run('session-start', JSON.stringify({ ...input(cwd, { hook_event_name: 'SessionStart' }), source }), env);
+    const context = (out: string): string => JSON.parse(out).hookSpecificOutput.additionalContext;
+    expect(context(start(dir, 'startup'))).toContain("This Mirage project can't edit videos until ");
+    expect(context(start(dir, 'compact'))).toBe('This folder is a Mirage project (“Lamp series”, 1 video). Use the mirage:edit skill to make or change a video.');
+    expect(start(await tmp(), 'compact')).toBe('');
+  });
+
   it('prints the decision in a project', async () => {
     const { dir } = await project();
     const out = run('pre', JSON.stringify(input(dir, { tool_name: E('status'), tool_input: {} })), { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), CLAUDE_PROJECT_DIR: '' });

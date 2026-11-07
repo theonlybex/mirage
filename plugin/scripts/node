@@ -60,7 +60,7 @@ if [ "$last" = session-start ]; then
     mkdir -p "$CLAUDE_PLUGIN_DATA" 2>/dev/null && : >"$CLAUDE_PLUGIN_DATA/node-notice-shown" 2>/dev/null
   fi
   if [ -n "$show" ]; then
-    notice="Mirage, the video-editing plugin, needs Node.js 22 or later, and this computer doesn't have it, so none of Mirage works yet. At the start of your first reply, before anything else, ask the person whether to install Node now, and say it runs Mirage itself: its engine and the viewer they watch their videos in. Use the mirage:setup skill (step 1) to install it. After Node is installed they need to start a new Claude Code session."
+    notice="Mirage, the video-editing plugin, needs Node.js 22 or later, and this computer doesn't have it (or has an older one), so none of Mirage works yet. At the start of your first reply, before anything else, ask the person whether to install Node now, and say it runs Mirage itself: its engine and the viewer they watch their videos in. Use the mirage:setup skill (step 1) to install it. After Node is installed they need to start a new Claude Code session."
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"'"$notice"'"}}'
   fi
   exit 0

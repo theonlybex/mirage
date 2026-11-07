@@ -63,10 +63,11 @@ function sessionNotice(inProject: boolean): string | null {
 
 async function main(): Promise<void> {
   if (!(EVENTS as readonly string[]).includes(event)) return;
-  const input = JSON.parse(await readStdin()) as { cwd?: unknown };
+  const input = JSON.parse(await readStdin()) as { cwd?: unknown; source?: unknown };
   if (typeof input?.cwd !== 'string') return;
   const inProject = findProject(projectDir, input.cwd) !== null;
-  const notice = event === 'session-start' ? sessionNotice(inProject) : null;
+  // Not again after /compact: Claude may be in the middle of an edit, and the person was already asked at the start.
+  const notice = event === 'session-start' && input.source !== 'compact' ? sessionNotice(inProject) : null;
   if (!inProject) {
     if (notice) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: notice } }));
     return;

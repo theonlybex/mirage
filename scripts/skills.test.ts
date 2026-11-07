@@ -124,6 +124,8 @@ describe('the plugin skills', () => {
     ]) expect(setup.split('\n')).toContain(line);
     expect(setup.indexOf('**Asking first**')).toBeLessThan(setup.indexOf('**How to work through it**'));
     expect(setup).toContain('`/mirage:setup` works any time');
+    // With no Node the engine never started, so setup_later doesn't exist: the skill must not send Claude to it.
+    expect(setup).toContain("If Node is the missing tool, don't call it");
   });
 
   it('the skills that run on engine output say to use the tool when a message suggests a command', () => {

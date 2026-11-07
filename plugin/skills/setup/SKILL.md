@@ -19,7 +19,7 @@ When the session start says tools are missing (or that Node is), ask before doin
 
 Add what the person has to do themselves, for example pasting the Homebrew installer into Terminal.
 - On yes: do the steps below for those tools only.
-- On "not now": call `mcp__plugin_mirage_engine__setup_later`, then say `/mirage:setup` works any time. Mirage doesn't ask again for 7 days.
+- On "not now": call `mcp__plugin_mirage_engine__setup_later`, then say `/mirage:setup` works any time. Mirage doesn't ask again for 7 days. If Node is the missing tool, don't call it (it needs Node, so it isn't there): just say `/mirage:setup` works any time.
 
 **How to work through it**
 - Work through the steps in order.

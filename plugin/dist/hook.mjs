@@ -34108,7 +34108,7 @@ async function main() {
   const input2 = JSON.parse(await readStdin());
   if (typeof input2?.cwd !== "string") return;
   const inProject = findProject(projectDir, input2.cwd) !== null;
-  const notice = event === "session-start" ? sessionNotice(inProject) : null;
+  const notice = event === "session-start" && input2.source !== "compact" ? sessionNotice(inProject) : null;
   if (!inProject) {
     if (notice) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: notice } }));
     return;

@@ -102,7 +102,7 @@ describe('plugin/scripts/node', () => {
 
   describe('with no Node, at the start of a session', () => {
     const NOTICE =
-      "Mirage, the video-editing plugin, needs Node.js 22 or later, and this computer doesn't have it, so none of Mirage works yet. At the start of your first reply, before anything else, ask the person whether to install Node now, and say it runs Mirage itself: its engine and the viewer they watch their videos in. Use the mirage:setup skill (step 1) to install it. After Node is installed they need to start a new Claude Code session.";
+      "Mirage, the video-editing plugin, needs Node.js 22 or later, and this computer doesn't have it (or has an older one), so none of Mirage works yet. At the start of your first reply, before anything else, ask the person whether to install Node now, and say it runs Mirage itself: its engine and the viewer they watch their videos in. Use the mirage:setup skill (step 1) to install it. After Node is installed they need to start a new Claude Code session.";
     const JSON_LINE = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: NOTICE } }) + '\n';
     const start = (env: Record<string, string>) => run({ args: ['hook.mjs', 'session-start'], env });
 
