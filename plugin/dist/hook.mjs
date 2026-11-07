@@ -33011,6 +33011,14 @@ function moveFilters(l, item, k, o2, src) {
   const top = `${e};st(1,${h2}/(${zoom}));(H-ld(1))*(${y})`;
   return `${pre}perspective=x0='${left}':y0='${top}':x1='${left}+ld(1)':y1='${top}':x2='${left}':y2='${top}+ld(1)':x3='${left}+ld(1)':y3='${top}+ld(1)':interpolation=cubic:eval=frame,${fill ? `scale=${W}:${H}` : framed(item.frame, cropAt(item.focus), o2, k)}`;
 }
+function cardPictureInput(pic, fps) {
+  return ["-noautorotate", "-f", `${pic.format}_pipe`, "-framerate", ffNum(fps), "-i", pic.path];
+}
+function cardPicture(pic, o2, k = 0, focus = { x: 0.5, y: 0.5 }) {
+  const flat = pic.format === "png" ? "format=rgba,premultiply=inplace=1," : "";
+  const range3 = pic.format === "jpeg" ? ",scale=out_range=tv:out_color_matrix=bt709,format=yuv420p" : "";
+  return `sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", cropAt(focus), o2, k)}${range3},setsar=1`;
+}
 function readFrom(src, sec) {
   if (sec < (src.videoStartSec ?? 0)) return [...sec > 0 ? ["-itsoffset", ffNum(-sec)] : [], "-i", src.path];
   return ["-noaccurate_seek", "-ss", ffNum(sec), "-i", src.path];
@@ -33032,10 +33040,8 @@ function itemChunkArgs(laid, o2, sources, output2) {
       if (item.card.style === "image") {
         const pic = o2.cardImages?.get(item.id);
         if (!pic) throw new MirageError("BAD_ITEM", `item ${item.id}: card image ${item.card.image} was not checked before rendering`, "Run check, then render again.");
-        inputs.push("-noautorotate", "-f", `${pic.format}_pipe`, "-framerate", ffNum(o2.fps), "-i", pic.path);
-        const flat = pic.format === "png" ? "format=rgba,premultiply=inplace=1," : "";
-        const range3 = pic.format === "jpeg" ? ",scale=out_range=tv:out_color_matrix=bt709,format=yuv420p" : "";
-        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", "", o2, k)}${range3},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        inputs.push(...cardPictureInput(pic, o2.fps));
+        chains.push(`[${k}:v]${cardPicture(pic, o2, k)},tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         inputs.push("-f", "lavfi", "-i", `color=c=black:s=${o2.width}x${o2.height}:r=${ffNum(o2.fps)}:d=${ffNum((l.frames + 1) / o2.fps)}`);
         chains.push(`[${k}:v]trim=end_frame=${l.frames},setsar=1,setpts=PTS-STARTPTS[v${k}]`, silence);
@@ -35259,7 +35265,7 @@ function thumbnailAss(width, height, text) {
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    `Dialogue: 0,0:00:00.00,0:00:10.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(height * 5 / 6)})}${assDraw(text.toUpperCase())}`,
+    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(height * 5 / 6)})}${assDraw(text.toUpperCase())}`,
     ""
   ].join("\n");
 }
@@ -35274,36 +35280,47 @@ async function writeThumbnail(project, n2, o2, tools, run2 = {}) {
   const fps = ep.output.fps;
   const shown2 = thumbSource(ep, o2.at);
   const { width: W, height: H } = thumbSize(ep.output);
+  const focusAt = (f) => `(iw-ow)*${ffNum(f.x)}:(ih-oh)*${ffNum(f.y)}`;
+  const look = "unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08";
+  const fontsDir = filterValue(bundledFontsDir());
+  const scripts = [];
   let input2;
-  let pick2 = "";
-  let focus;
+  let picture;
   let from;
   let where;
   if ("card" in shown2) {
-    const cut = latestCut(dir, n2);
-    const t = Math.floor(o2.at * fps + 1e-6) / fps;
-    input2 = ["-accurate_seek", "-ss", ffNum(Math.max(0, t - 1 / (4 * fps))), "-i", join21(dir, cut)];
-    focus = o2.focus ?? { x: 0.5, y: 0.5 };
+    const item = shown2.laid.item;
+    const focus = o2.focus ?? { x: 0.5, y: 0.5 };
+    if (item.card.style === "image") {
+      const pic = cardImagesFor(project, { ...ep, items: [item] }).get(item.id);
+      input2 = cardPictureInput(pic, fps);
+      picture = `${cardPicture(pic, { width: W, height: H }, 0, focus)},${look}`;
+    } else {
+      input2 = ["-f", "lavfi", "-i", `color=c=black:s=${W}x${H}:r=${ffNum(fps)}:d=1`];
+      picture = "setsar=1";
+    }
+    if (item.card.text.trim()) {
+      scripts.push(["card.ass", buildAss({ width: W, height: H, captions: [], overlays: [], prompts: [], cards: [{ start: 0, end: CARD_SEC, card: item.card }] })]);
+    }
     from = "card";
-    where = { name: cut, hint: `Render video ${n2} again (cut or render), then write the thumbnail.` };
+    where = { name: `card ${item.id}`, hint: `Check card ${item.id} (run check), then write the thumbnail again.` };
   } else {
     const item = shown2.laid.item;
     const src = sourcesFor({ ...ep, items: [item] }, await loadCatalog(project)).get(item.clip);
     input2 = readFrom(src, shown2.src);
-    pick2 = `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,`;
-    focus = o2.focus ?? item.focus;
+    picture = `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:${focusAt(o2.focus ?? item.focus)},setsar=1,${look}`;
     from = { clip: item.clip, src: ms(shown2.src) };
     where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
   }
-  const text = o2.text !== void 0 && tidy(o2.text) !== "";
-  const vf = `${pick2}scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)},setsar=1,unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08${text ? `,ass=thumbnail.ass:fontsdir=${filterValue(bundledFontsDir())}` : ""}`;
+  if (o2.text !== void 0 && tidy(o2.text) !== "") scripts.push(["thumbnail.ass", thumbnailAss(W, H, o2.text)]);
+  const vf = [picture, ...scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : [], ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`)].join(",");
   const file2 = join21(dir, "thumbnail.jpg");
   const part = join21(dir, `.thumbnail-${randomUUID9().slice(0, 8)}.jpg`);
   const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
   try {
-    if (text) await writeFile8(join21(work, "thumbnail.ass"), thumbnailAss(W, H, o2.text));
+    for (const [name, text] of scripts) await writeFile8(join21(work, name), text);
     await tools.runFfmpeg([...input2, "-vf", vf, "-frames:v", "1", "-q:v", "2", part], { cwd: work, signal: run2.signal });
-    if (!existsSync11(part)) throw new MirageError("BAD_INPUT", `${where.name} has no picture at ${secs("card" in shown2 ? o2.at : shown2.src)} s`, where.hint);
+    if (!existsSync11(part)) throw new MirageError("BAD_INPUT", `${"card" in shown2 ? where.name : `${where.name} at ${secs(shown2.src)} s`} gave no picture`, where.hint);
     run2.signal?.throwIfAborted();
     await rename7(part, file2);
   } finally {
@@ -35316,7 +35333,7 @@ function thumbnailReport(n2, r) {
   const from = r.from === "card" ? "the card" : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
   return `wrote episodes/${n2}/thumbnail.jpg (${r.width}\xD7${r.height}, from ${from})`;
 }
-var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, CAND_FILE, MAX_THUMB_WORDS, secs, HAS_WORD2;
+var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, CAND_FILE, CARD_SEC, MAX_THUMB_WORDS, secs, HAS_WORD2;
 var init_thumbnail = __esm({
   "packages/core/src/mirage/thumbnail.ts"() {
     "use strict";
@@ -35325,6 +35342,7 @@ var init_thumbnail = __esm({
     init_errors4();
     init_fonts();
     init_ingest();
+    init_cards();
     init_overlays();
     init_render_episode();
     init_timeline();
@@ -35337,6 +35355,7 @@ var init_thumbnail = __esm({
     EPS5 = 1e-9;
     ms = (t) => Math.round(t * 1e3) / 1e3;
     CAND_FILE = /^cand-\d+\.jpg$/;
+    CARD_SEC = 10;
     MAX_THUMB_WORDS = 4;
     secs = (n2) => String(ms(n2));
     HAS_WORD2 = /[\p{L}\p{N}]/u;
@@ -35428,6 +35447,8 @@ __export(src_exports2, {
   cardImageFile: () => cardImageFile,
   cardImagesFor: () => cardImagesFor,
   cardLabel: () => cardLabel,
+  cardPicture: () => cardPicture,
+  cardPictureInput: () => cardPictureInput,
   carrySlots: () => carrySlots,
   checkCardImages: () => checkCardImages,
   checkCueFiles: () => checkCueFiles,

@@ -4,14 +4,15 @@ import { existsSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isCard, type Catalog, type ClipItem, type Episode } from '@wordedits/shared';
+import { isCard, type CardItem, type Catalog, type ClipItem, type Episode } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { ffNum } from './encode.js';
 import { MirageError } from './errors.js';
 import { bundledFontsDir, CAPTION_FONT } from './fonts.js';
 import { loadCatalog } from './ingest.js';
-import { assDraw, scaler, tidy } from './overlays.js';
-import { episodeDir, filterValue, frameTolerance, loadEpisode, readFrom, sourcesFor } from './render-episode.js';
+import { cardImagesFor } from './cards.js';
+import { assDraw, buildAss, scaler, tidy } from './overlays.js';
+import { cardPicture, cardPictureInput, episodeDir, filterValue, frameTolerance, loadEpisode, readFrom, sourcesFor } from './render-episode.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
 
 /** A frame of the cut worth considering as a thumbnail: where it is (output seconds) and why it was picked. */
@@ -195,6 +196,9 @@ export function candidatesReport(n: number, r: CandidateFrames): string[] {
   ];
 }
 
+/** Seconds the scripts drawing a thumbnail's text show their events: a card's text fades in and out at its ends. */
+const CARD_SEC = 10;
+
 /** At most this many words on a thumbnail. */
 export const MAX_THUMB_WORDS = 4;
 
@@ -266,7 +270,7 @@ export function thumbnailAss(width: number, height: number, text: string): strin
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    `Dialogue: 0,0:00:00.00,0:00:10.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round((height * 5) / 6)})}${assDraw(text.toUpperCase())}`,
+    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round((height * 5) / 6)})}${assDraw(text.toUpperCase())}`,
     '',
   ].join('\n');
 }
@@ -280,11 +284,13 @@ export interface Thumbnail {
 }
 
 /**
- * Writes episodes/<n>/thumbnail.jpg from what video `n` shows at output second `at` (thumbSource): a clip item's frame
- * read from the clip file itself (not the compressed cut), a card's frame from the last cut. Scaled to cover the
- * thumbnail size (thumbSize), cropped around `focus` (default the item's own, a card's centre) the way Mirage crops,
- * sharpened and brightened a little, with `text` (at most MAX_THUMB_WORDS words) drawn on it (thumbnailAss). Written
- * beside the old one and then renamed over it, so a stop or failure leaves an earlier thumbnail as it was.
+ * Writes episodes/<n>/thumbnail.jpg from what video `n` shows at output second `at` (thumbSource), needing no cut:
+ * - a clip item: its frame read from the clip file itself (not the compressed cut), scaled to cover the thumbnail size
+ *   (thumbSize) and cropped around `focus` (default the item's own) the way Mirage crops, sharpened and brightened a little;
+ * - a card: drawn at the thumbnail size as the render draws it, its background (black, or its picture covering the frame
+ *   around `focus`, default the centre, sharpened and brightened as a clip's frame is) and its text in the card styles.
+ * Then `text` (at most MAX_THUMB_WORDS words) drawn on it (thumbnailAss). Written beside the old one and then renamed
+ * over it, so a stop or failure leaves an earlier thumbnail as it was.
  */
 export async function writeThumbnail(
   project: string,
@@ -304,20 +310,32 @@ export async function writeThumbnail(
   const shown = thumbSource(ep, o.at);
   const { width: W, height: H } = thumbSize(ep.output);
 
+  const focusAt = (f: { x: number; y: number }) => `(iw-ow)*${ffNum(f.x)}:(ih-oh)*${ffNum(f.y)}`;
+  const look = 'unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08';
+  const fontsDir = filterValue(bundledFontsDir());
+  const scripts: [string, string][] = [];
   let input: string[];
-  let pick = '';
-  let focus: { x: number; y: number };
+  let picture: string;
   let from: Thumbnail['from'];
   let where: { name: string; hint: string };
   if ('card' in shown) {
-    const cut = latestCut(dir, n);
-    // The cut's frame showing `at`: -accurate_seek decodes from the keyframe before to the first frame at or after the
-    // seek time, a quarter of a frame before that frame's own time (so a time stored a hair early still counts).
-    const t = Math.floor(o.at * fps + 1e-6) / fps;
-    input = ['-accurate_seek', '-ss', ffNum(Math.max(0, t - 1 / (4 * fps))), '-i', join(dir, cut)];
-    focus = o.focus ?? { x: 0.5, y: 0.5 };
+    // A card is drawn at the thumbnail's size as the render draws it: its background (black, or its picture through the
+    // render's own picture chain, cropped around the focus), then its text in the card styles of buildAss.
+    const item = shown.laid.item as CardItem;
+    const focus = o.focus ?? { x: 0.5, y: 0.5 };
+    if (item.card.style === 'image') {
+      const pic = cardImagesFor(project, { ...ep, items: [item] }).get(item.id)!;
+      input = cardPictureInput(pic, fps);
+      picture = `${cardPicture(pic, { width: W, height: H }, 0, focus)},${look}`;
+    } else {
+      input = ['-f', 'lavfi', '-i', `color=c=black:s=${W}x${H}:r=${ffNum(fps)}:d=1`];
+      picture = 'setsar=1';
+    }
+    if (item.card.text.trim()) {
+      scripts.push(['card.ass', buildAss({ width: W, height: H, captions: [], overlays: [], prompts: [], cards: [{ start: 0, end: CARD_SEC, card: item.card }] })]);
+    }
     from = 'card';
-    where = { name: cut, hint: `Render video ${n} again (cut or render), then write the thumbnail.` };
+    where = { name: `card ${item.id}`, hint: `Check card ${item.id} (run check), then write the thumbnail again.` };
   } else {
     const item = shown.laid.item as ClipItem;
     const src = sourcesFor({ ...ep, items: [item] }, await loadCatalog(project)).get(item.clip)!;
@@ -326,25 +344,24 @@ export async function writeThumbnail(
     // at or before the time, a quarter of a frame late still counting (fps holds it at 0, the first frame out). The seek
     // goes to the keyframe before and decodes from there, so the frame is exact.
     input = readFrom(src, shown.src);
-    pick = `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,`;
-    focus = o.focus ?? item.focus;
+    // Mirage's crop: the window at (iw−ow)·x, (ih−oh)·y.
+    picture =
+      `setpts=PTS-${frameTolerance(fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,` +
+      `scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:${focusAt(o.focus ?? item.focus)},setsar=1,${look}`;
     from = { clip: item.clip, src: ms(shown.src) };
     where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
   }
-
-  const text = o.text !== undefined && tidy(o.text) !== '';
-  // Mirage's crop: the window at (iw−ow)·x, (ih−oh)·y.
-  const vf =
-    `${pick}scale=${W}:${H}:force_original_aspect_ratio=increase:flags=lanczos,crop=${W}:${H}:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)},setsar=1,` +
-    `unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08${text ? `,ass=thumbnail.ass:fontsdir=${filterValue(bundledFontsDir())}` : ''}`;
+  if (o.text !== undefined && tidy(o.text) !== '') scripts.push(['thumbnail.ass', thumbnailAss(W, H, o.text)]);
+  // The picture is stamped CARD_SEC/2 into the scripts: past a card's fade in, before its fade out. Scripts are named
+  // relative to the folder FFmpeg runs in, so their paths need no escaping in the graph.
+  const vf = [picture, ...(scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : []), ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`)].join(',');
   const file = join(dir, 'thumbnail.jpg');
   const part = join(dir, `.thumbnail-${randomUUID().slice(0, 8)}.jpg`);
-  // The script is named relative to the folder FFmpeg runs in, so its path needs no escaping in the graph.
   const work = await mkdtemp(join(tmpdir(), 'mirage-thumb-'));
   try {
-    if (text) await writeFile(join(work, 'thumbnail.ass'), thumbnailAss(W, H, o.text!));
+    for (const [name, text] of scripts) await writeFile(join(work, name), text);
     await tools.runFfmpeg([...input, '-vf', vf, '-frames:v', '1', '-q:v', '2', part], { cwd: work, signal: run.signal });
-    if (!existsSync(part)) throw new MirageError('BAD_INPUT', `${where.name} has no picture at ${secs('card' in shown ? o.at : shown.src)} s`, where.hint);
+    if (!existsSync(part)) throw new MirageError('BAD_INPUT', `${'card' in shown ? where.name : `${where.name} at ${secs(shown.src)} s`} gave no picture`, where.hint);
     run.signal?.throwIfAborted();
     await rename(part, file);
   } finally {

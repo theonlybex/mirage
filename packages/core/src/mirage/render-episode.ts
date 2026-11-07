@@ -177,6 +177,32 @@ function moveFilters(l: LaidItem, item: ClipItem, k: number, o: { width: number;
 const UPRIGHT = ['', '', 'hflip,', 'hflip,vflip,', 'vflip,', 'transpose=0,', 'transpose=1,', 'transpose=3,', 'transpose=2,'];
 
 /**
+ * An image card's picture as an input: read once by the demuxer for what it is (so neither its name nor a % or * in its
+ * path matters), with FFmpeg's own rotation off (some versions turn a JPEG by its EXIF and some don't; cardPicture turns
+ * it from the orientation Mirage read itself).
+ */
+export function cardPictureInput(pic: CardImage, fps: number): string[] {
+  return ['-noautorotate', '-f', `${pic.format}_pipe`, '-framerate', ffNum(fps), '-i', pic.path];
+}
+
+/**
+ * The filters that make an image card's picture (cardPictureInput) a frame of `o`'s size: turned upright, laid on black,
+ * scaled to cover the frame and cropped (centred, or around `focus`), at the clips' limited range. `k` names the labels
+ * of a chain with more than one picture.
+ */
+export function cardPicture(pic: CardImage, o: { width: number; height: number }, k = 0, focus: ClipItem['focus'] = { x: 0.5, y: 0.5 }): string {
+  // A PNG's colour times its alpha is the picture over black: clear parts black, not whatever colour they hold.
+  const flat = pic.format === 'png' ? 'format=rgba,premultiply=inplace=1,' : '';
+  // A JPEG decodes full range on the BT.601 matrix (yuvj420p): left so, the chunk would be encoded full range, the
+  // clips beside it converted to match, and as the first chunk the whole episode would come out full range
+  // (-pix_fmt yuv420p doesn't bring it back on FFmpeg 7 and newer). Brought to the clips' limited range and BT.709.
+  const range = pic.format === 'jpeg' ? ',scale=out_range=tv:out_color_matrix=bt709,format=yuv420p' : '';
+  // FFmpeg 7.1 and newer still pass the JPEG's rotation on to the chunk with -noautorotate; as the first frame of
+  // the first chunk, the concat demuxer would carry it into the final pass, which would turn the whole episode.
+  return `sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ''}${flat}${framed('fill', cropAt(focus), o, k)}${range},setsar=1`;
+}
+
+/**
  * A chunk's output size and frame rate, the pictures of its image cards (cardImagesFor), and the fades J- and L-cuts ask
  * of shots' own sound (fadesFor), by item id.
  */
@@ -235,16 +261,8 @@ export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<stri
         // so Mirage turns it from the orientation it read itself.
         const pic = o.cardImages?.get(item.id);
         if (!pic) throw new MirageError('BAD_ITEM', `item ${item.id}: card image ${item.card.image} was not checked before rendering`, 'Run check, then render again.');
-        inputs.push('-noautorotate', '-f', `${pic.format}_pipe`, '-framerate', ffNum(o.fps), '-i', pic.path);
-        // A PNG's colour times its alpha is the picture over black: clear parts black, not whatever colour they hold.
-        const flat = pic.format === 'png' ? 'format=rgba,premultiply=inplace=1,' : '';
-        // A JPEG decodes full range on the BT.601 matrix (yuvj420p): left so, the chunk would be encoded full range, the
-        // clips beside it converted to match, and as the first chunk the whole episode would come out full range
-        // (-pix_fmt yuv420p doesn't bring it back on FFmpeg 7 and newer). Brought to the clips' limited range and BT.709.
-        const range = pic.format === 'jpeg' ? ',scale=out_range=tv:out_color_matrix=bt709,format=yuv420p' : '';
-        // FFmpeg 7.1 and newer still pass the JPEG's rotation on to the chunk with -noautorotate; as the first frame of
-        // the first chunk, the concat demuxer would carry it into the final pass, which would turn the whole episode.
-        chains.push(`[${k}:v]sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ''}${flat}${framed('fill', '', o, k)}${range},setsar=1,tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
+        inputs.push(...cardPictureInput(pic, o.fps));
+        chains.push(`[${k}:v]${cardPicture(pic, o, k)},tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},setpts=PTS-STARTPTS[v${k}]`, silence);
       } else {
         // A text card is black for its length, at the chunk's size (its text comes in the final pass); all cards are silent.
         inputs.push('-f', 'lavfi', '-i', `color=c=black:s=${o.width}x${o.height}:r=${ffNum(o.fps)}:d=${ffNum((l.frames + 1) / o.fps)}`);

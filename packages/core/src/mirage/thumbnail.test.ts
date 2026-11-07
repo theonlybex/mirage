@@ -540,7 +540,7 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       }
     });
 
-    it('takes the clip frame an output time shows, exactly: through speed, the held frame, a card from the cut, the source under a move', async () => {
+    it('takes the clip frame an output time shows, exactly: through speed, the held frame, a card drawn, the source under a move', async () => {
       const dir = await thumbProject('mapped', mapped, { cut: true });
       const r = await writeThumbnail(dir, 1, { at: 4.6 }, tools);
       expect(r).toEqual({ file: thumbFile(dir), width: 1280, height: 720, from: { clip: 'c001', src: 2.4 } });
@@ -550,12 +550,13 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       // Held from 8.5 s: the frame at 1.5 s (green), not 2.0 s into the clip (blue).
       expect((await writeThumbnail(dir, 1, { at: 9 }, tools)).from).toEqual({ clip: 'c001', src: 1.5 });
       expect(near(await colour(thumbFile(dir)), 'green')).toBe(true);
-      // The card: its frame from the cut (yellow there).
+      // The card: drawn at the thumbnail's size (black, its text in white), not its frame from the cut (yellow there).
       expect(await writeThumbnail(dir, 1, { at: 10 }, tools)).toEqual({ file: thumbFile(dir), width: 1280, height: 720, from: 'card' });
-      const yellow = await colour(thumbFile(dir));
-      expect(yellow[0]).toBeGreaterThan(200);
-      expect(yellow[1]).toBeGreaterThan(200);
-      expect(yellow[2]).toBeLessThan(60);
+      const drawn = await pixels(thumbFile(dir));
+      expect(Math.max(...drawn.at(2, 2), ...drawn.at(1277, 717))).toBeLessThan(40);
+      let lit = 0;
+      for (let y = 300; y < 420; y += 2) for (let x = 400; x < 880; x += 2) if (Math.min(...drawn.at(x, y)) > 200) lit++;
+      expect(lit).toBeGreaterThan(100);
       // Under the move (fully on the left, red, half): the whole source frame, red left and blue right.
       expect((await writeThumbnail(dir, 1, { at: 12 }, tools)).from).toEqual({ clip: 'c002', src: 0.5 });
       const px = await pixels(thumbFile(dir));
@@ -645,11 +646,65 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       expect(existsSync(thumbFile(dir))).toBe(false);
     });
 
-    it('needs a cut for a card, not for a clip', async () => {
+    it('needs no cut, for a card or a clip', async () => {
       const dir = await thumbProject('nocut', mapped);
-      await expect(writeThumbnail(dir, 1, { at: 10 }, tools)).rejects.toMatchObject({ message: 'video 1 has no cut yet', hint: 'Run cut (or render) first.' });
-      expect(existsSync(thumbFile(dir))).toBe(false);
+      expect((await writeThumbnail(dir, 1, { at: 10 }, tools)).from).toBe('card');
       expect((await writeThumbnail(dir, 1, { at: 1 }, tools)).from).toEqual({ clip: 'c001', src: 1 });
+    });
+
+    it('draws a card at the thumbnail size: its background (a picture covers the frame) and its text in the card styles and bundled fonts', async () => {
+      const cards = [
+        { id: 'm', beat: 'title', card: { text: 'npm run build', style: 'mono', sec: 2 } },
+        { id: 'p', beat: 'title', card: { text: 'Tokyo', style: 'image', image: "pics/green 'pic'.png", sec: 2 } },
+      ];
+      for (const output of [{ width: 320, height: 180 }, { width: 180, height: 320 }]) {
+        const dir = await thumbProject(`cards-${output.width}`, cards, { output });
+        await mkdir(join(dir, 'pics'));
+        // A landscape green picture: a portrait cover crops it, a landscape one scales it.
+        await ff(['-f', 'lavfi', '-i', 'color=c=0x00C800:s=800x600:d=1', '-frames:v', '1', join(dir, 'pics', "green 'pic'.png")]);
+        const logs: string[] = [];
+        const verbose: MediaTools = {
+          ...tools,
+          runFfmpeg: async (args, opts) => {
+            const graph = args[args.indexOf('-vf') + 1] ?? '';
+            if (!graph.includes('ass=')) return tools.runFfmpeg(args, opts);
+            expect(graph).toContain(`:fontsdir=`);
+            logs.push((await run('ffmpeg', ['-hide_banner', '-v', 'verbose', '-nostats', '-y', ...args], { cwd: opts?.cwd })).stderr);
+          },
+        };
+        const [w, h] = output.width > output.height ? [1280, 720] : [1080, 1920];
+        const white = (p: number[]) => Math.min(...p) > 200;
+        const black = (p: number[]) => Math.max(...p) < 50;
+        const count = (px: Awaited<ReturnType<typeof pixels>>, y0: number, y1: number, test: (p: number[]) => boolean) => {
+          let n = 0;
+          for (let y = Math.round(y0); y < y1; y += 2) for (let x = 0; x < px.w; x += 2) if (test(px.at(x, y))) n++;
+          return n;
+        };
+
+        // Mono: white JetBrains Mono on black, centred.
+        expect(await writeThumbnail(dir, 1, { at: 1 }, verbose)).toEqual({ file: thumbFile(dir), width: w, height: h, from: 'card' });
+        expect(logs[0]).toMatch(/fontselect: \(JetBrains Mono, 400, 0\) -> JetBrainsMono-Regular\b/);
+        const mono = await pixels(thumbFile(dir));
+        expect([mono.w, mono.h]).toEqual([w, h]);
+        expect(count(mono, h * 0.4, h * 0.6, white)).toBeGreaterThan(200);
+        expect(count(mono, 0, h * 0.3, (p) => !black(p)) + count(mono, h * 0.7, h, (p) => !black(p))).toBe(0);
+
+        // Picture: it covers the frame, its text white with a black outline in Montserrat ExtraBold in the middle; the
+        // thumbnail's own text in the lower third.
+        await writeThumbnail(dir, 1, { at: 3, text: 'Go' }, verbose);
+        expect(logs[1]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
+        const pic = await pixels(thumbFile(dir));
+        expect([pic.w, pic.h]).toEqual([w, h]);
+        for (const [x, y] of [[2, 2], [w - 3, 2], [2, h - 3], [w - 3, h - 3]] as const) {
+          const c = pic.at(x, y);
+          expect(c[1]).toBeGreaterThan(150);
+          expect(Math.max(c[0]!, c[2]!)).toBeLessThan(80);
+        }
+        expect(count(pic, h * 0.4, h * 0.6, white)).toBeGreaterThan(200);
+        expect(count(pic, h * 0.4, h * 0.6, black)).toBeGreaterThan(100);
+        expect(count(pic, h * 0.75, h * 0.92, white)).toBeGreaterThan(200);
+        expect(count(pic, 0, h * 0.3, (p) => white(p) || black(p))).toBe(0);
+      }
     });
 
     it('replaces an earlier thumbnail, keeps it when it fails, and touches nothing else', async () => {
