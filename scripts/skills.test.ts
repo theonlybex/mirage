@@ -104,6 +104,13 @@ describe('the plugin skills', () => {
     }
   });
 
+  it('edit teaches the captions field: its styles, and pop for every new vertical video', () => {
+    const edit = read('edit');
+    expect(edit).toContain('captions');
+    for (const style of ['phrase', 'pop', 'karaoke', 'chosen', 'off']) expect(edit, `edit never names the ${style} style`).toContain(`\`${style}\``);
+    expect(edit).toContain('For every new short or vertical video, write "captions": { "style": "pop", "position": "middle" } into episode.json.');
+  });
+
   it('the copy the plan fixes word for word is there', () => {
     const edit = read('edit');
     expect(edit).toContain("Here's the rough cut in Mirage's viewer. Click on the video to leave notes, then press Send notes.");
