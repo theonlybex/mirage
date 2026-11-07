@@ -28,6 +28,7 @@ Each engine tool is called `mcp__plugin_mirage_engine__<name>`. Below, a tool is
 | `mcp__plugin_mirage_engine__vo` | `{ video, recording, add?, slots? }` | fits the voice-over recording to the video |
 | `mcp__plugin_mirage_engine__speak` | `{ video, voice?, speed?, slots? }` | reads the written lines aloud with an AI voice (Kokoro, free, on this computer) and fits them like `vo` |
 | `mcp__plugin_mirage_engine__render` | `{ video }` | renders the final video with captions (`final.mp4`, `final.srt`) |
+| `mcp__plugin_mirage_engine__thumbnail` | `{ video, at?, text?, focus? }` | without `at`: up to 12 candidate frames from the newest cut, each listed with its time and why it was picked; with `at` (a second of the video): writes `thumbnail.jpg` from the source frame there, cropped around `focus`, with optional `text` of up to 4 words |
 | `mcp__plugin_mirage_engine__versions` | `{ video }` | lists the saved versions of a video, each with its id |
 | `mcp__plugin_mirage_engine__restore` | `{ video, id }` | puts a saved version back (what is there now is kept) |
 
@@ -240,6 +241,22 @@ With AI narration, `speak` takes the place of `vo` here: after a re-cut, `slots`
 `render` → `final.mp4` + `final.srt` (captions use the written lines' spelling). Write `episodes/<n>/summary.md` (what was attempted, what broke, what's left, counter values) for the next episode's recap. Suggest a title in the format: all caps with a number ("I BUILT X IN 7 DAYS", "X SAID IT WAS IMPOSSIBLE").
 
 That summary and title are the build story's. A video in another format writes its summary and suggests its title as its format's rules say (a short's `summary.md` says what to set when posting it).
+
+### Thumbnail, title and description
+After `render`, package the video. A short's cover is its thumbnail; its title and description follow the short format's rules.
+1. Call `thumbnail` with `{ video: n }`. It writes up to 12 candidate frames to `episodes/<n>/thumbs/cand-01.jpg`, `cand-02.jpg` … and lists each with its time and why it was picked (a moment from the catalog, the loudest moment of a shot, a beat, or even spacing). Read the JPEGs to look at them. Look at the candidate frames, pick the one where a face shows the strongest reaction with its cause in frame, and write the thumbnail without text unless the person asks for some.
+2. Call `thumbnail` with `{ video: n, at }` using that frame's time. It writes `episodes/<n>/thumbnail.jpg` (1280×720, or a 1080×1920 cover for a vertical video) from the source frame, not from the compressed render. `focus` (`{ x, y }`, 0–1) moves the crop when the face is off-centre; `text` is up to 4 words, only when asked for. Show it to the person (Read the JPEG) and say where it is; they ask for another frame, a different crop or some words, and you call `thumbnail` with `at` again, which replaces it. `thumbnail.jpg` is copied together with the finished video by the person's own rule for where finished videos go.
+3. Write 3 title options into `summary.md`, in the style of the video's format (the build story's: all caps with a number; the other formats' rules say theirs). Each is 3–8 words and never a claim the video does not deliver. The person picks.
+4. Write a description for the video into `summary.md`, in this order, leaving out any part the person hasn't given you: a schedule line (when they post), a sponsor code, plugs for their podcast, products and socials, "People in the video" with each person's handle exactly as the person gave it, then credits, and the licence line for each music track used, read from `music/library.json`.
+
+Titles and descriptions hold only facts the person gave you or the catalog holds: never invent a handle, a sponsor, a link, a number or a licence. Ask when something is missing.
+
+When `thumbnail` answers with a `✖` or a `⚠`, say it in plain words and what to do:
+- `video <n> has no cut yet`: the video hasn't been cut, so there are no frames to pick from. Run `cut` or `render` first.
+- `⚠ the timeline changed after <file> was made — run cut again for frames that match`: the candidate frames show an older cut than the timeline now has. Run `cut` again, then ask for candidates again.
+- `thumbnail text is <k> words — keep it to 4 or fewer`: shorten the words, or leave them out.
+- `<at> s is outside the video (0–<D> s)`: pick a time from the candidates' list.
+- `focus x and y go from 0 to 1 (…)`: give the crop point as two numbers from 0 to 1.
 
 When a big video (any format but a short) is finished, offer "a few shorts from this?" with 3–5 moments from it, each in one line with where it cuts off ("The lamp lights up for the first time: cuts off as he reaches for the switch."). Make each one the person picks with `new_video { from, format: "short" }` and its own title: `from` is the big video's number, and the short gets its footage, its answers and the catalog, so don't catalog again. Each short is its own video, edited by the short format's rules (`formats { id: "short" }`) from step 3.
 

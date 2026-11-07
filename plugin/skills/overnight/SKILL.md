@@ -32,6 +32,8 @@ Start once they say it's done.
 ## 3. Edit each video, never asking
 For each video in turn, follow the mirage:edit skill from its step 1 (catalog the footage folders in `episodes/<n>/video.json`) through step 4 (the narration lines and `mcp__plugin_mirage_engine__guide`). Don't stop at the rough cut, and don't wait for the person to read the lines. When `episodes/<n>/video.json` asks for AI narration, or the person asked for it, call `mcp__plugin_mirage_engine__speak` after the lines and then `mcp__plugin_mirage_engine__render`, instead of stopping at the guide (the edit skill's step 4 says how).
 
+After the final render, call `mcp__plugin_mirage_engine__thumbnail` for candidates and once with `at` for the best one, and log it with kind `guess` for the person to confirm.
+
 Never ask the person anything; nobody is there to answer. Instead, write it down for the morning with `mcp__plugin_mirage_engine__log` (`{ video: n, kind, text }`):
 - Where you would have asked, make your best guess and carry on, then log it with kind `guess`: "Used the second take of the intro, because the first one cuts off mid-sentence."
 - What only the person can answer (a number for a counter, what went wrong off screen, how long something took) goes in with kind `question`. Leave that thing out of the video meanwhile: never invent footage, numbers or events.

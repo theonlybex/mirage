@@ -205,6 +205,27 @@ describe('the plugin skills', () => {
     expect(edit).toContain("`number` is one more than the highest among the project's vlogs of that name, or 1");
   });
 
+  it('edit picks thumbnails and writes titles and descriptions from the person and the catalog only', () => {
+    const edit = read('edit');
+    expect(toolsNamed(edit)).toContain('thumbnail');
+    const row = edit.split('\n').find((l) => l.startsWith('| `mcp__plugin_mirage_engine__thumbnail` |'))!;
+    for (const input of ['video', 'at?', 'text?', 'focus?']) expect(row, `thumbnail row lacks ${input}`).toContain(input);
+    expect(edit).toContain('Look at the candidate frames, pick the one where a face shows the strongest reaction with its cause in frame, and write the thumbnail without text unless the person asks for some.');
+    for (const words of ['thumbs/cand-', 'thumbnail.jpg', 'Show it to the person', '3 title options', 'never a claim the video does not deliver', 'People in the video', 'music/library.json', 'only facts the person gave you or the catalog holds']) {
+      expect(edit, `edit never says ${words}`).toContain(words);
+    }
+    // The tool's ✖ and ⚠ lines are passed on in plain words.
+    for (const message of ['`video <n> has no cut yet`', '`thumbnail text is <k> words — keep it to 4 or fewer`', '`<at> s is outside the video (0–<D> s)`']) {
+      expect(edit, `edit never explains ${message}`).toContain(message);
+    }
+  });
+
+  it('overnight makes candidates and a thumbnail after the final render and logs them for the person to confirm', () => {
+    const overnight = read('overnight');
+    expect(toolsNamed(overnight)).toContain('thumbnail');
+    expect(overnight).toContain('After the final render, call `mcp__plugin_mirage_engine__thumbnail` for candidates and once with `at` for the best one, and log it with kind `guess` for the person to confirm.');
+  });
+
   it('status explains the Formats line and a broken format file', () => {
     const status = read('status');
     expect(status).toContain('`Formats: <id>, <id>, …`');

@@ -36,8 +36,16 @@ Pass `vlog: { name, date }` to `new_video`: `name` is what the person calls thei
 - Time cards for jumps in time: a `bold` card ("Not even 2 days later...") or a yellow `timecard` overlay ("EARLIER") when the picture should keep playing.
 - Plug cards near the end (above), and the `mono` title card. No other full-screen cards (phone screens, texts and video calls full frame are fine).
 
-## Title and thumbnail
-Suggest titles in either style and let the person pick: the classic, ALL CAPS, 3–8 words ending "!!", hiding who and what ("SURPRISING BEST FRIEND WITH LAMBORGHINI!!"); or the current one, sentence case, first person, no "!!" ("This was a bad idea"). For the thumbnail, suggest a frame with a wide-open laughing or shocked face and the cause in frame, with no text on it.
+## Packaging
+Suggest titles in either style and let the person pick (3 options in `summary.md`, each 3–8 words):
+- The classic: ALL CAPS, ending "!!", hiding who and what, with an optional tag in brackets ("SURPRISING BEST FRIEND WITH LAMBORGHINI!!", "SHE SAID SHE'D NEVER DO THIS AGAIN!! (CAUGHT)").
+- The current one: sentence case, first person, no "!!" ("This was a bad idea").
+
+A title never claims what the vlog doesn't show.
+
+Thumbnail: no text, no arrows. Pick a frame with a wide-open laughing or shocked face and the cause in frame, as the edit skill says (`thumbnail`, candidates first); call it without `text`.
+
+The description follows the edit skill's order: schedule line, sponsor code, plugs, socials, "People in the video" with the handles the person gave, credits. Take nothing from anywhere but the person and the catalog.
 
 ## Guardrails
 - Only people who agreed to be on camera. Leave out bystanders and anyone who didn't agree to be shown; if they matter to a bit, ask the person.

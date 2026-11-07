@@ -30,8 +30,10 @@ A short made `from` a big video has its footage folders, its answers (`about`, `
 ## Keep text and faces out of the covered areas
 Instagram's buttons and caption cover more of the picture than YouTube's, so keep text and faces out of both: about the bottom 20%, the top 10% and the right 15% of the frame. Pick each item's `focus` so faces stay in the clear part of the frame. `check` names any overlay or caption that falls in a covered area; a `callout` sits in the middle of the frame and is always clear.
 
-## The title
+## Packaging
 The short's title asks the big video's question, never the answer ("Did he actually say yes?"). A standalone short's title asks the hook's question.
+
+The cover (1080×1920) is the hook's strongest frame: call `thumbnail` for candidates and pick the one nearest the hook, with a face in the clear part of the frame, no text unless the person asks. The title and description are written as the edit skill says, from the person and the catalog only.
 
 ## When it's finished
 The short's `summary.md` says what to set when posting it:

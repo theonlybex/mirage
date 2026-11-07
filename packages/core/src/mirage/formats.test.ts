@@ -78,6 +78,22 @@ describe('the plugin\'s format files', () => {
   });
 });
 
+describe('packaging in the format files', () => {
+  const body = (id: string) => loadFormats().formats.find((f) => f.id === id)!.rules;
+  it('every format has a packaging part naming its title style', () => {
+    for (const id of ['build-story', 'short', 'vlog']) expect(body(id), `${id} has no packaging part`).toContain('## Packaging');
+    expect(body('vlog')).toContain('ALL CAPS');
+    expect(body('vlog')).toContain('"This was a bad idea"');
+    expect(body('short')).toContain('asks the big video\'s question');
+    expect(body('build-story')).toContain('all caps with a number');
+  });
+  it('each says what its thumbnail shows', () => {
+    expect(body('vlog')).toContain('no text, no arrows');
+    expect(body('short')).toContain('cover (1080×1920)');
+    expect(body('build-story')).toContain('before/after');
+  });
+});
+
 describe('loadFormats', () => {
   it('reads front matter (a JSON object between --- lines) and the rules after it', async () => {
     const dir = await folder({ 'demo.md': file({ ...FM, targetSec: 30 }, '# Rules\n\nOpen on the joke.\n') });
