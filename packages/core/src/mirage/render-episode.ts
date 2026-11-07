@@ -420,6 +420,11 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
   // Pop and karaoke captions are drawn in the bundled font: a broken install stops here, not with libass's fallback font.
   const style = o.mode === 'guide' ? 'off' : (ep.captions?.style ?? 'phrase');
   const fontsDir = style === 'pop' || style === 'karaoke' ? bundledFontsDir() : undefined;
+  // Every render's last pass draws overlays.ass with FFmpeg's ass filter: an FFmpeg without libass fails there, after all the work.
+  const captions = await o.tools.ffmpegCaptions?.();
+  if (captions && !captions.ok) {
+    throw new MirageError('NO_CAPTIONS', `FFmpeg can't draw captions or text: ${captions.path} was built without libass.`, captions.hint);
+  }
   const outputPath = join(dir, `${o.mode}.mp4`);
   const id = randomUUID();
   const work = join(dir, `.work-${id}`);

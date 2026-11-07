@@ -8,6 +8,7 @@ const fine = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({
   freeBytes: async () => 500 * GB,
   footageBytes: async () => 20 * GB,
   which: async () => true,
+  captions: async () => ({ ok: true, path: '/bin/ffmpeg' }),
   transcriber: async () => null,
   tts: async () => ({ state: 'ok' }),
   ...over,
@@ -38,6 +39,15 @@ describe('preflight', () => {
     expect(r.problems).toEqual(["ffmpeg isn't installed. Run /mirage:setup."]);
     const none = await preflight({ project: '/p', videos: [1], deps: fine({ which: async () => false }) });
     expect(none.problems).toEqual(["ffmpeg isn't installed. Run /mirage:setup.", "ffprobe isn't installed. Run /mirage:setup."]);
+  });
+
+  it('lists an FFmpeg that was built without libass, with how to get a full one', async () => {
+    const c = { ok: false as const, path: '/opt/homebrew/bin/ffmpeg', hint: "Install Homebrew's complete build: brew install ffmpeg-full (Mirage finds it by itself)." };
+    const r = await preflight({ project: '/p', videos: [1], deps: fine({ captions: async () => c }) });
+    expect(r).toEqual({ ok: false, problems: ["FFmpeg can't draw captions or text: /opt/homebrew/bin/ffmpeg was built without libass. Install Homebrew's complete build: brew install ffmpeg-full (Mirage finds it by itself)."], notes: [] });
+    // No FFmpeg at all is reported once, as missing.
+    const none = await preflight({ project: '/p', videos: [1], deps: fine({ which: async (t) => t === 'ffprobe', captions: async () => null }) });
+    expect(none.problems).toEqual(["ffmpeg isn't installed. Run /mirage:setup."]);
   });
 
   it('says what speech recognition is missing', async () => {

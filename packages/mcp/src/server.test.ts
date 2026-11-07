@@ -17,7 +17,7 @@ import { createEngineServer, newestSessionId, TOOL_NAMES, type EngineContext } f
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
 const GB = 1024 ** 3;
-const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, transcriber: async () => null, tts: async () => ({ state: 'ok' }), ...over });
+const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, captions: async () => ({ ok: true, path: '/bin/ffmpeg' }), transcriber: async () => null, tts: async () => ({ state: 'ok' }), ...over });
 
 const clients: Client[] = [];
 afterEach(async () => {
@@ -441,6 +441,10 @@ describe('engine tools', () => {
       await writeFile(join(dir, '.mirage', 'viewer.json'), JSON.stringify({ url: 'http://127.0.0.1:5123', pid: process.pid }));
       expect((await call('status')).text).toContain('Viewer: running at http://127.0.0.1:5123');
     }
+    const noLibass = await connect(dir, { preflightDeps: deps({ captions: async () => ({ ok: false, path: '/opt/homebrew/bin/ffmpeg', hint: "Install Homebrew's complete build: brew install ffmpeg-full (Mirage finds it by itself)." }) }) });
+    const noLibassLines = (await noLibass.call('status')).text.split('\n');
+    expect(noLibassLines).toContain("ffmpeg: can't draw captions — /opt/homebrew/bin/ffmpeg was built without libass. Install Homebrew's complete build: brew install ffmpeg-full (Mirage finds it by itself).");
+    expect(noLibassLines).not.toContain('ffmpeg: ok');
     const { call } = await connect(dir, { preflightDeps: deps() });
     expect((await call('status')).text.split('\n')).toContain('transcriber: ok');
     expect((await call('status')).text.split('\n')).toContain('tts: ok');

@@ -4,7 +4,7 @@ import { readdir, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { readVideo } from '@wordedits/core';
-import { locate, ttsSetup, whisperSetup, type TtsState } from '@wordedits/sidecars';
+import { ffmpegCaptions, locate, ttsSetup, whisperSetup, type CaptionsCheck, type TtsState } from '@wordedits/sidecars';
 
 /** What the overnight check asks of the machine. Tests pass stubs; the server passes realPreflightDeps(). */
 export interface PreflightDeps {
@@ -12,6 +12,8 @@ export interface PreflightDeps {
   freeBytes(path: string): Promise<number>;
   footageBytes(project: string, n: number): Promise<number>;
   which(cmd: string): Promise<boolean>;
+  /** Whether the FFmpeg in use can draw captions; null when there is no FFmpeg to ask. */
+  captions(): Promise<CaptionsCheck | null>;
   /** What speech recognition is missing (whisper-cli, its model, or both, with how to get them); null when both are found. */
   transcriber(): Promise<string | null>;
   /** Whether Kokoro, the AI narration voice, is ready, will be fetched by speak, or can't be installed. */
@@ -31,6 +33,8 @@ export async function preflight(o: { project: string; videos: number[]; deps: Pr
   for (const tool of ['ffmpeg', 'ffprobe']) {
     if (!(await deps.which(tool))) problems.push(`${tool} isn't installed. Run /mirage:setup.`);
   }
+  const captions = await deps.captions();
+  if (captions && !captions.ok) problems.push(captionsProblem(captions));
   const speech = await deps.transcriber();
   if (speech) problems.push(`Speech recognition isn't set up: ${speech} Run /mirage:setup.`);
   // Narration is only needed by videos without a voice of their own, and speak fetches Kokoro itself: only a Kokoro that
@@ -40,6 +44,11 @@ export async function preflight(o: { project: string; videos: number[]; deps: Pr
   if (tts.state === 'missing') problems.push(`AI narration isn't available: ${tts.text}`);
   if (tts.state === 'fetch') notes.push(`AI narration (Kokoro) is ${tts.text}.`);
   return { ok: problems.length === 0, problems, notes };
+}
+
+/** The sentence for an FFmpeg built without libass: it can't draw captions or text on the video. */
+export function captionsProblem(c: { path: string; hint: string }): string {
+  return `FFmpeg can't draw captions or text: ${c.path} was built without libass. ${c.hint}`;
 }
 
 const execFileAsync = promisify(execFile);
@@ -74,6 +83,7 @@ export function realPreflightDeps(): PreflightDeps {
       return (await Promise.all((video?.footage ?? []).map(folderBytes))).reduce((a, b) => a + b, 0);
     },
     which: (cmd) => locate(cmd as 'ffmpeg' | 'ffprobe').then(() => true, () => false),
+    captions: () => ffmpegCaptions().catch(() => null),
     transcriber: async () => {
       const s = await whisperSetup();
       return s.ok ? null : s.problem;

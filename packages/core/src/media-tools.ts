@@ -23,6 +23,11 @@ export interface MediaTools {
   makeProxy(src: string, out: string, opts?: { height?: number; onProgress?: (f: number) => void }): Promise<void>;
   measureLoudness(file: string, opts?: { audioStream?: number; maxSec?: number }): Promise<{ integratedLufs: number; truePeakDb: number }>;
   extractWav(src: string, out: string, opts?: { timeoutMs?: number; audioStream?: number; signal?: AbortSignal }): Promise<void>;
+  /**
+   * Whether the FFmpeg in use can draw captions (has libass). Render checks it before any work; stubs leave it out, which skips the
+   * check. Throws NOT_FOUND without an FFmpeg.
+   */
+  ffmpegCaptions?(): Promise<s.CaptionsCheck>;
   /** Speech to timed words with whisper.cpp (`locale` 'en-US' or none for auto-detect). */
   transcribe(audioPath: string, opts?: { locale?: string; timeoutMs?: number; signal?: AbortSignal }): Promise<Transcript>;
 }
@@ -37,6 +42,7 @@ export async function realMediaTools(): Promise<MediaTools> {
     makeProxy: s.makeProxy,
     measureLoudness: (file, opts) => s.measureLoudness(file, opts),
     extractWav: (src, out, opts) => s.extractWav(src, out, opts),
+    ffmpegCaptions: s.ffmpegCaptions,
     transcribe: (audio, opts) => s.transcribeAudio(audio, opts),
   };
 }

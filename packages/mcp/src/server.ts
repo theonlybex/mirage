@@ -358,7 +358,11 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     // A missing or broken viewer.json, or a pid that is gone (the viewer died without cleaning up), means it is not running.
     const viewer = await readJsonFile(join(project, '.mirage', 'viewer.json'), ViewerInfoSchema, '.mirage/viewer.json').catch(() => null);
     lines.push(viewer && alive(viewer.pid) ? `Viewer: running at ${viewer.url}` : 'Viewer: not running');
-    for (const t of ['ffmpeg', 'ffprobe']) lines.push(`${t}: ${(await deps.which(t)) ? 'ok' : 'missing'}`);
+    for (const t of ['ffmpeg', 'ffprobe']) {
+      const found = await deps.which(t);
+      const captions = t === 'ffmpeg' && found ? await deps.captions() : null;
+      lines.push(captions && !captions.ok ? `ffmpeg: can't draw captions — ${captions.path} was built without libass. ${captions.hint}` : `${t}: ${found ? 'ok' : 'missing'}`);
+    }
     const speech = await deps.transcriber();
     lines.push(speech ? `transcriber: missing — ${speech}` : 'transcriber: ok');
     const tts = await deps.tts();

@@ -392,6 +392,24 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect(b.calls).toEqual([]);
   }, 60_000);
 
+  it('refuses before creating any work folder when FFmpeg was built without libass', async () => {
+    await saveEpisode(project, ep(one, { number: 13 }));
+    const a = counting();
+    const noCaptions = { ...a.tools, ffmpegCaptions: async () => ({ ok: false as const, path: '/opt/homebrew/bin/ffmpeg', hint: "Install Homebrew's complete build: brew install ffmpeg-full (Mirage finds it by itself)." }) };
+    for (const mode of ['rough', 'final', 'guide'] as const) {
+      await expect(renderEpisode({ project, episode: 13, mode, tools: noCaptions })).rejects.toMatchObject({
+        name: 'MirageError',
+        message: "FFmpeg can't draw captions or text: /opt/homebrew/bin/ffmpeg was built without libass.",
+        hint: "Install Homebrew's complete build: brew install ffmpeg-full (Mirage finds it by itself).",
+      });
+    }
+    expect(a.calls).toEqual([]);
+    expect((await readdir(join(project, 'episodes', '13'))).filter((f) => f.startsWith('.work-'))).toEqual([]);
+    // With captions available the same episode renders.
+    const ok = { ...a.tools, ffmpegCaptions: async () => ({ ok: true as const, path: 'ffmpeg' }) };
+    await expect(renderEpisode({ project, episode: 13, mode: 'rough', tools: ok })).resolves.toBeDefined();
+  }, 60_000);
+
   it('stops before rendering a final cut whose voice-over recording is gone', async () => {
     await saveEpisode(project, ep(one, { number: 5, voiceover: { recording: 'gone.m4a', lines: [] } }));
     await writeFile(join(project, 'episodes', '5', 'voiceover.transcript.json'), JSON.stringify({ words: [], segments: [], speech: [] }));

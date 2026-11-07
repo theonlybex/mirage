@@ -69,6 +69,46 @@ var init_project_root = __esm({
   }
 });
 
+// packages/shared/src/setup-state.ts
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join as join2 } from "node:path";
+function readSetupState(dataDir) {
+  try {
+    const raw = JSON.parse(readFileSync(join2(dataDir, SETUP_FILE), "utf8"));
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+    const { askedVersion, laterUntil, ffmpeg } = raw;
+    const state = {};
+    if (typeof askedVersion === "string") state.askedVersion = askedVersion;
+    if (typeof laterUntil === "string") state.laterUntil = laterUntil;
+    if (typeof ffmpeg === "object" && ffmpeg !== null && !Array.isArray(ffmpeg)) {
+      const { path: path8, mtimeMs, captions } = ffmpeg;
+      if (typeof path8 === "string" && typeof mtimeMs === "number" && Number.isFinite(mtimeMs) && typeof captions === "boolean") state.ffmpeg = { path: path8, mtimeMs, captions };
+    }
+    return state;
+  } catch {
+    return {};
+  }
+}
+function writeSetupState(dataDir, patch) {
+  try {
+    const next = { ...readSetupState(dataDir) };
+    if (patch.askedVersion !== void 0) next.askedVersion = patch.askedVersion;
+    if (patch.laterUntil !== void 0) next.laterUntil = patch.laterUntil;
+    if (patch.ffmpeg !== void 0) next.ffmpeg = patch.ffmpeg;
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join2(dataDir, SETUP_FILE), `${JSON.stringify(next, null, 2)}
+`);
+  } catch {
+  }
+}
+var SETUP_FILE;
+var init_setup_state = __esm({
+  "packages/shared/src/setup-state.ts"() {
+    "use strict";
+    SETUP_FILE = "setup.json";
+  }
+});
+
 // packages/hooks/src/policy.ts
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import path2 from "node:path";
@@ -224,73 +264,6 @@ var init_errors = __esm({
       stderr;
       name = "SidecarError";
     };
-  }
-});
-
-// packages/sidecars/src/locate.ts
-import { access, constants as constants2 } from "node:fs/promises";
-import { delimiter, join as join3 } from "node:path";
-function installHint(tool) {
-  return `Install FFmpeg (macOS: brew install ffmpeg; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
-}
-async function exists(p) {
-  try {
-    await access(p, constants2.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-async function fromStaticPackage(tool) {
-  try {
-    if (tool === "ffmpeg") {
-      const mod2 = await import("ffmpeg-static");
-      return mod2.default;
-    }
-    const mod = await import("ffprobe-static");
-    return mod.path;
-  } catch {
-    return null;
-  }
-}
-async function locate(tool) {
-  const cached2 = cache.get(tool);
-  if (cached2) return cached2;
-  const override = process.env.WORDEDITS_FFMPEG_DIR;
-  if (override) {
-    const p = join3(override, exe(tool));
-    if (await exists(p)) return remember(tool, p);
-    throw new SidecarError(
-      tool,
-      "NOT_FOUND",
-      `${tool} not found in WORDEDITS_FFMPEG_DIR (${override})`,
-      `Put ${exe(tool)} in that folder or unset WORDEDITS_FFMPEG_DIR.`
-    );
-  }
-  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
-    const p = join3(dir, exe(tool));
-    if (await exists(p)) return remember(tool, p);
-  }
-  const bundled = await fromStaticPackage(tool);
-  if (bundled && await exists(bundled)) return remember(tool, bundled);
-  throw new SidecarError(
-    tool,
-    "NOT_FOUND",
-    `${tool} was not found`,
-    installHint(tool)
-  );
-}
-function remember(tool, p) {
-  cache.set(tool, p);
-  return p;
-}
-var cache, exe;
-var init_locate = __esm({
-  "packages/sidecars/src/locate.ts"() {
-    "use strict";
-    init_errors();
-    cache = /* @__PURE__ */ new Map();
-    exe = (tool) => process.platform === "win32" ? `${tool}.exe` : tool;
   }
 });
 
@@ -1294,15 +1267,15 @@ var require_windows = __commonJS({
       }
       return false;
     }
-    function checkStat(stat5, path8, options) {
-      if (!stat5.isSymbolicLink() && !stat5.isFile()) {
+    function checkStat(stat6, path8, options) {
+      if (!stat6.isSymbolicLink() && !stat6.isFile()) {
         return false;
       }
       return checkPathExt(path8, options);
     }
     function isexe(path8, options, cb) {
-      fs.stat(path8, function(er, stat5) {
-        cb(er, er ? false : checkStat(stat5, path8, options));
+      fs.stat(path8, function(er, stat6) {
+        cb(er, er ? false : checkStat(stat6, path8, options));
       });
     }
     function sync(path8, options) {
@@ -1318,20 +1291,20 @@ var require_mode = __commonJS({
     isexe.sync = sync;
     var fs = __require("fs");
     function isexe(path8, options, cb) {
-      fs.stat(path8, function(er, stat5) {
-        cb(er, er ? false : checkStat(stat5, options));
+      fs.stat(path8, function(er, stat6) {
+        cb(er, er ? false : checkStat(stat6, options));
       });
     }
     function sync(path8, options) {
       return checkStat(fs.statSync(path8), options);
     }
-    function checkStat(stat5, options) {
-      return stat5.isFile() && checkMode(stat5, options);
+    function checkStat(stat6, options) {
+      return stat6.isFile() && checkMode(stat6, options);
     }
-    function checkMode(stat5, options) {
-      var mod = stat5.mode;
-      var uid = stat5.uid;
-      var gid = stat5.gid;
+    function checkMode(stat6, options) {
+      var mod = stat6.mode;
+      var uid = stat6.uid;
+      var gid = stat6.gid;
       var myUid = options.uid !== void 0 ? options.uid : process.getuid && process.getuid();
       var myGid = options.gid !== void 0 ? options.gid : process.getgid && process.getgid();
       var u2 = parseInt("100", 8);
@@ -2206,7 +2179,7 @@ var init_core = __esm({
 });
 
 // node_modules/.pnpm/human-signals@8.0.1/node_modules/human-signals/build/src/signals.js
-import { constants as constants3 } from "node:os";
+import { constants as constants2 } from "node:os";
 var getSignals, normalizeSignal;
 var init_signals = __esm({
   "node_modules/.pnpm/human-signals@8.0.1/node_modules/human-signals/build/src/signals.js"() {
@@ -2227,7 +2200,7 @@ var init_signals = __esm({
     }) => {
       const {
         signals: { [name]: constantSignal }
-      } = constants3;
+      } = constants2;
       const supported = constantSignal !== void 0;
       const number4 = supported ? constantSignal : defaultNumber;
       return { name, number: number4, description, supported, action, forced, standard };
@@ -2236,7 +2209,7 @@ var init_signals = __esm({
 });
 
 // node_modules/.pnpm/human-signals@8.0.1/node_modules/human-signals/build/src/main.js
-import { constants as constants4 } from "node:os";
+import { constants as constants3 } from "node:os";
 var getSignalsByName, getSignalByName, signalsByName, getSignalsByNumber, getSignalByNumber, findSignalByNumber, signalsByNumber;
 var init_main = __esm({
   "node_modules/.pnpm/human-signals@8.0.1/node_modules/human-signals/build/src/main.js"() {
@@ -2284,7 +2257,7 @@ var init_main = __esm({
       };
     };
     findSignalByNumber = (number4, signals2) => {
-      const signal = signals2.find(({ name }) => constants4.signals[name] === number4);
+      const signal = signals2.find(({ name }) => constants3.signals[name] === number4);
       if (signal !== void 0) {
         return signal;
       }
@@ -2295,7 +2268,7 @@ var init_main = __esm({
 });
 
 // node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/terminate/signal.js
-import { constants as constants5 } from "node:os";
+import { constants as constants4 } from "node:os";
 var normalizeKillSignal, normalizeSignalArgument, normalizeSignal2, normalizeSignalInteger, getSignalsIntegerToName, signalsIntegerToName, normalizeSignalName, getAvailableSignals, getAvailableSignalNames, getAvailableSignalIntegers, getSignalDescription;
 var init_signal = __esm({
   "node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/terminate/signal.js"() {
@@ -2325,13 +2298,13 @@ ${getAvailableSignals()}`);
       throw new TypeError(`Invalid ${optionName} ${signalInteger}: this signal integer does not exist.
 ${getAvailableSignals()}`);
     };
-    getSignalsIntegerToName = () => new Map(Object.entries(constants5.signals).reverse().map(([signalName, signalInteger]) => [signalInteger, signalName]));
+    getSignalsIntegerToName = () => new Map(Object.entries(constants4.signals).reverse().map(([signalName, signalInteger]) => [signalInteger, signalName]));
     signalsIntegerToName = getSignalsIntegerToName();
     normalizeSignalName = (signalName, optionName) => {
-      if (signalName in constants5.signals) {
+      if (signalName in constants4.signals) {
         return signalName;
       }
-      if (signalName.toUpperCase() in constants5.signals) {
+      if (signalName.toUpperCase() in constants4.signals) {
         throw new TypeError(`Invalid ${optionName} '${signalName}': please rename it to '${signalName.toUpperCase()}'.`);
       }
       throw new TypeError(`Invalid ${optionName} '${signalName}': this signal name does not exist.
@@ -2339,8 +2312,8 @@ ${getAvailableSignals()}`);
     };
     getAvailableSignals = () => `Available signal names: ${getAvailableSignalNames()}.
 Available signal numbers: ${getAvailableSignalIntegers()}.`;
-    getAvailableSignalNames = () => Object.keys(constants5.signals).sort().map((signalName) => `'${signalName}'`).join(", ");
-    getAvailableSignalIntegers = () => [...new Set(Object.values(constants5.signals).sort((signalInteger, signalIntegerTwo) => signalInteger - signalIntegerTwo))].join(", ");
+    getAvailableSignalNames = () => Object.keys(constants4.signals).sort().map((signalName) => `'${signalName}'`).join(", ");
+    getAvailableSignalIntegers = () => [...new Set(Object.values(constants4.signals).sort((signalInteger, signalIntegerTwo) => signalInteger - signalIntegerTwo))].join(", ");
     getSignalDescription = (signal) => signalsByName[signal].description;
   }
 });
@@ -8608,6 +8581,142 @@ var init_run = __esm({
     init_execa();
     init_errors();
     init_locate();
+  }
+});
+
+// packages/sidecars/src/locate.ts
+import { access, constants as constants5, stat } from "node:fs/promises";
+import { delimiter, dirname as dirname2, join as join3 } from "node:path";
+function installHint(tool) {
+  return `Install FFmpeg (macOS: brew install ffmpeg; Windows: winget install ffmpeg) or set WORDEDITS_FFMPEG_DIR to a folder containing ${exe(tool)}.`;
+}
+async function exists(p) {
+  try {
+    await access(p, constants5.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function fromStaticPackage(tool) {
+  try {
+    if (tool === "ffmpeg") {
+      const mod2 = await import("ffmpeg-static");
+      return mod2.default;
+    }
+    const mod = await import("ffprobe-static");
+    return mod.path;
+  } catch {
+    return null;
+  }
+}
+async function overrideMissing(tool, override) {
+  throw new SidecarError(
+    tool,
+    "NOT_FOUND",
+    `${tool} not found in WORDEDITS_FFMPEG_DIR (${override})`,
+    `Put ${exe(tool)} in that folder or unset WORDEDITS_FFMPEG_DIR.`
+  );
+}
+async function ffmpegCandidates() {
+  const override = process.env.WORDEDITS_FFMPEG_DIR;
+  if (override) {
+    const p = join3(override, exe("ffmpeg"));
+    return await exists(p) ? [p] : overrideMissing("ffmpeg", override);
+  }
+  const dirs = [...(process.env.PATH ?? "").split(delimiter).filter(Boolean), ...process.platform === "win32" ? [] : kegDirs];
+  const found2 = [];
+  for (const dir of dirs) {
+    const p = join3(dir, exe("ffmpeg"));
+    if (!found2.includes(p) && await exists(p)) found2.push(p);
+  }
+  if (found2.length === 0 && useStatic) {
+    const bundled = await fromStaticPackage("ffmpeg");
+    if (bundled && await exists(bundled)) found2.push(bundled);
+  }
+  return found2;
+}
+async function listsAssFilter(path8) {
+  try {
+    const { stdout } = await runPath("ffmpeg", path8, ["-hide_banner", "-filters"], { timeoutMs: captionsTimeoutMs });
+    return /^\s*\S+\s+ass\s/m.test(stdout);
+  } catch {
+    return false;
+  }
+}
+async function resolveFfmpeg() {
+  const candidates = await ffmpegCandidates();
+  if (candidates.length === 0) {
+    throw new SidecarError("ffmpeg", "NOT_FOUND", "ffmpeg was not found", installHint("ffmpeg"));
+  }
+  let asked = false;
+  let first;
+  for (const path8 of candidates) {
+    const mtimeMs = (await stat(path8)).mtimeMs;
+    const key = `${path8}\0${mtimeMs}`;
+    let check2 = captionChecks.get(key);
+    if (!check2) {
+      asked = true;
+      check2 = listsAssFilter(path8);
+      captionChecks.set(key, check2);
+    }
+    const captions = await check2;
+    if (captions) return remembered({ path: path8, captions, asked }, mtimeMs);
+    first ??= { path: path8, captions, asked: false };
+  }
+  const chosen = first;
+  return remembered({ ...chosen, asked }, (await stat(chosen.path)).mtimeMs);
+}
+function remembered(r, mtimeMs) {
+  const dataDir = process.env.MIRAGE_PLUGIN_DATA;
+  if (r.asked && dataDir) writeSetupState(dataDir, { ffmpeg: { path: r.path, mtimeMs, captions: r.captions } });
+  return r;
+}
+function captionsHint(platform2 = process.platform) {
+  if (platform2 === "darwin") return "Install Homebrew's complete build: brew install ffmpeg-full (Mirage finds it by itself).";
+  if (platform2 === "win32") return "Install the full build: winget install --id Gyan.FFmpeg -e.";
+  return "Install an FFmpeg built with libass (your distribution's ffmpeg package usually is), or set WORDEDITS_FFMPEG_DIR to one.";
+}
+async function ffmpegCaptions() {
+  const { path: path8, captions } = await resolveFfmpeg();
+  return captions ? { ok: true, path: path8 } : { ok: false, path: path8, hint: captionsHint() };
+}
+async function locate(tool) {
+  if (tool === "ffmpeg") return (await resolveFfmpeg()).path;
+  const sibling = await resolveFfmpeg().then((r) => join3(dirname2(r.path), exe("ffprobe")), () => null);
+  if (sibling && await exists(sibling)) return sibling;
+  const override = process.env.WORDEDITS_FFMPEG_DIR;
+  if (override) {
+    const p = join3(override, exe(tool));
+    return await exists(p) ? p : overrideMissing(tool, override);
+  }
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    const p = join3(dir, exe(tool));
+    if (await exists(p)) return p;
+  }
+  const bundled = useStatic ? await fromStaticPackage(tool) : null;
+  if (bundled && await exists(bundled)) return bundled;
+  throw new SidecarError(
+    tool,
+    "NOT_FOUND",
+    `${tool} was not found`,
+    installHint(tool)
+  );
+}
+var KEG_DIRS, CAPTIONS_TIMEOUT_MS, kegDirs, captionsTimeoutMs, useStatic, captionChecks, exe;
+var init_locate = __esm({
+  "packages/sidecars/src/locate.ts"() {
+    "use strict";
+    init_setup_state();
+    init_errors();
+    init_run();
+    KEG_DIRS = ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin", "/home/linuxbrew/.linuxbrew/opt/ffmpeg-full/bin"];
+    CAPTIONS_TIMEOUT_MS = 1e4;
+    kegDirs = KEG_DIRS;
+    captionsTimeoutMs = CAPTIONS_TIMEOUT_MS;
+    useStatic = true;
+    captionChecks = /* @__PURE__ */ new Map();
+    exe = (tool) => process.platform === "win32" ? `${tool}.exe` : tool;
   }
 });
 
@@ -28438,21 +28547,21 @@ function visit(schema, fnOrHandlers) {
     const h2 = fnOrHandlers[node2._zod.def.type];
     return h2 ? h2(node2, rewritten) : node2;
   };
-  const cache2 = /* @__PURE__ */ new Map();
+  const cache = /* @__PURE__ */ new Map();
   function run2(s) {
-    const cached2 = cache2.get(s);
+    const cached2 = cache.get(s);
     if (cached2 === RESOLVING) {
       return new $ZodLazy({
         type: "lazy",
-        getter: () => cache2.get(s)
+        getter: () => cache.get(s)
       });
     }
     if (cached2 !== void 0)
       return cached2;
-    cache2.set(s, RESOLVING);
+    cache.set(s, RESOLVING);
     const inner = mapInner(s);
     const mapped = fn(inner, inner !== s);
-    cache2.set(s, mapped);
+    cache.set(s, mapped);
     return mapped;
   }
   function mapInner(s) {
@@ -29402,7 +29511,7 @@ var init_src = __esm({
 });
 
 // packages/sidecars/src/ffprobe.ts
-import { stat } from "node:fs/promises";
+import { stat as stat2 } from "node:fs/promises";
 function parseFps(rate) {
   const m = /^(\d+)\/(\d+)$/.exec(rate.trim());
   if (!m) return 0;
@@ -29449,7 +29558,7 @@ async function probe(file2, opts = {}) {
   const v = raw.streams?.find((s) => s.codec_type === "video" && s.disposition?.attached_pic !== 1);
   const a2 = raw.streams?.find((s) => s.codec_type === "audio");
   const audioStreams = raw.streams?.filter((s) => s.codec_type === "audio").length ?? 0;
-  const packets = await scanPackets(file2, opts.scanTimeoutMs ?? scanTimeoutMs((await stat(file2)).size));
+  const packets = await scanPackets(file2, opts.scanTimeoutMs ?? scanTimeoutMs((await stat2(file2)).size));
   const start = num(raw.format?.start_time) ?? 0;
   const headerEnd = (s) => {
     const d = num(s.duration);
@@ -29929,6 +30038,7 @@ async function realMediaTools() {
     makeProxy,
     measureLoudness: (file2, opts) => measureLoudness(file2, opts),
     extractWav: (src, out, opts) => extractWav(src, out, opts),
+    ffmpegCaptions,
     transcribe: (audio, opts) => transcribeAudio(audio, opts)
   };
 }
@@ -30208,7 +30318,7 @@ var init_json_file = __esm({
 
 // packages/core/src/mirage/errors.ts
 import { accessSync as accessSync2, constants as constants7, existsSync as existsSync2 } from "node:fs";
-import { dirname as dirname2 } from "node:path";
+import { dirname as dirname3 } from "node:path";
 function unreadableFile(path8) {
   try {
     accessSync2(path8, constants7.R_OK);
@@ -30226,7 +30336,7 @@ function describeError(e) {
     const why = err.code === "EROFS" ? "the disk is read-only" : "permission denied";
     if (err.syscall === "scandir" || err.syscall === "opendir") return { message: `can't read ${path8}: ${why}`, hint: "Check the folder's permissions (Finder \u2192 Get Info \u2192 Sharing & Permissions)." };
     if ((err.syscall === "open" || err.syscall === "read") && unreadableFile(path8)) return { message: `can't read ${path8}: ${why}`, hint: "Make that file readable (Finder \u2192 Get Info \u2192 Sharing & Permissions)." };
-    return { message: `can't write in ${dirname2(path8)}: ${why}`, hint: "Make that folder writable (Finder \u2192 Get Info \u2192 Sharing & Permissions), or move the project to a folder you can write to." };
+    return { message: `can't write in ${dirname3(path8)}: ${why}`, hint: "Make that folder writable (Finder \u2192 Get Info \u2192 Sharing & Permissions), or move the project to a folder you can write to." };
   }
   if (path8 && err.code === "ENOENT") return { message: `${path8} does not exist`, hint: err.hint };
   if (path8 && err.code === "ENOSPC") return { message: `the disk is full (writing ${path8})`, hint: "Free some space and run the command again." };
@@ -30339,7 +30449,7 @@ var init_cancel2 = __esm({
 
 // packages/core/src/mirage/lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { open as open2, readdir, readFile as readFile3, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
+import { open as open2, readdir, readFile as readFile3, rm as rm2, stat as stat3, writeFile as writeFile2 } from "node:fs/promises";
 import { join as join6 } from "node:path";
 function alive(pid) {
   try {
@@ -30388,7 +30498,7 @@ async function removeAbandoned(path8, what, now) {
 `, { flag: "wx" });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
-    const st = await stat2(guard).catch(() => null);
+    const st = await stat3(guard).catch(() => null);
     if (st && Date.now() - st.mtimeMs > STARTING_GRACE_MS) await rm2(guard, { force: true });
     return false;
   }
@@ -30432,7 +30542,7 @@ async function clearLeftovers(dir, lock, ours) {
       const p = join6(dir, f);
       if (!ours(f)) {
         if (!tmp.test(f)) return;
-        const st = await stat2(p).catch(() => null);
+        const st = await stat3(p).catch(() => null);
         if (!st || st.mtimeMs > lock.startedAt - TMP_GRACE_MS) return;
       }
       await rm2(p, { recursive: true, force: true }).catch(() => {
@@ -30570,7 +30680,7 @@ var init_word_timing = __esm({
 // packages/core/src/mirage/ingest.ts
 import { createHash as createHash2 } from "node:crypto";
 import { createReadStream as createReadStream2, existsSync as existsSync3 } from "node:fs";
-import { mkdir, readdir as readdir2, rename as rename2, rm as rm3, stat as stat3 } from "node:fs/promises";
+import { mkdir, readdir as readdir2, rename as rename2, rm as rm3, stat as stat4 } from "node:fs/promises";
 import { extname, join as join7, resolve as resolve2 } from "node:path";
 function guessKind(probe2, transcript) {
   const words = transcript?.words.length ?? 0;
@@ -30645,7 +30755,7 @@ async function loadCatalogOrStop(project) {
   }
 }
 async function clipFiles(dir, result2) {
-  const st = await stat3(dir).catch(() => null);
+  const st = await stat4(dir).catch(() => null);
   if (!st) throw new MirageError("BAD_INPUT", `${dir} does not exist`, "Pass the folder your clips are in.");
   if (!st.isDirectory()) throw new MirageError("BAD_INPUT", `${dir} is a file, not a folder`, "Pass the folder your clips are in.");
   const files = [];
@@ -31173,10 +31283,10 @@ var init_captions = __esm({
 
 // packages/core/src/mirage/fonts.ts
 import { existsSync as existsSync5 } from "node:fs";
-import { dirname as dirname3, join as join9, resolve as resolve4 } from "node:path";
+import { dirname as dirname4, join as join9, resolve as resolve4 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function bundledFontsDir(from = import.meta.url) {
-  const here = dirname3(from.startsWith("file:") ? fileURLToPath3(from) : resolve4(from));
+  const here = dirname4(from.startsWith("file:") ? fileURLToPath3(from) : resolve4(from));
   const dir = SOURCE_LAYOUT.test(here) ? resolve4(here, "..", "..", "..", "..", "plugin", "fonts", "files") : resolve4(here, "..", "fonts", "files");
   if (!existsSync5(join9(dir, CAPTION_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${dir}`, "Reinstall the Mirage plugin.");
   return dir;
@@ -32294,6 +32404,10 @@ async function renderLocked(o2) {
   }
   const style = o2.mode === "guide" ? "off" : ep.captions?.style ?? "phrase";
   const fontsDir = style === "pop" || style === "karaoke" ? bundledFontsDir() : void 0;
+  const captions = await o2.tools.ffmpegCaptions?.();
+  if (captions && !captions.ok) {
+    throw new MirageError("NO_CAPTIONS", `FFmpeg can't draw captions or text: ${captions.path} was built without libass.`, captions.hint);
+  }
   const outputPath = join10(dir, `${o2.mode}.mp4`);
   const id = randomUUID4();
   const work = join10(dir, `.work-${id}`);
@@ -33157,8 +33271,8 @@ var init_labels = __esm({
 // packages/core/src/mirage/session-files.ts
 import { randomUUID as randomUUID7 } from "node:crypto";
 import { readFileSync as readFileSync4 } from "node:fs";
-import { appendFile, link as link2, mkdir as mkdir6, readdir as readdir6, readFile as readFile7, rename as rename5, rm as rm9, stat as stat4, utimes, writeFile as writeFile7 } from "node:fs/promises";
-import { dirname as dirname4, join as join16, resolve as resolve10 } from "node:path";
+import { appendFile, link as link2, mkdir as mkdir6, readdir as readdir6, readFile as readFile7, rename as rename5, rm as rm9, stat as stat5, utimes, writeFile as writeFile7 } from "node:fs/promises";
+import { dirname as dirname5, join as join16, resolve as resolve10 } from "node:path";
 function checkSessionId(id) {
   if (!SESSION_ID.test(id) || id.includes("..")) throw new MirageError("BAD_INPUT", `"${id}" is not a session id`, "A session id is letters, digits, dots, dashes and underscores.");
   return id;
@@ -33187,7 +33301,7 @@ async function readLines(path8, schema) {
 }
 async function appendLine(path8, schema, value) {
   const parsed = schema.parse(value);
-  await mkdir6(dirname4(path8), { recursive: true });
+  await mkdir6(dirname5(path8), { recursive: true });
   await appendFile(path8, JSON.stringify(parsed) + "\n", "utf8");
 }
 async function writeProgress(dir, p) {
@@ -33221,7 +33335,7 @@ async function claimedControl(project, n2, written) {
   let best = null;
   const stale = [];
   for (const name of names) {
-    const info = await stat4(join16(dir, name)).catch(() => null);
+    const info = await stat5(join16(dir, name)).catch(() => null);
     if (!info) continue;
     if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
     if (written) continue;
@@ -33293,7 +33407,7 @@ async function readSessionState(project, sessionId) {
 async function writeSessionState(project, sessionId, patch) {
   const path8 = sessionStatePath(project, sessionId);
   const next = SessionStateSchema.parse({ ...await readSessionState(project, sessionId), ...patch });
-  await mkdir6(dirname4(path8), { recursive: true });
+  await mkdir6(dirname5(path8), { recursive: true });
   await writeJsonFile(path8, SessionStateSchema, next, `.mirage/sessions/${sessionId}.json`);
   return next;
 }
@@ -33312,7 +33426,7 @@ function claudeProcessPath(project, pid) {
 }
 async function writeClaudeProcess(project, pid, sessionId, at2 = /* @__PURE__ */ new Date()) {
   const path8 = claudeProcessPath(project, pid);
-  await mkdir6(dirname4(path8), { recursive: true });
+  await mkdir6(dirname5(path8), { recursive: true });
   await writeJsonFile(path8, ClaudeProcessSchema, { sessionId: checkSessionId(sessionId), updatedAt: at2.toISOString() }, `.mirage/claude/${pid}.json`);
 }
 function readClaudeProcess(project, pid) {
@@ -34133,39 +34247,9 @@ import { homedir as homedir3 } from "node:os";
 import { join as join20 } from "node:path";
 
 // packages/hooks/src/setup-notice.ts
+init_setup_state();
 import { accessSync, constants, statSync } from "node:fs";
 import path from "node:path";
-
-// packages/shared/src/setup-state.ts
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join as join2 } from "node:path";
-var SETUP_FILE = "setup.json";
-function readSetupState(dataDir) {
-  try {
-    const raw = JSON.parse(readFileSync(join2(dataDir, SETUP_FILE), "utf8"));
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
-    const { askedVersion, laterUntil } = raw;
-    const state = {};
-    if (typeof askedVersion === "string") state.askedVersion = askedVersion;
-    if (typeof laterUntil === "string") state.laterUntil = laterUntil;
-    return state;
-  } catch {
-    return {};
-  }
-}
-function writeSetupState(dataDir, patch) {
-  try {
-    const next = { ...readSetupState(dataDir) };
-    if (patch.askedVersion !== void 0) next.askedVersion = patch.askedVersion;
-    if (patch.laterUntil !== void 0) next.laterUntil = patch.laterUntil;
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join2(dataDir, SETUP_FILE), `${JSON.stringify(next, null, 2)}
-`);
-  } catch {
-  }
-}
-
-// packages/hooks/src/setup-notice.ts
 var DEFAULT_MODEL = "ggml-large-v3-turbo-q5_0.bin";
 function isFile(p) {
   try {
