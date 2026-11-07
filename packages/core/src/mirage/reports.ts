@@ -16,7 +16,7 @@ const range = (s: { start: number; end: number }) => `${s.start.toFixed(1)}–${
 const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
 /** The timeline item by item, its total, then notes (•) and warnings (⚠). */
-export function checkReport({ episode: ep, warnings, notes }: { episode: Episode; warnings: string[]; notes: string[] }): string[] {
+export function checkReport({ episode: ep, warnings, notes, problems = [] }: { episode: Episode; warnings: string[]; notes: string[]; problems?: string[] }): string[] {
   const lines: string[] = [];
   for (const l of layoutTimeline(ep)) {
     const it = l.item;
@@ -24,6 +24,7 @@ export function checkReport({ episode: ep, warnings, notes }: { episode: Episode
     lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${what}  ${l.start.toFixed(2)}–${l.end.toFixed(2)}${it.quiet ? '  quiet' : ''}`);
   }
   lines.push(`total ${formatTime(timelineDuration(ep))} · ${ep.items.length} items · ${ep.overlays.length} overlays · ${ep.music.length} music cues${ep.sfx ? ` · ${ep.sfx.length} sound effects` : ''}`);
+  lines.push(...problems);
   for (const m of notes) lines.push(`• ${m}`);
   for (const w of warnings) lines.push(`⚠ ${w}`);
   return lines;

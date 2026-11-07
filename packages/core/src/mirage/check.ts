@@ -1,15 +1,18 @@
 import { join, resolve } from 'node:path';
-import { isCard, type ClipItem, type Episode, type Move, type MusicLibrary } from '@wordedits/shared';
+import { BUILD_STORY_BEATS, isCard, type Catalog, type ClipItem, type Episode, type Move, type MusicLibrary, type Video } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { checkCardImages } from './cards.js';
+import { describeError } from './errors.js';
+import { loadFormats, type Format } from './formats.js';
 import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
 import { splitShots } from './move.js';
-import { undrawable } from './overlays.js';
+import { OVERLAY_STYLE, speechWords, styleGeometry, undrawable, type StyleGeometry } from './overlays.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
 import { fileUnreadable, sfxSource, unreadableSfx } from './sfx.js';
 import { slotsStale } from './slots.js';
-import { dropCollapsed, layoutTimeline, timelineDuration } from './timeline.js';
+import { dropCollapsed, formatTime, layoutTimeline, timelineDuration } from './timeline.js';
+import { readVideo } from './video.js';
 import { cutChanged, cutChangedError, hasWords, lineChangeWarnings } from './voiceover.js';
 
 /** The music cue gain every cue got before 9af3199; cues saved by a check back then carry it explicitly. */
@@ -110,13 +113,115 @@ function timelineWarnings(ep: Episode, lib: MusicLibrary | null, snapped: boolea
 const MAX_SFX_PER_MINUTE = 6;
 const SFX_WINDOW_SEC = 60;
 
+/** A short opening on more silence than this gets a warning. */
+const MAX_OPENING_SILENCE_SEC = 0.5;
+/** What the Shorts and Reels buttons cover of a vertical frame (Instagram's cover more than YouTube's: these are both). */
+const COVERED = { top: 0.1, bottom: 0.2, right: 0.15 };
+
+/** The covered areas a style's text box reaches into, e.g. ['top 10%', 'right 15%']: its edge by its anchor and margins. */
+function coveredBy(s: StyleGeometry, width: number, height: number): string[] {
+  const row = Math.ceil(s.align / 3); // 1 bottom, 2 middle, 3 top
+  const col = (s.align - 1) % 3; // 0 left, 1 centre, 2 right
+  const out: string[] = [];
+  if (row === 3 && s.marginV - s.outline < height * COVERED.top) out.push(`top ${COVERED.top * 100}%`);
+  if (row === 1 && height - s.marginV + s.outline > height * (1 - COVERED.bottom)) out.push(`bottom ${COVERED.bottom * 100}%`);
+  if (col === 2 && width - s.margin + s.outline > width * (1 - COVERED.right)) out.push(`right ${COVERED.right * 100}%`);
+  return out;
+}
+
+/**
+ * What the video's format asks that the cut doesn't do. A video without a format (a build story) is only told about a
+ * beat outside the build story's own list; `formatted` is false for it.
+ */
+function formatWarnings(ep: Episode, catalog: Catalog, video: Video | null, format: Format, formatted: boolean): string[] {
+  const out: string[] = [];
+  const known: readonly string[] = formatted ? format.beats : BUILD_STORY_BEATS;
+  for (const item of ep.items) {
+    if (!known.includes(item.beat)) out.push(`item ${item.id}'s beat "${item.beat}" isn't one of the ${format.name} format's beats (${format.beats.join(', ')})`);
+  }
+  if (!formatted) return out;
+  const D = timelineDuration(ep);
+  if (format.warnPastSec !== undefined) {
+    // A video's own target scales the limit: a vlog aiming at 15 min instead of 4:20 is warned past 400 s × 900 / 260.
+    const limit = video?.targetSec !== undefined && format.targetSec !== undefined ? (format.warnPastSec * video.targetSec) / format.targetSec : format.warnPastSec;
+    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than the ${format.name} format's ${formatTime(limit)} — cut whole bits rather than thinning laughs`);
+  }
+  if (format.short) {
+    const laid = layoutTimeline(ep);
+    const first = laid[0];
+    const opening = first?.item;
+    // The opening silence of the first item's own live sound; a card or a muted item has none to measure.
+    if (opening && !isCard(opening) && opening.audio === 'keep' && opening.speed === 1) {
+      const clip = catalog.clips.find((c) => c.id === opening.clip);
+      if (clip?.probe.hasAudio && clip.transcript) {
+        const word = speechWords(ep, catalog, null).find((w) => w.start >= first.start - 1e-6 && w.start < first.end);
+        const silence = (word?.start ?? first.end) - first.start;
+        if (silence > MAX_OPENING_SILENCE_SEC + 1e-6) out.push(`a short opens on its hook: item ${opening.id} starts with ${s1(silence)} s of silence`);
+      }
+    }
+    if (first && (first.item.beat === 'title' || first.item.beat === 'cold-open')) out.push(`a short opens on its hook, not a ${first.item.beat}: item ${first.item.id}`);
+    for (const item of ep.items) if (item.beat === 'outro') out.push(`a short has no outro: item ${item.id}`);
+    // A short made from a big video is the format's kind (a teaser pointing to it); one with no big video behind it stands alone.
+    const kind = video?.from !== undefined ? format.short.kind : 'standalone';
+    if (kind === 'standalone') {
+      const last = [...ep.music].sort((a, b) => b.end - a.end)[0];
+      if (last && last.end >= D - 0.5 / ep.output.fps && last.fadeOut > 0) out.push('a standalone short loops: the last music cue fades out at the end — set its fadeOut to 0');
+    } else if (!ep.items.some((i) => i.beat === 'pointer')) {
+      out.push('a teaser short ends pointing to the full video: add a pointer beat at the end');
+    }
+    const { width, height } = ep.output;
+    if (height > width) {
+      const covered = (what: string, s: StyleGeometry) => {
+        const areas = coveredBy(s, width, height);
+        if (areas.length) out.push(`${what} falls where the Shorts and Reels buttons cover it (${areas.join(', ')}) — move it`);
+      };
+      const position = ep.captions?.position ?? 'bottom';
+      const g = styleGeometry(width, height, position);
+      for (const o of ep.overlays) covered(`overlay ${o.kind} ("${o.text}")`, g[OVERLAY_STYLE[o.kind]]);
+      const style = ep.captions?.style ?? 'phrase';
+      if (style !== 'chosen' && style !== 'off') covered(`captions at the ${position}`, g[style === 'pop' ? 'Pop' : style === 'karaoke' ? 'Karaoke' : 'Caption']);
+    }
+  }
+  return out;
+}
+
+/**
+ * The video's format, and what is wrong with the formats: every format file that can't be used, an unknown format id
+ * (the video is then checked as a build story), a missing build story when the video needs it. Never throws.
+ */
+async function videoFormat(root: string, n: number, dir?: string): Promise<{ video: Video | null; format: Format | null; formatted: boolean; problems: string[] }> {
+  const { formats, problems } = loadFormats(dir);
+  let video: Video | null = null;
+  try {
+    video = await readVideo(root, n);
+  } catch (e) {
+    problems.push(`✖ ${describeError(e).message}`);
+  }
+  const named = video?.format === undefined ? undefined : formats.find((f) => f.id === video!.format);
+  if (named) return { video, format: named, formatted: true, problems };
+  if (video?.format !== undefined) problems.push(`✖ video.json: unknown format "${video.format}"\n  The formats are: ${formats.map((f) => f.id).join(', ') || 'none'}.`);
+  const story = formats.find((f) => f.id === 'build-story') ?? null;
+  // A broken build-story.md, or no formats folder, is already among the loader's problems.
+  if (!story && !problems.some((p) => p.startsWith('✖ plugin/formats/build-story.md:') || p.startsWith('✖ plugin/formats:'))) {
+    problems.push('✖ plugin/formats/build-story.md: the file is missing');
+  }
+  return { video, format: story, formatted: false, problems };
+}
+
 /**
  * The `check` command: validates the timeline against the catalog (clips exist, ranges fit), the music library (cue
  * tracks listed and present) and the sound effects (each a built-in or a file in sfx/; with `tools`, a file FFmpeg can
  * read), snaps montages to the beat (not once a voice-over is fitted), saves it if that changed anything, and collects
- * what the user should know: `warnings` (⚠) and `notes`.
+ * what the user should know: `warnings` (⚠), `notes`, and `problems` (✖ lines that don't stop the check: a format file
+ * that can't be used, a format id that isn't one). It also warns about what the video's format asks (`formatsDir`: the
+ * folder of format files, default the plugin's own).
  */
-export async function checkEpisode(project: string, n: number, tools?: MediaTools): Promise<{ episode: Episode; warnings: string[]; notes: string[] }> {
+export async function checkEpisode(
+  project: string,
+  n: number,
+  tools?: MediaTools,
+  opts: { formatsDir?: string } = {},
+): Promise<{ episode: Episode; warnings: string[]; notes: string[]; problems: string[] }> {
   const root = resolve(project);
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n);
@@ -161,5 +266,7 @@ export async function checkEpisode(project: string, n: number, tools?: MediaTool
     }
   }
   warnings.push(...timelineWarnings(ep, lib, !ep.voiceover));
-  return { episode: ep, warnings, notes };
+  const { video, format, formatted, problems } = await videoFormat(root, n, opts.formatsDir);
+  if (format) warnings.push(...formatWarnings(ep, catalog, video, format, formatted));
+  return { episode: ep, warnings, notes, problems };
 }

@@ -28447,6 +28447,31 @@ var NARRATION_GAPS = { lead: 0.3, sentence: 0.3, line: 0.8 };
 var MARGIN_SEC = 0.03;
 var MIN_PAUSE = NARRATION_GAPS.sentence + 2 * MARGIN_SEC;
 
+// packages/core/src/mirage/formats.ts
+var even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
+var FormatSchema = strictObject2({
+  /** Equal to the file's name without `.md`. */
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+  name: external_exports.string().min(1),
+  describe: external_exports.string().min(1),
+  /** Words a person uses for this kind of video ("reel", "day in the life"): Claude picks the format from them. */
+  words: external_exports.array(external_exports.string().min(1)),
+  /** The beat words the format's videos are built from, in the order they usually come. */
+  beats: external_exports.array(BeatSchema).min(1),
+  /** The length the format aims for, in seconds. */
+  targetSec: external_exports.number().positive().optional(),
+  /** A video longer than this gets a warning. */
+  warnPastSec: external_exports.number().positive().optional(),
+  output: strictObject2({ width: even2, height: even2 }).optional(),
+  captions: CaptionsSchema.optional(),
+  /** The kind of short a video of this format is made as when it doesn't say. */
+  short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
+});
+
+// packages/core/src/mirage/video.ts
+import { access as access4, mkdir as mkdir2, readdir as readdir3 } from "node:fs/promises";
+import { join as join8, resolve as resolve2 } from "node:path";
+
 // packages/core/src/mirage/versions.ts
 import { randomBytes, randomUUID as randomUUID3 } from "node:crypto";
 import { access as access3, copyFile, link, mkdir, readdir as readdir2, readFile as readFile4, rename as rename2, rm as rm3, writeFile as writeFile3 } from "node:fs/promises";
@@ -28596,9 +28621,32 @@ async function restoreVersion(project2, n2, id, o2 = {}) {
   });
 }
 
+// packages/core/src/mirage/video.ts
+var videoPath = (project2, n2) => join8(episodeDir(project2, n2), "video.json");
+async function readVideo(project2, n2) {
+  try {
+    return await readJsonFile(videoPath(project2, n2), VideoSchema, `episodes/${n2}/video.json`);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+}
+async function videoStage(project2, n2) {
+  const dir = episodeDir(project2, n2);
+  let stage = "new";
+  for (const s of ["final", "guide", "rough"]) {
+    if (await access4(join8(dir, `${s}.mp4`)).then(() => true, () => false)) {
+      stage = s;
+      break;
+    }
+  }
+  const deliveries = (await listVersions(project2, n2)).filter((v) => v.kind === "delivery").length;
+  return { stage, deliveries };
+}
+
 // packages/core/src/mirage/session-files.ts
-import { appendFile, link as link2, mkdir as mkdir2, readdir as readdir3, readFile as readFile5, rename as rename3, rm as rm4, stat as stat4, utimes, writeFile as writeFile4 } from "node:fs/promises";
-import { dirname as dirname3, join as join8, resolve as resolve2 } from "node:path";
+import { appendFile, link as link2, mkdir as mkdir3, readdir as readdir4, readFile as readFile5, rename as rename3, rm as rm4, stat as stat4, utimes, writeFile as writeFile4 } from "node:fs/promises";
+import { dirname as dirname3, join as join9, resolve as resolve3 } from "node:path";
 async function readLines(path6, schema) {
   let text;
   try {
@@ -28621,9 +28669,9 @@ async function readLines(path6, schema) {
   }
   return out;
 }
-var stepsPath = (dir) => join8(dir, "steps.jsonl");
-var logPath = (dir) => join8(dir, "log.jsonl");
-var progressPath = (dir) => join8(dir, "progress.json");
+var stepsPath = (dir) => join9(dir, "steps.jsonl");
+var logPath = (dir) => join9(dir, "log.jsonl");
+var progressPath = (dir) => join9(dir, "progress.json");
 var readSteps = (dir) => readLines(stepsPath(dir), StepLineSchema);
 var readLog = (dir) => readLines(logPath(dir), LogEntrySchema);
 async function readProgress(dir) {
@@ -28633,7 +28681,7 @@ async function readProgress(dir) {
     return null;
   }
 }
-var controlPath = (project2, n2) => join8(episodeDir(project2, n2), "control.json");
+var controlPath = (project2, n2) => join9(episodeDir(project2, n2), "control.json");
 var CLAIM = "control.json.take-";
 var defaultControl = () => ({ version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
 async function readControlFile(path6) {
@@ -28657,22 +28705,22 @@ async function writeControlIfNone(path6, control2) {
 }
 async function claimedControl(project2, n2, written) {
   const dir = episodeDir(project2, n2);
-  const names = (await readdir3(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
+  const names = (await readdir4(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
   let best = null;
   const stale = [];
   for (const name of names) {
-    const info = await stat4(join8(dir, name)).catch(() => null);
+    const info = await stat4(join9(dir, name)).catch(() => null);
     if (!info) continue;
     if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
     if (written) continue;
-    const control2 = await readControlFile(join8(dir, name));
+    const control2 = await readControlFile(join9(dir, name));
     if (control2 && (!best || info.mtimeMs > best.mtime)) best = { control: control2, mtime: info.mtimeMs };
   }
   const claimed = best ? { ...best.control, correction: null } : null;
   if (stale.length) {
     try {
       if (claimed && stale.length === names.length) await writeControlIfNone(controlPath(project2, n2), claimed);
-      for (const name of stale) await rm4(join8(dir, name), { force: true });
+      for (const name of stale) await rm4(join9(dir, name), { force: true });
     } catch {
     }
   }
@@ -28688,34 +28736,9 @@ async function readControl(project2, n2) {
 }
 async function writeControl(project2, n2, patch) {
   const next = ControlSchema.parse({ ...await readControl(project2, n2), ...patch, version: 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
-  await mkdir2(episodeDir(project2, n2), { recursive: true });
+  await mkdir3(episodeDir(project2, n2), { recursive: true });
   await writeJsonFile(controlPath(project2, n2), ControlSchema, next, "control.json");
   return next;
-}
-
-// packages/core/src/mirage/video.ts
-import { access as access4, mkdir as mkdir3, readdir as readdir4 } from "node:fs/promises";
-import { join as join9, resolve as resolve3 } from "node:path";
-var videoPath = (project2, n2) => join9(episodeDir(project2, n2), "video.json");
-async function readVideo(project2, n2) {
-  try {
-    return await readJsonFile(videoPath(project2, n2), VideoSchema, `episodes/${n2}/video.json`);
-  } catch (e) {
-    if (e.code === "ENOENT") return null;
-    throw e;
-  }
-}
-async function videoStage(project2, n2) {
-  const dir = episodeDir(project2, n2);
-  let stage = "new";
-  for (const s of ["final", "guide", "rough"]) {
-    if (await access4(join9(dir, `${s}.mp4`)).then(() => true, () => false)) {
-      stage = s;
-      break;
-    }
-  }
-  const deliveries = (await listVersions(project2, n2)).filter((v) => v.kind === "delivery").length;
-  return { stage, deliveries };
 }
 
 // packages/core/src/mirage/notes.ts
@@ -28801,27 +28824,6 @@ function oneLine(text, max = 1e3) {
   const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
-
-// packages/core/src/mirage/formats.ts
-var even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
-var FormatSchema = strictObject2({
-  /** Equal to the file's name without `.md`. */
-  id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
-  name: external_exports.string().min(1),
-  describe: external_exports.string().min(1),
-  /** Words a person uses for this kind of video ("reel", "day in the life"): Claude picks the format from them. */
-  words: external_exports.array(external_exports.string().min(1)),
-  /** The beat words the format's videos are built from, in the order they usually come. */
-  beats: external_exports.array(BeatSchema).min(1),
-  /** The length the format aims for, in seconds. */
-  targetSec: external_exports.number().positive().optional(),
-  /** A video longer than this gets a warning. */
-  warnPastSec: external_exports.number().positive().optional(),
-  output: strictObject2({ width: even2, height: even2 }).optional(),
-  captions: CaptionsSchema.optional(),
-  /** The kind of short a video of this format is made as when it doesn't say. */
-  short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
-});
 
 // packages/viewer/src/fallback.ts
 import { readFileSync as readFileSync4 } from "node:fs";

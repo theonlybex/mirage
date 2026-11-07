@@ -17,6 +17,7 @@ import { createEngineServer, newestSessionId, TOOL_NAMES, type EngineContext } f
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
 const GB = 1024 ** 3;
+const BUILD_STORY = '(format build-story: cold-open → title → recap → new-toy → problem → montage → twist → truth → outro → blooper)';
 const deps = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({ onBattery: async () => false, freeBytes: async () => 500 * GB, footageBytes: async () => GB, which: async () => true, captions: async () => ({ ok: true, path: '/bin/ffmpeg' }), transcriber: async () => null, tts: async () => ({ state: 'ok' }), ...over });
 
 const clients: Client[] = [];
@@ -104,7 +105,7 @@ describe('engine tools', () => {
     // A folder beside the project, or inside it, is fine.
     await mkdir(join(parent, 'clips'));
     await mkdir(join(dir, 'raw'));
-    expect((await call('new_video', { title: 'Two', about: 'x', footage: [join(parent, 'clips'), join(dir, 'raw')] })).text).toBe('video 1 created');
+    expect((await call('new_video', { title: 'Two', about: 'x', footage: [join(parent, 'clips'), join(dir, 'raw')] })).text).toBe(`video 1 created ${BUILD_STORY}`);
   });
 
   it('new_video creates the video and records it in the session state', async () => {
@@ -112,9 +113,46 @@ describe('engine tools', () => {
     const { call } = await connect(dir);
     const clips = await mkdtemp(join(tmpdir(), 'mirage-clips-'));
     const r = await call('new_video', { title: 'Two', about: 'the second', mention: 'the bug', footage: [clips] });
-    expect(r).toEqual({ isError: false, text: 'video 2 created' });
+    expect(r).toEqual({ isError: false, text: `video 2 created ${BUILD_STORY}` });
     expect(JSON.parse(await readFile(join(dir, 'episodes', '2', 'video.json'), 'utf8'))).toMatchObject({ title: 'Two', mention: 'the bug', hide: '', footage: [clips] });
     expect((await readSessionState(dir, 's1')).video).toBe(2);
+  });
+
+  it('new_video in a format names the format and its beats, and numbers vlogs', async () => {
+    const dir = await projectWithVideo();
+    const { call } = await connect(dir);
+    const clips = await mkdtemp(join(tmpdir(), 'mirage-clips-'));
+    const vlog = { title: 'Ibiza day 1', about: 'the trip', footage: [clips], format: 'vlog', vlog: { name: 'Ibiza', date: '2026-07-01' } };
+    expect(await call('new_video', vlog)).toEqual({ isError: false, text: 'video 2 created (format vlog: cold-open → title-card → premise → bit → headline → sponsor → plugs → tag)' });
+    expect(await call('new_video', { ...vlog, title: 'Ibiza day 2', vlog: { name: 'Ibiza', date: '2026-07-02' }, targetSec: 600 })).toMatchObject({ isError: false });
+    expect(JSON.parse(await readFile(join(dir, 'episodes', '2', 'video.json'), 'utf8'))).toMatchObject({ format: 'vlog', vlog: { name: 'Ibiza', number: 1, date: '2026-07-01' } });
+    expect(JSON.parse(await readFile(join(dir, 'episodes', '3', 'video.json'), 'utf8'))).toMatchObject({ format: 'vlog', targetSec: 600, vlog: { name: 'Ibiza', number: 2, date: '2026-07-02' } });
+  });
+
+  it('new_video from a big video copies its footage and answers and is a short; from a short too; ✖ for a missing video or an unknown format', async () => {
+    const dir = await projectWithVideo();
+    const { call } = await connect(dir);
+    const clips = await mkdtemp(join(tmpdir(), 'mirage-clips-'));
+    await call('new_video', { title: 'The proposal', about: 'my brother proposes', mention: 'the ring', hide: 'the address', footage: [clips] });
+    const SHORT = '(format short: hook → tease → pointer → payoff → loop)';
+    expect(await call('new_video', { title: 'Did he say yes?', from: 2, mention: 'the cake' })).toEqual({ isError: false, text: `video 3 created ${SHORT}` });
+    expect(JSON.parse(await readFile(join(dir, 'episodes', '3', 'video.json'), 'utf8'))).toMatchObject({
+      title: 'Did he say yes?', about: 'my brother proposes', mention: 'the ring\nthe cake', hide: 'the address', footage: [clips], format: 'short', from: 2,
+    });
+    expect((await readSessionState(dir, 's1')).video).toBe(3);
+    expect(await call('new_video', { title: 'Shorter', from: 3 })).toEqual({ isError: false, text: `video 4 created ${SHORT}` });
+    expect(JSON.parse(await readFile(join(dir, 'episodes', '4', 'video.json'), 'utf8'))).toMatchObject({ footage: [clips], format: 'short', from: 3 });
+    expect(await call('new_video', { title: 'x', from: 9 })).toEqual({ isError: true, text: '✖ there is no video 9\n  Run status to see the videos.' });
+    expect(await call('new_video', { title: 'x', about: 'x', footage: [clips], format: 'reel' })).toEqual({ isError: true, text: '✖ unknown format "reel"\n  The formats are: build-story, short, vlog.' });
+    expect(existsSync(join(dir, 'episodes', '5'))).toBe(false);
+  });
+
+  it('check of a short warns against its format', async () => {
+    const dir = await projectWithVideo({ output: { width: 1080, height: 1920, fps: 30 }, items: [{ id: 'a', beat: 'title', clip: 'c001', src: { in: 0, out: 3 } }], captions: { style: 'pop', position: 'middle' } });
+    const { call } = await connect(dir);
+    await writeFile(join(dir, 'episodes', '1', 'video.json'), JSON.stringify({ version: 1, title: 't', about: '', mention: '', hide: '', footage: [], createdAt: new Date().toISOString(), format: 'short' }));
+    const lines = (await call('check', { video: 1 })).text.split('\n');
+    expect(lines).toContain('⚠ a short opens on its hook, not a title: item a');
   });
 
   it('check returns the timeline lines', async () => {
@@ -577,8 +615,8 @@ describe('session identity', () => {
     expect((await readLog(sessionDir(dir, 1, 'sess-a'))).map((e) => e.text)).toEqual(['from a']);
     expect((await readLog(sessionDir(dir, 1, 'sess-b'))).map((e) => e.text)).toEqual(['from b']);
     const footage = await mkdtemp(join(tmpdir(), 'mirage-footage-'));
-    expect((await a.call('new_video', { title: 'Two', about: 'x', footage: [footage] })).text).toBe('video 2 created');
-    expect((await b.call('new_video', { title: 'Three', about: 'x', footage: [footage] })).text).toBe('video 3 created');
+    expect((await a.call('new_video', { title: 'Two', about: 'x', footage: [footage] })).text).toBe(`video 2 created ${BUILD_STORY}`);
+    expect((await b.call('new_video', { title: 'Three', about: 'x', footage: [footage] })).text).toBe(`video 3 created ${BUILD_STORY}`);
     expect([(await readSessionState(dir, 'sess-a')).video, (await readSessionState(dir, 'sess-b')).video]).toEqual([2, 3]);
     expect(existsSync(join(dir, '.mirage', 'sessions', 'unknown.json'))).toBe(false);
   });

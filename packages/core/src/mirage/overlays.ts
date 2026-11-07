@@ -236,6 +236,67 @@ const assColor = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex
 /** The newest word of a pop caption grows in from 115%. */
 const POP_IN = (scale: number) => `\\fscx${Math.round(scale * 1.15)}\\fscy${Math.round(scale * 1.15)}\\t(0,120,\\fscx${scale}\\fscy${scale})`;
 
+/** Pixel sizes are written for a 1080-px short side and scale with the frame's short side (never below 1 px). */
+const scaler = (width: number, height: number) => {
+  const k = Math.min(width, height) / 1080;
+  return (n: number) => Math.max(1, Math.round(n * k));
+};
+
+/**
+ * Where a subtitle style puts its text, in pixels of the frame: font size, BorderStyle (3 = an opaque box, whose padding
+ * is the outline width), outline width, numpad Alignment (1–3 bottom, 4–6 middle, 7–9 top; left, centre, right),
+ * MarginV, and the left and right margin.
+ */
+export interface StyleGeometry {
+  size: number;
+  border: 1 | 3;
+  outline: number;
+  align: number;
+  marginV: number;
+  margin: number;
+}
+
+/**
+ * The geometry of every style `buildAss` writes, for a width×height frame with captions at `position` (default bottom).
+ * `check` finds what the Shorts and Reels buttons cover from the same numbers.
+ */
+export function styleGeometry(width: number, height: number, position?: 'bottom' | 'middle') {
+  const px = scaler(width, height);
+  const side = Math.round(width * 0.05);
+  // Middle: the captions' bottom edge a little below the centre, for every caption style.
+  const captionMv = (bottom: number) => (position === 'middle' ? Math.round(height * 0.38) : bottom);
+  const s = (size: number, border: 1 | 3, outline: number, align: number, marginV: number, margin = side): StyleGeometry => ({ size, border, outline, align, marginV, margin });
+  return {
+    Caption: s(px(64), 3, px(18), 2, captionMv(px(90))),
+    Callout: s(px(150), 1, px(6), 5, 0),
+    /** Every badge tone. */
+    Badge: s(px(48), 3, px(14), 9, px(60)),
+    Counter: s(px(40), 3, px(12), 7, px(60)),
+    Label: s(px(48), 3, px(14), 1, px(220)),
+    Chapter: s(px(96), 1, px(4), 5, 0),
+    /** Before and after overlays. */
+    Before: s(px(56), 3, px(14), 8, px(60)),
+    Prompt: s(px(54), 3, px(16), 8, px(150)),
+    PromptNext: s(px(44), 3, px(14), 8, px(150)),
+    Pop: s(px(84), 1, px(7), 2, captionMv(px(120))),
+    Karaoke: s(px(64), 1, px(5), 2, captionMv(px(120))),
+    CardMono: s(px(72), 1, 0, 5, 0),
+    CardBold: s(px(110), 1, 0, 5, 0, Math.round(width * 0.1)),
+    // A name label is a lower third, left-aligned 6% of the width in and 18% of the height up, with margins on both
+    // sides so a long line wraps inside the frame; a subtitle sits where captions would; a time tag is a yellow box in
+    // the top-left corner.
+    Name: s(px(64), 1, px(5), 1, Math.round(height * 0.18), Math.round(width * 0.06)),
+    Subtitle: s(px(44), 1, px(4), 2, captionMv(px(80))),
+    Timecard: s(px(40), 3, px(14), 7, Math.round(height * 0.05)),
+  };
+}
+export type StyleName = keyof ReturnType<typeof styleGeometry>;
+
+/** The style each overlay kind is drawn in (a badge's tone only changes its colours). */
+export const OVERLAY_STYLE: Record<Overlay['kind'], StyleName> = {
+  callout: 'Callout', badge: 'Badge', counter: 'Counter', label: 'Label', chapter: 'Chapter', before: 'Before', after: 'Before', name: 'Name', subtitle: 'Subtitle', timecard: 'Timecard',
+};
+
 export function buildAss(o: {
   width: number;
   height: number;
@@ -260,46 +321,44 @@ export function buildAss(o: {
     const s = assText(t.replace(EMOJI, '').replace(/ {2,}/g, ' ').trim());
     return cjk ? s.replace(CJK, (run) => `{\\fn${cjk}}${run}{\\fn}`) : s;
   };
-  const k = Math.min(o.width, o.height) / 1080;
-  const px = (n: number) => Math.max(1, Math.round(n * k));
+  const px = scaler(o.width, o.height);
   const font = o.font ?? defaultFont();
-  const side = Math.round(o.width * 0.05);
-  // Middle: the captions' bottom edge a little below the centre, for every caption style.
-  const captionMv = (bottom: number) => (o.position === 'middle' ? Math.round(o.height * 0.38) : bottom);
-  // Name, Fontsize, Primary, Outline, Back, Bold, BorderStyle, Outline, Alignment, MarginV[, Fontname[, MarginL and R]]
-  const styles: [string, number, string, string, string, number, number, number, number, number, string?, number?][] = [
-    ['Caption', px(64), WHITE, BOX, BOX, -1, 3, px(18), 2, captionMv(px(90))],
-    ['Callout', px(150), WHITE, BLACK, BLACK, -1, 1, px(6), 5, 0],
-    ['BadgeFail', px(48), WHITE, '&H002A2AE0', '&H002A2AE0', -1, 3, px(14), 9, px(60)],
-    ['BadgePass', px(48), WHITE, '&H004EAA2E', '&H004EAA2E', -1, 3, px(14), 9, px(60)],
-    ['BadgeLive', px(48), WHITE, '&H00E37100', '&H00E37100', -1, 3, px(14), 9, px(60)],
-    ['BadgeNeutral', px(48), WHITE, '&H00333333', '&H00333333', -1, 3, px(14), 9, px(60)],
-    ['Counter', px(40), WHITE, BOX, BOX, -1, 3, px(12), 7, px(60)],
-    ['Label', px(48), WHITE, BOX, BOX, -1, 3, px(14), 1, px(220)],
-    ['Chapter', px(96), WHITE, BLACK, BLACK, -1, 1, px(4), 5, 0],
-    ['Before', px(56), WHITE, BOX, BOX, -1, 3, px(14), 8, px(60)],
-    ['Prompt', px(54), '&H0000D7FF', BOX, BOX, -1, 3, px(16), 8, px(150)],
-    ['PromptNext', px(44), '&H00B4B4B4', BOX, BOX, 0, 3, px(14), 8, px(150)],
+  const g = styleGeometry(o.width, o.height, o.position);
+  // Name, Fontsize, Primary, Outline, Back, Bold, BorderStyle, Outline, Alignment, MarginV, Fontname, MarginL and R
+  type Row = [string, number, string, string, string, number, number, number, number, number, string, number];
+  const row = (name: string, s: StyleGeometry, primary: string, outline: string, back: string, bold: number, face = font): Row =>
+    [name, s.size, primary, outline, back, bold, s.border, s.outline, s.align, s.marginV, face, s.margin];
+  const styles: Row[] = [
+    row('Caption', g.Caption, WHITE, BOX, BOX, -1),
+    row('Callout', g.Callout, WHITE, BLACK, BLACK, -1),
+    row('BadgeFail', g.Badge, WHITE, '&H002A2AE0', '&H002A2AE0', -1),
+    row('BadgePass', g.Badge, WHITE, '&H004EAA2E', '&H004EAA2E', -1),
+    row('BadgeLive', g.Badge, WHITE, '&H00E37100', '&H00E37100', -1),
+    row('BadgeNeutral', g.Badge, WHITE, '&H00333333', '&H00333333', -1),
+    row('Counter', g.Counter, WHITE, BOX, BOX, -1),
+    row('Label', g.Label, WHITE, BOX, BOX, -1),
+    row('Chapter', g.Chapter, WHITE, BLACK, BLACK, -1),
+    row('Before', g.Before, WHITE, BOX, BOX, -1),
+    row('Prompt', g.Prompt, '&H0000D7FF', BOX, BOX, -1),
+    row('PromptNext', g.PromptNext, '&H00B4B4B4', BOX, BOX, 0),
   ];
   // The bundled face is already heavy: no faux bold on it.
-  if (o.captionLines?.style === 'pop') styles.push(['Pop', px(84), WHITE, BLACK, BLACK, 0, 1, px(7), 2, captionMv(px(120)), CAPTION_FONT]);
-  if (o.captionLines?.style === 'karaoke') styles.push(['Karaoke', px(64), WHITE, BLACK, BLACK, 0, 1, px(5), 2, captionMv(px(120)), CAPTION_FONT]);
+  if (o.captionLines?.style === 'pop') styles.push(row('Pop', g.Pop, WHITE, BLACK, BLACK, 0, CAPTION_FONT));
+  if (o.captionLines?.style === 'karaoke') styles.push(row('Karaoke', g.Karaoke, WHITE, BLACK, BLACK, 0, CAPTION_FONT));
   // Cards: centred on the frame. Mono keeps the usual side margins; bold (and a picture's text) wraps inside 80% of the
   // width. Declared only when a card draws text in them.
   const cards = (o.cards ?? []).filter((c) => c.card.text.trim());
   const cardStyle = (c: CardItem['card']) => (c.style === 'mono' ? 'CardMono' : 'CardBold');
-  if (cards.some((c) => cardStyle(c.card) === 'CardMono')) styles.push(['CardMono', px(72), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, MONO_FONT]);
-  if (cards.some((c) => cardStyle(c.card) === 'CardBold')) styles.push(['CardBold', px(110), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, CAPTION_FONT, Math.round(o.width * 0.1)]);
-  // Name labels, chosen subtitles and time tags: the bundled face, declared only when an overlay uses them. A name label
-  // is a lower third, left-aligned 6% of the width in and 18% of the height up, with margins on both sides so a long
-  // line wraps inside the frame; a subtitle sits where captions would; a time tag is a yellow box in the top-left
-  // corner (BorderStyle 3: the box takes the outline colour, its padding the outline width).
+  if (cards.some((c) => cardStyle(c.card) === 'CardMono')) styles.push(row('CardMono', g.CardMono, WHITE, BLACK, BLACK, 0, MONO_FONT));
+  if (cards.some((c) => cardStyle(c.card) === 'CardBold')) styles.push(row('CardBold', g.CardBold, WHITE, BLACK, BLACK, 0, CAPTION_FONT));
+  // Name labels, chosen subtitles and time tags: the bundled face, declared only when an overlay uses them (their
+  // geometry: styleGeometry).
   const uses = (kind: Overlay['kind']) => o.overlays.some((ov) => ov.kind === kind);
-  if (uses('name')) styles.push(['Name', px(64), YELLOW, BLACK, BLACK, 0, 1, px(5), 1, Math.round(o.height * 0.18), CAPTION_FONT, Math.round(o.width * 0.06)]);
-  if (uses('subtitle')) styles.push(['Subtitle', px(44), YELLOW, BLACK, BLACK, 0, 1, px(4), 2, captionMv(px(80)), CAPTION_FONT]);
-  if (uses('timecard')) styles.push(['Timecard', px(40), BLACK, YELLOW, YELLOW, 0, 3, px(14), 7, Math.round(o.height * 0.05), CAPTION_FONT]);
+  if (uses('name')) styles.push(row('Name', g.Name, YELLOW, BLACK, BLACK, 0, CAPTION_FONT));
+  if (uses('subtitle')) styles.push(row('Subtitle', g.Subtitle, YELLOW, BLACK, BLACK, 0, CAPTION_FONT));
+  if (uses('timecard')) styles.push(row('Timecard', g.Timecard, BLACK, YELLOW, YELLOW, 0, CAPTION_FONT));
   const styleLines = styles.map(
-    ([name, size, primary, outline, back, bold, border, outw, align, mv, face = font, margin = side]) =>
+    ([name, size, primary, outline, back, bold, border, outw, align, mv, face, margin]) =>
       `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold},0,0,0,100,100,0,0,${border},${outw},0,${align},${margin},${margin},${mv},1`,
   );
 

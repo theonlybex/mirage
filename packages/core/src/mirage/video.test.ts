@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { DELIVERY_LABEL } from './labels.js';
 import { snapshotVersion } from './versions.js';
 import { VideoSchema } from '@wordedits/shared';
-import { newVideo, readVideo, videoStage } from './video.js';
+import { loadFormats } from './formats.js';
+import { newVideo, planVideo, readVideo, videoStage } from './video.js';
 
 const v = (title: string) => ({ title, about: 'a build story', mention: 'the bug', hide: 'the API key', footage: ['/clips/a'] });
 
@@ -81,6 +82,67 @@ describe('video.json and formats', () => {
     expect(VideoSchema.safeParse({ ...OLD, targetSec: -1 }).success).toBe(false);
     expect(VideoSchema.safeParse({ ...OLD, vlog: { name: 'x', number: 0, date: 'd' } }).success).toBe(false);
     expect(VideoSchema.safeParse({ ...OLD, vlog: { name: 'x', number: 1, date: 'd', extra: 1 } }).success).toBe(false);
+  });
+});
+
+describe('planVideo', () => {
+  const loaded = loadFormats();
+  const big = { title: 'The proposal', about: 'my brother proposes', mention: 'the ring', hide: 'the address', footage: ['/clips/a', '/clips/b'] };
+
+  it('a plain video: as asked, no new keys, a build story', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const { video, format } = await planVideo(dir, { title: 'Part 1', about: 'x', footage: ['/clips/a'] }, loaded);
+    expect(video).toEqual({ title: 'Part 1', about: 'x', mention: '', hide: '', footage: ['/clips/a'] });
+    expect(format?.id).toBe('build-story');
+  });
+
+  it('a video in a format keeps the format and its target', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const { video, format } = await planVideo(dir, { title: 'Trip', about: 'x', footage: [], format: 'vlog', targetSec: 600 }, loaded);
+    expect(video).toMatchObject({ format: 'vlog', targetSec: 600 });
+    expect(format?.id).toBe('vlog');
+  });
+
+  it("refuses an unknown format, naming the ids, and needs about and footage unless it's made from another video", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    await expect(planVideo(dir, { title: 'x', about: 'x', footage: [], format: 'reel' }, loaded)).rejects.toMatchObject({ message: 'unknown format "reel"', hint: 'The formats are: build-story, short, vlog.' });
+    await expect(planVideo(dir, { title: 'x', footage: [] }, loaded)).rejects.toMatchObject({ message: 'a new video needs about and footage, unless it is made from another video (from)' });
+    await expect(planVideo(dir, { title: 'x', about: 'x' }, loaded)).rejects.toMatchObject({ message: 'a new video needs about and footage, unless it is made from another video (from)' });
+  });
+
+  it('numbers vlogs: the first is 1, the next one more than the highest; a number given is kept', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    await newVideo(dir, v('Not a vlog'));
+    const first = (await planVideo(dir, { title: 'Day 1', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Ibiza', date: '2026-07-01' } }, loaded)).video;
+    expect(first.vlog).toEqual({ name: 'Ibiza', number: 1, date: '2026-07-01' });
+    await newVideo(dir, first);
+    await newVideo(dir, { ...first, vlog: { name: 'Ibiza', number: 4, date: '2026-07-04' } });
+    const next = (await planVideo(dir, { title: 'Day 5', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Ibiza', date: '2026-07-05' } }, loaded)).video;
+    expect(next.vlog).toEqual({ name: 'Ibiza', number: 5, date: '2026-07-05' });
+    const given = (await planVideo(dir, { title: 'Day 2', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Ibiza', number: 2, date: '2026-07-02' } }, loaded)).video;
+    expect(given.vlog?.number).toBe(2);
+  });
+
+  it("from a big video: its footage and answers, the caller's added to them, a short by default", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const n = await newVideo(dir, big);
+    const { video, format } = await planVideo(dir, { title: 'Did he say yes?', from: n, about: 'the moment he kneels', footage: ['/clips/b', '/clips/c'] }, loaded);
+    expect(video).toEqual({
+      title: 'Did he say yes?', about: 'my brother proposes\nthe moment he kneels', mention: 'the ring', hide: 'the address', footage: ['/clips/a', '/clips/b', '/clips/c'], format: 'short', from: n,
+    });
+    expect(format?.id).toBe('short');
+    expect((await planVideo(dir, { title: 'Vlog cut', from: n, format: 'vlog' }, loaded)).video).toMatchObject({ format: 'vlog', about: 'my brother proposes', footage: ['/clips/a', '/clips/b'] });
+  });
+
+  it('from a short is allowed (a short of a short), and from a video that is not there is refused', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const n = await newVideo(dir, big);
+    const s = await newVideo(dir, (await planVideo(dir, { title: 'Short', from: n }, loaded)).video);
+    const again = (await planVideo(dir, { title: 'Short of a short', from: s }, loaded)).video;
+    expect(again).toMatchObject({ format: 'short', from: s, footage: ['/clips/a', '/clips/b'], about: 'my brother proposes' });
+    await expect(planVideo(dir, { title: 'x', from: 9 }, loaded)).rejects.toMatchObject({ code: 'BAD_INPUT', message: 'there is no video 9' });
+    await mkdir(join(dir, 'episodes', '7'));
+    await expect(planVideo(dir, { title: 'x', from: 7 }, loaded)).rejects.toMatchObject({ code: 'BAD_INPUT', message: 'video 7 has no video.json to copy from' });
   });
 });
 

@@ -29201,13 +29201,14 @@ var init_catalog = __esm({
 });
 
 // packages/shared/src/schemas/episode.ts
-var range, BeatSchema, MoveSchema, ClipItemSchema, isProjectPath, CardItemSchema, TimelineItemSchema, isCard, OverlaySchema, MusicCueSchema, SfxCueSchema, SlotSchema, VoiceLineSchema, CaptionsSchema, even, EpisodeSchema;
+var range, BUILD_STORY_BEATS, BeatSchema, MoveSchema, ClipItemSchema, isProjectPath, CardItemSchema, TimelineItemSchema, isCard, OverlaySchema, MusicCueSchema, SfxCueSchema, SlotSchema, VoiceLineSchema, CaptionsSchema, even, EpisodeSchema;
 var init_episode = __esm({
   "packages/shared/src/schemas/episode.ts"() {
     "use strict";
     init_zod();
     init_strict2();
     range = (shape, what) => strictObject2({ start: external_exports.number().min(0), end: external_exports.number().positive(), ...shape }).refine((r) => r.end > r.start, { message: `${what}: end must be after start` });
+    BUILD_STORY_BEATS = ["cold-open", "title", "recap", "new-toy", "problem", "montage", "twist", "truth", "outro", "blooper"];
     BeatSchema = external_exports.string().regex(/^[a-z][a-z0-9-]*$/);
     MoveSchema = strictObject2({
       /** The zoom at the end of the move. */
@@ -31699,43 +31700,71 @@ function defaultFont() {
   if (process.platform === "win32") return "Segoe UI";
   return "DejaVu Sans";
 }
+function styleGeometry(width, height, position) {
+  const px = scaler(width, height);
+  const side = Math.round(width * 0.05);
+  const captionMv = (bottom) => position === "middle" ? Math.round(height * 0.38) : bottom;
+  const s = (size, border, outline, align, marginV, margin = side) => ({ size, border, outline, align, marginV, margin });
+  return {
+    Caption: s(px(64), 3, px(18), 2, captionMv(px(90))),
+    Callout: s(px(150), 1, px(6), 5, 0),
+    /** Every badge tone. */
+    Badge: s(px(48), 3, px(14), 9, px(60)),
+    Counter: s(px(40), 3, px(12), 7, px(60)),
+    Label: s(px(48), 3, px(14), 1, px(220)),
+    Chapter: s(px(96), 1, px(4), 5, 0),
+    /** Before and after overlays. */
+    Before: s(px(56), 3, px(14), 8, px(60)),
+    Prompt: s(px(54), 3, px(16), 8, px(150)),
+    PromptNext: s(px(44), 3, px(14), 8, px(150)),
+    Pop: s(px(84), 1, px(7), 2, captionMv(px(120))),
+    Karaoke: s(px(64), 1, px(5), 2, captionMv(px(120))),
+    CardMono: s(px(72), 1, 0, 5, 0),
+    CardBold: s(px(110), 1, 0, 5, 0, Math.round(width * 0.1)),
+    // A name label is a lower third, left-aligned 6% of the width in and 18% of the height up, with margins on both
+    // sides so a long line wraps inside the frame; a subtitle sits where captions would; a time tag is a yellow box in
+    // the top-left corner.
+    Name: s(px(64), 1, px(5), 1, Math.round(height * 0.18), Math.round(width * 0.06)),
+    Subtitle: s(px(44), 1, px(4), 2, captionMv(px(80))),
+    Timecard: s(px(40), 3, px(14), 7, Math.round(height * 0.05))
+  };
+}
 function buildAss(o2) {
   const cjk = o2.cjkFont === void 0 ? defaultCjkFont() : o2.cjkFont;
   const draw = (t) => {
     const s = assText(t.replace(EMOJI, "").replace(/ {2,}/g, " ").trim());
     return cjk ? s.replace(CJK, (run2) => `{\\fn${cjk}}${run2}{\\fn}`) : s;
   };
-  const k = Math.min(o2.width, o2.height) / 1080;
-  const px = (n2) => Math.max(1, Math.round(n2 * k));
+  const px = scaler(o2.width, o2.height);
   const font = o2.font ?? defaultFont();
-  const side = Math.round(o2.width * 0.05);
-  const captionMv = (bottom) => o2.position === "middle" ? Math.round(o2.height * 0.38) : bottom;
+  const g = styleGeometry(o2.width, o2.height, o2.position);
+  const row = (name, s, primary, outline, back, bold2, face = font) => [name, s.size, primary, outline, back, bold2, s.border, s.outline, s.align, s.marginV, face, s.margin];
   const styles = [
-    ["Caption", px(64), WHITE, BOX, BOX, -1, 3, px(18), 2, captionMv(px(90))],
-    ["Callout", px(150), WHITE, BLACK, BLACK, -1, 1, px(6), 5, 0],
-    ["BadgeFail", px(48), WHITE, "&H002A2AE0", "&H002A2AE0", -1, 3, px(14), 9, px(60)],
-    ["BadgePass", px(48), WHITE, "&H004EAA2E", "&H004EAA2E", -1, 3, px(14), 9, px(60)],
-    ["BadgeLive", px(48), WHITE, "&H00E37100", "&H00E37100", -1, 3, px(14), 9, px(60)],
-    ["BadgeNeutral", px(48), WHITE, "&H00333333", "&H00333333", -1, 3, px(14), 9, px(60)],
-    ["Counter", px(40), WHITE, BOX, BOX, -1, 3, px(12), 7, px(60)],
-    ["Label", px(48), WHITE, BOX, BOX, -1, 3, px(14), 1, px(220)],
-    ["Chapter", px(96), WHITE, BLACK, BLACK, -1, 1, px(4), 5, 0],
-    ["Before", px(56), WHITE, BOX, BOX, -1, 3, px(14), 8, px(60)],
-    ["Prompt", px(54), "&H0000D7FF", BOX, BOX, -1, 3, px(16), 8, px(150)],
-    ["PromptNext", px(44), "&H00B4B4B4", BOX, BOX, 0, 3, px(14), 8, px(150)]
+    row("Caption", g.Caption, WHITE, BOX, BOX, -1),
+    row("Callout", g.Callout, WHITE, BLACK, BLACK, -1),
+    row("BadgeFail", g.Badge, WHITE, "&H002A2AE0", "&H002A2AE0", -1),
+    row("BadgePass", g.Badge, WHITE, "&H004EAA2E", "&H004EAA2E", -1),
+    row("BadgeLive", g.Badge, WHITE, "&H00E37100", "&H00E37100", -1),
+    row("BadgeNeutral", g.Badge, WHITE, "&H00333333", "&H00333333", -1),
+    row("Counter", g.Counter, WHITE, BOX, BOX, -1),
+    row("Label", g.Label, WHITE, BOX, BOX, -1),
+    row("Chapter", g.Chapter, WHITE, BLACK, BLACK, -1),
+    row("Before", g.Before, WHITE, BOX, BOX, -1),
+    row("Prompt", g.Prompt, "&H0000D7FF", BOX, BOX, -1),
+    row("PromptNext", g.PromptNext, "&H00B4B4B4", BOX, BOX, 0)
   ];
-  if (o2.captionLines?.style === "pop") styles.push(["Pop", px(84), WHITE, BLACK, BLACK, 0, 1, px(7), 2, captionMv(px(120)), CAPTION_FONT]);
-  if (o2.captionLines?.style === "karaoke") styles.push(["Karaoke", px(64), WHITE, BLACK, BLACK, 0, 1, px(5), 2, captionMv(px(120)), CAPTION_FONT]);
+  if (o2.captionLines?.style === "pop") styles.push(row("Pop", g.Pop, WHITE, BLACK, BLACK, 0, CAPTION_FONT));
+  if (o2.captionLines?.style === "karaoke") styles.push(row("Karaoke", g.Karaoke, WHITE, BLACK, BLACK, 0, CAPTION_FONT));
   const cards = (o2.cards ?? []).filter((c3) => c3.card.text.trim());
   const cardStyle = (c3) => c3.style === "mono" ? "CardMono" : "CardBold";
-  if (cards.some((c3) => cardStyle(c3.card) === "CardMono")) styles.push(["CardMono", px(72), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, MONO_FONT]);
-  if (cards.some((c3) => cardStyle(c3.card) === "CardBold")) styles.push(["CardBold", px(110), WHITE, BLACK, BLACK, 0, 1, 0, 5, 0, CAPTION_FONT, Math.round(o2.width * 0.1)]);
+  if (cards.some((c3) => cardStyle(c3.card) === "CardMono")) styles.push(row("CardMono", g.CardMono, WHITE, BLACK, BLACK, 0, MONO_FONT));
+  if (cards.some((c3) => cardStyle(c3.card) === "CardBold")) styles.push(row("CardBold", g.CardBold, WHITE, BLACK, BLACK, 0, CAPTION_FONT));
   const uses = (kind) => o2.overlays.some((ov) => ov.kind === kind);
-  if (uses("name")) styles.push(["Name", px(64), YELLOW, BLACK, BLACK, 0, 1, px(5), 1, Math.round(o2.height * 0.18), CAPTION_FONT, Math.round(o2.width * 0.06)]);
-  if (uses("subtitle")) styles.push(["Subtitle", px(44), YELLOW, BLACK, BLACK, 0, 1, px(4), 2, captionMv(px(80)), CAPTION_FONT]);
-  if (uses("timecard")) styles.push(["Timecard", px(40), BLACK, YELLOW, YELLOW, 0, 3, px(14), 7, Math.round(o2.height * 0.05), CAPTION_FONT]);
+  if (uses("name")) styles.push(row("Name", g.Name, YELLOW, BLACK, BLACK, 0, CAPTION_FONT));
+  if (uses("subtitle")) styles.push(row("Subtitle", g.Subtitle, YELLOW, BLACK, BLACK, 0, CAPTION_FONT));
+  if (uses("timecard")) styles.push(row("Timecard", g.Timecard, BLACK, YELLOW, YELLOW, 0, CAPTION_FONT));
   const styleLines = styles.map(
-    ([name, size, primary, outline, back, bold2, border, outw, align, mv, face = font, margin = side]) => `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold2},0,0,0,100,100,0,0,${border},${outw},0,${align},${margin},${margin},${mv},1`
+    ([name, size, primary, outline, back, bold2, border, outw, align, mv, face, margin]) => `Style: ${name},${face},${size},${primary},${primary},${outline},${back},${bold2},0,0,0,100,100,0,0,${border},${outw},0,${align},${margin},${margin},${mv},1`
   );
   const events = [];
   const ev = (layer, start, end, style, text) => events.push(`Dialogue: ${layer},${assTime(start)},${assTime(end)},${style},,0,0,0,,${text}`);
@@ -31821,7 +31850,7 @@ function buildAss(o2) {
     ""
   ].join("\n");
 }
-var r35, EPS3, SENTENCE_END3, PICTO, EMOJI, undrawable, CJK, tidy, HAS_WORD, assText, WHITE, BLACK, BOX, YELLOW, assColor, POP_IN;
+var r35, EPS3, SENTENCE_END3, PICTO, EMOJI, undrawable, CJK, tidy, HAS_WORD, assText, WHITE, BLACK, BOX, YELLOW, assColor, POP_IN, scaler, OVERLAY_STYLE;
 var init_overlays = __esm({
   "packages/core/src/mirage/overlays.ts"() {
     "use strict";
@@ -31846,6 +31875,22 @@ var init_overlays = __esm({
     YELLOW = "&H0000D4FF";
     assColor = (hex3) => `&H00${hex3.slice(5, 7)}${hex3.slice(3, 5)}${hex3.slice(1, 3)}&`.toUpperCase();
     POP_IN = (scale) => `\\fscx${Math.round(scale * 1.15)}\\fscy${Math.round(scale * 1.15)}\\t(0,120,\\fscx${scale}\\fscy${scale})`;
+    scaler = (width, height) => {
+      const k = Math.min(width, height) / 1080;
+      return (n2) => Math.max(1, Math.round(n2 * k));
+    };
+    OVERLAY_STYLE = {
+      callout: "Callout",
+      badge: "Badge",
+      counter: "Counter",
+      label: "Label",
+      chapter: "Chapter",
+      before: "Before",
+      after: "Before",
+      name: "Name",
+      subtitle: "Subtitle",
+      timecard: "Timecard"
+    };
   }
 });
 
@@ -33703,8 +33748,372 @@ var init_narration = __esm({
   }
 });
 
+// packages/core/src/mirage/formats.ts
+import { readdirSync, readFileSync as readFileSync4 } from "node:fs";
+import { dirname as dirname6, join as join14, resolve as resolve9 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+function formatsDir(from = import.meta.url) {
+  const here = dirname6(from.startsWith("file:") ? fileURLToPath4(from) : resolve9(from));
+  return SOURCE_LAYOUT2.test(here) ? resolve9(here, "..", "..", "..", "..", "plugin", "formats") : resolve9(here, "..", "formats");
+}
+function splitFile(text) {
+  const lines = text.replace(/^﻿/, "").replace(/\r\n/g, "\n").split("\n");
+  if (lines[0]?.trimEnd() !== "---") return "no front matter: the file must start with a --- line, a JSON object, and a --- line";
+  const end = lines.findIndex((l, i2) => i2 > 0 && l.trimEnd() === "---");
+  if (end < 0) return "front matter has no closing --- line";
+  let front;
+  try {
+    front = JSON.parse(lines.slice(1, end).join("\n"));
+  } catch (e) {
+    return `front matter is not valid JSON (${e.message})`;
+  }
+  if (front === null || typeof front !== "object" || Array.isArray(front)) return "front matter must be a JSON object";
+  return { front, rules: lines.slice(end + 1).join("\n") };
+}
+function loadFormats(dir = formatsDir()) {
+  let names;
+  try {
+    names = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+  } catch {
+    return { formats: [], problems: ["\u2716 plugin/formats: the folder is missing or unreadable"] };
+  }
+  const formats = [];
+  const problems = [];
+  for (const file2 of names) {
+    const problem = (why) => problems.push(`\u2716 plugin/formats/${file2}: ${why}`);
+    let text;
+    try {
+      text = readFileSync4(join14(dir, file2), "utf8");
+    } catch (e) {
+      problem(`can't be read (${e.message})`);
+      continue;
+    }
+    const split = splitFile(text);
+    if (typeof split === "string") {
+      problem(split);
+      continue;
+    }
+    const parsed = FormatSchema.safeParse(split.front);
+    if (!parsed.success) {
+      problem(describeZodError(parsed.error));
+      continue;
+    }
+    const stem = file2.slice(0, -".md".length);
+    if (parsed.data.id !== stem) {
+      problem(`id: the id "${parsed.data.id}" must be the file name, "${stem}"`);
+      continue;
+    }
+    formats.push({ ...parsed.data, rules: split.rules, file: file2 });
+  }
+  return { formats, problems };
+}
+function formatOf(video, formats) {
+  const id = video?.format ?? "build-story";
+  const found = formats.find((f) => f.id === id) ?? formats.find((f) => f.id === "build-story");
+  if (!found) throw new MirageError("BAD_INPUT", "Mirage's build-story format is missing or broken", "Run the formats tool to see what is wrong with plugin/formats, or reinstall the Mirage plugin.");
+  return found;
+}
+var even2, FormatSchema, SOURCE_LAYOUT2;
+var init_formats = __esm({
+  "packages/core/src/mirage/formats.ts"() {
+    "use strict";
+    init_src();
+    init_zod();
+    init_errors4();
+    init_json_file();
+    even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
+    FormatSchema = strictObject2({
+      /** Equal to the file's name without `.md`. */
+      id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+      name: external_exports.string().min(1),
+      describe: external_exports.string().min(1),
+      /** Words a person uses for this kind of video ("reel", "day in the life"): Claude picks the format from them. */
+      words: external_exports.array(external_exports.string().min(1)),
+      /** The beat words the format's videos are built from, in the order they usually come. */
+      beats: external_exports.array(BeatSchema).min(1),
+      /** The length the format aims for, in seconds. */
+      targetSec: external_exports.number().positive().optional(),
+      /** A video longer than this gets a warning. */
+      warnPastSec: external_exports.number().positive().optional(),
+      output: strictObject2({ width: even2, height: even2 }).optional(),
+      captions: CaptionsSchema.optional(),
+      /** The kind of short a video of this format is made as when it doesn't say. */
+      short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
+    });
+    SOURCE_LAYOUT2 = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
+  }
+});
+
+// packages/core/src/mirage/versions.ts
+import { randomBytes, randomUUID as randomUUID7 } from "node:crypto";
+import { access as access3, copyFile, link, mkdir as mkdir5, readdir as readdir5, readFile as readFile7, rename as rename5, rm as rm9, writeFile as writeFile5 } from "node:fs/promises";
+import { join as join15 } from "node:path";
+async function readBytes(path8) {
+  try {
+    return await readFile7(path8);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+}
+async function writeBytesAtomic(path8, bytes) {
+  const tmpPath = `${path8}.tmp-${randomUUID7()}`;
+  await writeFile5(tmpPath, bytes);
+  await rename5(tmpPath, path8);
+}
+async function linkOrCopy(from, to) {
+  try {
+    await link(from, to);
+  } catch (e) {
+    const code = e.code;
+    if (code !== "EXDEV" && code !== "EPERM" && code !== "ENOTSUP") throw e;
+    await copyFile(from, to);
+  }
+}
+function newId(kind, at2) {
+  const d = `${pad(at2.getUTCFullYear(), 4)}${pad(at2.getUTCMonth() + 1, 2)}${pad(at2.getUTCDate(), 2)}`;
+  const t = `${pad(at2.getUTCHours(), 2)}${pad(at2.getUTCMinutes(), 2)}${pad(at2.getUTCSeconds(), 2)}`;
+  return `${d}-${t}-${pad(at2.getUTCMilliseconds(), 3)}-${kind}-${randomBytes(2).toString("hex")}`;
+}
+async function withEpisodeLock(project, n2, waitMs, fn) {
+  const deadline = Date.now() + (waitMs ?? DEFAULT_WAIT_MS);
+  for (; ; ) {
+    try {
+      const lock = await lockEpisode(project, n2, "versions");
+      try {
+        return await fn();
+      } finally {
+        await lock.release();
+      }
+    } catch (e) {
+      if (!(e instanceof MirageError) || e.code !== "BUSY" || Date.now() >= deadline) throw e;
+    }
+    await new Promise((r) => setTimeout(r, Math.min(RETRY_MS, Math.max(0, deadline - Date.now()))));
+  }
+}
+async function listLocked(project, n2) {
+  const root = versionsDir(project, n2);
+  const names = await readdir5(root).catch((e) => {
+    if (e.code === "ENOENT") return [];
+    throw e;
+  });
+  const metas = [];
+  for (const name of names.filter((f) => ID_PATTERN.test(f)).sort()) {
+    try {
+      const meta3 = await readJsonFile(join15(root, name, "meta.json"), VersionMetaSchema);
+      if (meta3.id === name) metas.push(meta3);
+    } catch {
+    }
+  }
+  return metas;
+}
+async function snapshotLocked(project, n2, o2) {
+  const dir = episodeDir(project, n2);
+  const root = versionsDir(project, n2);
+  if (o2.render && !await access3(join15(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
+    throw new MirageError("BAD_INPUT", `episodes/${n2}/${o2.render}.mp4 does not exist`, "Render it first.");
+  }
+  await mkdir5(root, { recursive: true });
+  for (const f of await readdir5(root)) if (f.startsWith(".tmp-")) await rm9(join15(root, f), { recursive: true, force: true }).catch(() => {
+  });
+  const existing = await listLocked(project, n2);
+  const now = /* @__PURE__ */ new Date();
+  const id = newId(o2.kind, now);
+  const tmp = join15(root, `.tmp-${randomUUID7()}`);
+  await mkdir5(tmp);
+  try {
+    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join15(dir, f))));
+    if (episode) await writeFile5(join15(tmp, "episode.json"), episode);
+    if (summary) await writeFile5(join15(tmp, "summary.md"), summary);
+    let render = null;
+    if (o2.render) {
+      await linkOrCopy(join15(dir, `${o2.render}.mp4`), join15(tmp, "video.mp4"));
+      let captions = null;
+      if (o2.render === "final" && await readBytes(join15(dir, "final.srt")) !== null) {
+        await copyFile(join15(dir, "final.srt"), join15(tmp, "captions.srt"));
+        captions = "captions.srt";
+      }
+      render = { mode: o2.render, file: "video.mp4", captions };
+    }
+    const delivery = o2.kind === "delivery" ? Math.max(0, ...existing.map((v) => v.delivery ?? 0)) + 1 : null;
+    const meta3 = {
+      version: 1,
+      id,
+      kind: o2.kind,
+      label: o2.label,
+      createdAt: now.toISOString(),
+      sessionId: o2.sessionId ?? null,
+      delivery,
+      render,
+      hasEpisode: episode !== null,
+      hasSummary: summary !== null
+    };
+    await writeJsonFile(join15(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
+    await rename5(tmp, join15(root, id));
+    if (o2.kind === "checkpoint") await prune(project, n2, "checkpoint", MAX_CHECKPOINTS);
+    if (o2.kind === "backup") await prune(project, n2, "backup", MAX_BACKUPS);
+    return meta3;
+  } catch (e) {
+    await rm9(tmp, { recursive: true, force: true }).catch(() => {
+    });
+    throw e;
+  }
+}
+async function prune(project, n2, kind, keep) {
+  const ofKind = (await listLocked(project, n2)).filter((v) => v.kind === kind);
+  for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
+    await rm9(join15(versionsDir(project, n2), old.id), { recursive: true, force: true });
+  }
+}
+async function snapshotVersion(project, n2, o2) {
+  return withEpisodeLock(project, n2, o2.waitMs, () => snapshotLocked(project, n2, o2));
+}
+async function listVersions(project, n2) {
+  return listLocked(project, n2);
+}
+async function restoreVersion(project, n2, id, o2 = {}) {
+  return withEpisodeLock(project, n2, o2.waitMs, async () => {
+    const restored = (await listLocked(project, n2)).find((v) => v.id === id);
+    if (!restored) throw new MirageError("BAD_INPUT", `episodes/${n2} has no saved version "${id}"`, "List the versions and pick one of those.");
+    const from = join15(versionsDir(project, n2), id);
+    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join15(from, f))));
+    const backup = await snapshotLocked(project, n2, { kind: "backup", label: `Before going back to \u201C${restored.label}\u201D` });
+    const dir = episodeDir(project, n2);
+    for (const [i2, f] of STATE_FILES.entries()) {
+      const b = bytes[i2];
+      if (b) await writeBytesAtomic(join15(dir, f), b);
+      else await rm9(join15(dir, f), { force: true });
+    }
+    return { restored, backup };
+  });
+}
+var MAX_CHECKPOINTS, MAX_BACKUPS, DEFAULT_WAIT_MS, RETRY_MS, STATE_FILES, ID_PATTERN, versionsDir, pad;
+var init_versions2 = __esm({
+  "packages/core/src/mirage/versions.ts"() {
+    "use strict";
+    init_src();
+    init_errors4();
+    init_json_file();
+    init_render_episode();
+    MAX_CHECKPOINTS = 50;
+    MAX_BACKUPS = 20;
+    DEFAULT_WAIT_MS = 3e4;
+    RETRY_MS = 250;
+    STATE_FILES = ["episode.json", "summary.md"];
+    ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
+    versionsDir = (project, n2) => join15(episodeDir(project, n2), "versions");
+    pad = (v, w) => String(v).padStart(w, "0");
+  }
+});
+
+// packages/core/src/mirage/video.ts
+import { access as access4, mkdir as mkdir6, readdir as readdir6 } from "node:fs/promises";
+import { join as join16, resolve as resolve10 } from "node:path";
+async function newVideo(project, v) {
+  const video = VideoSchema.parse({ ...v, version: 1, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
+  const root = join16(resolve10(project), "episodes");
+  await mkdir6(root, { recursive: true });
+  for (; ; ) {
+    const highest = (await readdir6(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
+    const n2 = highest + 1;
+    try {
+      await mkdir6(episodeDir(project, n2));
+    } catch (e) {
+      if (e.code === "EEXIST") continue;
+      throw e;
+    }
+    await writeJsonFile(videoPath(project, n2), VideoSchema, video, `episodes/${n2}/video.json`);
+    return n2;
+  }
+}
+async function videoNumbers(project) {
+  const names = await readdir6(join16(resolve10(project), "episodes")).catch(() => []);
+  return names.filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+}
+async function planVideo(project, req, { formats, problems }) {
+  let base = { about: "", mention: "", hide: "", footage: [] };
+  if (req.from !== void 0) {
+    const src = await readVideo(project, req.from);
+    if (!src) {
+      const folder = await access4(episodeDir(project, req.from)).then(() => true, () => false);
+      throw new MirageError("BAD_INPUT", folder ? `video ${req.from} has no video.json to copy from` : `there is no video ${req.from}`, "Run status to see the videos.");
+    }
+    base = { about: src.about, mention: src.mention, hide: src.hide, footage: src.footage };
+  } else if (req.about === void 0 || req.footage === void 0) {
+    throw new MirageError("BAD_INPUT", "a new video needs about and footage, unless it is made from another video (from)", "Say what the video is about and give the folders its footage is in.");
+  }
+  const format2 = req.format ?? (req.from !== void 0 ? "short" : void 0);
+  if (format2 !== void 0 && !formats.some((f) => f.id === format2)) {
+    throw new MirageError("BAD_INPUT", `unknown format "${format2}"`, [`The formats are: ${formats.map((f) => f.id).join(", ") || "none"}.`, ...problems].join("\n  "));
+  }
+  const add = (copied, more) => [copied, more ?? ""].filter((t) => t.trim()).join("\n");
+  let vlog;
+  if (req.vlog) {
+    let number4 = req.vlog.number;
+    if (number4 === void 0) {
+      number4 = 1;
+      for (const n2 of await videoNumbers(project)) {
+        const other = await readVideo(project, n2).catch(() => null);
+        if (other?.vlog) number4 = Math.max(number4, other.vlog.number + 1);
+      }
+    }
+    vlog = { name: req.vlog.name, number: number4, date: req.vlog.date };
+  }
+  const video = {
+    title: req.title,
+    about: add(base.about, req.about),
+    mention: add(base.mention, req.mention),
+    hide: add(base.hide, req.hide),
+    footage: [.../* @__PURE__ */ new Set([...base.footage, ...req.footage ?? []])],
+    ...format2 !== void 0 ? { format: format2 } : {},
+    ...req.from !== void 0 ? { from: req.from } : {},
+    ...vlog ? { vlog } : {},
+    ...req.targetSec !== void 0 ? { targetSec: req.targetSec } : {}
+  };
+  let found;
+  try {
+    found = formatOf({ ...video, version: 1, createdAt: "" }, formats);
+  } catch {
+    found = null;
+  }
+  return { video, format: found };
+}
+async function readVideo(project, n2) {
+  try {
+    return await readJsonFile(videoPath(project, n2), VideoSchema, `episodes/${n2}/video.json`);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+}
+async function videoStage(project, n2) {
+  const dir = episodeDir(project, n2);
+  let stage = "new";
+  for (const s of ["final", "guide", "rough"]) {
+    if (await access4(join16(dir, `${s}.mp4`)).then(() => true, () => false)) {
+      stage = s;
+      break;
+    }
+  }
+  const deliveries = (await listVersions(project, n2)).filter((v) => v.kind === "delivery").length;
+  return { stage, deliveries };
+}
+var videoPath;
+var init_video2 = __esm({
+  "packages/core/src/mirage/video.ts"() {
+    "use strict";
+    init_src();
+    init_errors4();
+    init_formats();
+    init_json_file();
+    init_render_episode();
+    init_versions2();
+    videoPath = (project, n2) => join16(episodeDir(project, n2), "video.json");
+  }
+});
+
 // packages/core/src/mirage/check.ts
-import { join as join14, resolve as resolve9 } from "node:path";
+import { join as join17, resolve as resolve11 } from "node:path";
 function timelineWarnings(ep, lib, snapped) {
   const out = [];
   const D = timelineDuration(ep);
@@ -33783,15 +34192,90 @@ function timelineWarnings(ep, lib, snapped) {
   });
   return out;
 }
-async function checkEpisode(project, n2, tools) {
-  const root = resolve9(project);
+function coveredBy(s, width, height) {
+  const row = Math.ceil(s.align / 3);
+  const col = (s.align - 1) % 3;
+  const out = [];
+  if (row === 3 && s.marginV - s.outline < height * COVERED.top) out.push(`top ${COVERED.top * 100}%`);
+  if (row === 1 && height - s.marginV + s.outline > height * (1 - COVERED.bottom)) out.push(`bottom ${COVERED.bottom * 100}%`);
+  if (col === 2 && width - s.margin + s.outline > width * (1 - COVERED.right)) out.push(`right ${COVERED.right * 100}%`);
+  return out;
+}
+function formatWarnings(ep, catalog, video, format2, formatted) {
+  const out = [];
+  const known = formatted ? format2.beats : BUILD_STORY_BEATS;
+  for (const item of ep.items) {
+    if (!known.includes(item.beat)) out.push(`item ${item.id}'s beat "${item.beat}" isn't one of the ${format2.name} format's beats (${format2.beats.join(", ")})`);
+  }
+  if (!formatted) return out;
+  const D = timelineDuration(ep);
+  if (format2.warnPastSec !== void 0) {
+    const limit = video?.targetSec !== void 0 && format2.targetSec !== void 0 ? format2.warnPastSec * video.targetSec / format2.targetSec : format2.warnPastSec;
+    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than the ${format2.name} format's ${formatTime(limit)} \u2014 cut whole bits rather than thinning laughs`);
+  }
+  if (format2.short) {
+    const laid = layoutTimeline(ep);
+    const first = laid[0];
+    const opening = first?.item;
+    if (opening && !isCard(opening) && opening.audio === "keep" && opening.speed === 1) {
+      const clip = catalog.clips.find((c3) => c3.id === opening.clip);
+      if (clip?.probe.hasAudio && clip.transcript) {
+        const word = speechWords(ep, catalog, null).find((w) => w.start >= first.start - 1e-6 && w.start < first.end);
+        const silence = (word?.start ?? first.end) - first.start;
+        if (silence > MAX_OPENING_SILENCE_SEC + 1e-6) out.push(`a short opens on its hook: item ${opening.id} starts with ${s12(silence)} s of silence`);
+      }
+    }
+    if (first && (first.item.beat === "title" || first.item.beat === "cold-open")) out.push(`a short opens on its hook, not a ${first.item.beat}: item ${first.item.id}`);
+    for (const item of ep.items) if (item.beat === "outro") out.push(`a short has no outro: item ${item.id}`);
+    const kind = video?.from !== void 0 ? format2.short.kind : "standalone";
+    if (kind === "standalone") {
+      const last = [...ep.music].sort((a2, b) => b.end - a2.end)[0];
+      if (last && last.end >= D - 0.5 / ep.output.fps && last.fadeOut > 0) out.push("a standalone short loops: the last music cue fades out at the end \u2014 set its fadeOut to 0");
+    } else if (!ep.items.some((i2) => i2.beat === "pointer")) {
+      out.push("a teaser short ends pointing to the full video: add a pointer beat at the end");
+    }
+    const { width, height } = ep.output;
+    if (height > width) {
+      const covered = (what, s) => {
+        const areas = coveredBy(s, width, height);
+        if (areas.length) out.push(`${what} falls where the Shorts and Reels buttons cover it (${areas.join(", ")}) \u2014 move it`);
+      };
+      const position = ep.captions?.position ?? "bottom";
+      const g = styleGeometry(width, height, position);
+      for (const o2 of ep.overlays) covered(`overlay ${o2.kind} ("${o2.text}")`, g[OVERLAY_STYLE[o2.kind]]);
+      const style = ep.captions?.style ?? "phrase";
+      if (style !== "chosen" && style !== "off") covered(`captions at the ${position}`, g[style === "pop" ? "Pop" : style === "karaoke" ? "Karaoke" : "Caption"]);
+    }
+  }
+  return out;
+}
+async function videoFormat(root, n2, dir) {
+  const { formats, problems } = loadFormats(dir);
+  let video = null;
+  try {
+    video = await readVideo(root, n2);
+  } catch (e) {
+    problems.push(`\u2716 ${describeError(e).message}`);
+  }
+  const named = video?.format === void 0 ? void 0 : formats.find((f) => f.id === video.format);
+  if (named) return { video, format: named, formatted: true, problems };
+  if (video?.format !== void 0) problems.push(`\u2716 video.json: unknown format "${video.format}"
+  The formats are: ${formats.map((f) => f.id).join(", ") || "none"}.`);
+  const story = formats.find((f) => f.id === "build-story") ?? null;
+  if (!story && !problems.some((p) => p.startsWith("\u2716 plugin/formats/build-story.md:") || p.startsWith("\u2716 plugin/formats:"))) {
+    problems.push("\u2716 plugin/formats/build-story.md: the file is missing");
+  }
+  return { video, format: story, formatted: false, problems };
+}
+async function checkEpisode(project, n2, tools, opts = {}) {
+  const root = resolve11(project);
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n2);
   sourcesFor(ep, catalog);
   checkCardImages(root, ep);
   const warnings = [];
   const notes = [];
-  const musicDir = join14(root, "music");
+  const musicDir = join17(root, "music");
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
   for (const [k, x] of (ep.sfx ?? []).entries()) {
@@ -33826,14 +34310,18 @@ async function checkEpisode(project, n2, tools) {
     }
   }
   warnings.push(...timelineWarnings(ep, lib, !ep.voiceover));
-  return { episode: ep, warnings, notes };
+  const { video, format: format2, formatted, problems } = await videoFormat(root, n2, opts.formatsDir);
+  if (format2) warnings.push(...formatWarnings(ep, catalog, video, format2, formatted));
+  return { episode: ep, warnings, notes, problems };
 }
-var OLD_DEFAULT_GAIN_DB, s12, s2, MAX_SFX_PER_MINUTE, SFX_WINDOW_SEC;
+var OLD_DEFAULT_GAIN_DB, s12, s2, MAX_SFX_PER_MINUTE, SFX_WINDOW_SEC, MAX_OPENING_SILENCE_SEC, COVERED;
 var init_check = __esm({
   "packages/core/src/mirage/check.ts"() {
     "use strict";
     init_src();
     init_cards();
+    init_errors4();
+    init_formats();
     init_ingest();
     init_music();
     init_move();
@@ -33842,40 +34330,43 @@ var init_check = __esm({
     init_sfx();
     init_slots();
     init_timeline();
+    init_video2();
     init_voiceover();
     OLD_DEFAULT_GAIN_DB = -18;
     s12 = (n2) => n2.toFixed(1);
     s2 = (n2) => n2.toFixed(2);
     MAX_SFX_PER_MINUTE = 6;
     SFX_WINDOW_SEC = 60;
+    MAX_OPENING_SILENCE_SEC = 0.5;
+    COVERED = { top: 0.1, bottom: 0.2, right: 0.15 };
   }
 });
 
 // packages/core/src/mirage/project.ts
 import { existsSync as existsSync10 } from "node:fs";
-import { mkdir as mkdir5, writeFile as writeFile5 } from "node:fs/promises";
+import { mkdir as mkdir7, writeFile as writeFile6 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { join as join15, resolve as resolve10 } from "node:path";
+import { join as join18, resolve as resolve12 } from "node:path";
 function resolveUserPath(p, base = process.env.INIT_CWD ?? process.cwd(), home = homedir3()) {
   if (p === "~") return home;
-  if (p.startsWith("~/")) return join15(home, p.slice(2));
-  return resolve10(base, p);
+  if (p.startsWith("~/")) return join18(home, p.slice(2));
+  return resolve12(base, p);
 }
 async function initProject(project, title) {
-  const file2 = join15(project, "mirage.json");
+  const file2 = join18(project, "mirage.json");
   if (existsSync10(file2)) throw new MirageError("BAD_INPUT", `${project} is already a Mirage project`, "Nothing was changed; edit mirage.json to change its title.");
-  await mkdir5(join15(project, "episodes"), { recursive: true });
-  await mkdir5(join15(project, "music"), { recursive: true });
-  await writeFile5(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
+  await mkdir7(join18(project, "episodes"), { recursive: true });
+  await mkdir7(join18(project, "music"), { recursive: true });
+  await writeFile6(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
 }
 function requireProject(project) {
-  if (!existsSync10(join15(project, "mirage.json"))) {
+  if (!existsSync10(join18(project, "mirage.json"))) {
     throw new MirageError("NO_PROJECT", `no Mirage project at ${project}`, `Check the path, or create one with: pnpm mirage init ${project} --title "<title>"`);
   }
 }
 async function readProject(project) {
   try {
-    return await readJsonFile(join15(project, "mirage.json"), MirageProjectSchema, "mirage.json");
+    return await readJsonFile(join18(project, "mirage.json"), MirageProjectSchema, "mirage.json");
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -33887,168 +34378,6 @@ var init_project2 = __esm({
     init_src();
     init_errors4();
     init_json_file();
-  }
-});
-
-// packages/core/src/mirage/versions.ts
-import { randomBytes, randomUUID as randomUUID7 } from "node:crypto";
-import { access as access3, copyFile, link, mkdir as mkdir6, readdir as readdir5, readFile as readFile7, rename as rename5, rm as rm9, writeFile as writeFile6 } from "node:fs/promises";
-import { join as join16 } from "node:path";
-async function readBytes(path8) {
-  try {
-    return await readFile7(path8);
-  } catch (e) {
-    if (e.code === "ENOENT") return null;
-    throw e;
-  }
-}
-async function writeBytesAtomic(path8, bytes) {
-  const tmpPath = `${path8}.tmp-${randomUUID7()}`;
-  await writeFile6(tmpPath, bytes);
-  await rename5(tmpPath, path8);
-}
-async function linkOrCopy(from, to) {
-  try {
-    await link(from, to);
-  } catch (e) {
-    const code = e.code;
-    if (code !== "EXDEV" && code !== "EPERM" && code !== "ENOTSUP") throw e;
-    await copyFile(from, to);
-  }
-}
-function newId(kind, at2) {
-  const d = `${pad(at2.getUTCFullYear(), 4)}${pad(at2.getUTCMonth() + 1, 2)}${pad(at2.getUTCDate(), 2)}`;
-  const t = `${pad(at2.getUTCHours(), 2)}${pad(at2.getUTCMinutes(), 2)}${pad(at2.getUTCSeconds(), 2)}`;
-  return `${d}-${t}-${pad(at2.getUTCMilliseconds(), 3)}-${kind}-${randomBytes(2).toString("hex")}`;
-}
-async function withEpisodeLock(project, n2, waitMs, fn) {
-  const deadline = Date.now() + (waitMs ?? DEFAULT_WAIT_MS);
-  for (; ; ) {
-    try {
-      const lock = await lockEpisode(project, n2, "versions");
-      try {
-        return await fn();
-      } finally {
-        await lock.release();
-      }
-    } catch (e) {
-      if (!(e instanceof MirageError) || e.code !== "BUSY" || Date.now() >= deadline) throw e;
-    }
-    await new Promise((r) => setTimeout(r, Math.min(RETRY_MS, Math.max(0, deadline - Date.now()))));
-  }
-}
-async function listLocked(project, n2) {
-  const root = versionsDir(project, n2);
-  const names = await readdir5(root).catch((e) => {
-    if (e.code === "ENOENT") return [];
-    throw e;
-  });
-  const metas = [];
-  for (const name of names.filter((f) => ID_PATTERN.test(f)).sort()) {
-    try {
-      const meta3 = await readJsonFile(join16(root, name, "meta.json"), VersionMetaSchema);
-      if (meta3.id === name) metas.push(meta3);
-    } catch {
-    }
-  }
-  return metas;
-}
-async function snapshotLocked(project, n2, o2) {
-  const dir = episodeDir(project, n2);
-  const root = versionsDir(project, n2);
-  if (o2.render && !await access3(join16(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
-    throw new MirageError("BAD_INPUT", `episodes/${n2}/${o2.render}.mp4 does not exist`, "Render it first.");
-  }
-  await mkdir6(root, { recursive: true });
-  for (const f of await readdir5(root)) if (f.startsWith(".tmp-")) await rm9(join16(root, f), { recursive: true, force: true }).catch(() => {
-  });
-  const existing = await listLocked(project, n2);
-  const now = /* @__PURE__ */ new Date();
-  const id = newId(o2.kind, now);
-  const tmp = join16(root, `.tmp-${randomUUID7()}`);
-  await mkdir6(tmp);
-  try {
-    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join16(dir, f))));
-    if (episode) await writeFile6(join16(tmp, "episode.json"), episode);
-    if (summary) await writeFile6(join16(tmp, "summary.md"), summary);
-    let render = null;
-    if (o2.render) {
-      await linkOrCopy(join16(dir, `${o2.render}.mp4`), join16(tmp, "video.mp4"));
-      let captions = null;
-      if (o2.render === "final" && await readBytes(join16(dir, "final.srt")) !== null) {
-        await copyFile(join16(dir, "final.srt"), join16(tmp, "captions.srt"));
-        captions = "captions.srt";
-      }
-      render = { mode: o2.render, file: "video.mp4", captions };
-    }
-    const delivery = o2.kind === "delivery" ? Math.max(0, ...existing.map((v) => v.delivery ?? 0)) + 1 : null;
-    const meta3 = {
-      version: 1,
-      id,
-      kind: o2.kind,
-      label: o2.label,
-      createdAt: now.toISOString(),
-      sessionId: o2.sessionId ?? null,
-      delivery,
-      render,
-      hasEpisode: episode !== null,
-      hasSummary: summary !== null
-    };
-    await writeJsonFile(join16(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
-    await rename5(tmp, join16(root, id));
-    if (o2.kind === "checkpoint") await prune(project, n2, "checkpoint", MAX_CHECKPOINTS);
-    if (o2.kind === "backup") await prune(project, n2, "backup", MAX_BACKUPS);
-    return meta3;
-  } catch (e) {
-    await rm9(tmp, { recursive: true, force: true }).catch(() => {
-    });
-    throw e;
-  }
-}
-async function prune(project, n2, kind, keep) {
-  const ofKind = (await listLocked(project, n2)).filter((v) => v.kind === kind);
-  for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
-    await rm9(join16(versionsDir(project, n2), old.id), { recursive: true, force: true });
-  }
-}
-async function snapshotVersion(project, n2, o2) {
-  return withEpisodeLock(project, n2, o2.waitMs, () => snapshotLocked(project, n2, o2));
-}
-async function listVersions(project, n2) {
-  return listLocked(project, n2);
-}
-async function restoreVersion(project, n2, id, o2 = {}) {
-  return withEpisodeLock(project, n2, o2.waitMs, async () => {
-    const restored = (await listLocked(project, n2)).find((v) => v.id === id);
-    if (!restored) throw new MirageError("BAD_INPUT", `episodes/${n2} has no saved version "${id}"`, "List the versions and pick one of those.");
-    const from = join16(versionsDir(project, n2), id);
-    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join16(from, f))));
-    const backup = await snapshotLocked(project, n2, { kind: "backup", label: `Before going back to \u201C${restored.label}\u201D` });
-    const dir = episodeDir(project, n2);
-    for (const [i2, f] of STATE_FILES.entries()) {
-      const b = bytes[i2];
-      if (b) await writeBytesAtomic(join16(dir, f), b);
-      else await rm9(join16(dir, f), { force: true });
-    }
-    return { restored, backup };
-  });
-}
-var MAX_CHECKPOINTS, MAX_BACKUPS, DEFAULT_WAIT_MS, RETRY_MS, STATE_FILES, ID_PATTERN, versionsDir, pad;
-var init_versions2 = __esm({
-  "packages/core/src/mirage/versions.ts"() {
-    "use strict";
-    init_src();
-    init_errors4();
-    init_json_file();
-    init_render_episode();
-    MAX_CHECKPOINTS = 50;
-    MAX_BACKUPS = 20;
-    DEFAULT_WAIT_MS = 3e4;
-    RETRY_MS = 250;
-    STATE_FILES = ["episode.json", "summary.md"];
-    ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
-    versionsDir = (project, n2) => join16(episodeDir(project, n2), "versions");
-    pad = (v, w) => String(v).padStart(w, "0");
   }
 });
 
@@ -34067,9 +34396,9 @@ var init_labels = __esm({
 
 // packages/core/src/mirage/session-files.ts
 import { randomUUID as randomUUID8 } from "node:crypto";
-import { readFileSync as readFileSync4 } from "node:fs";
-import { appendFile, link as link2, mkdir as mkdir7, readdir as readdir6, readFile as readFile8, rename as rename6, rm as rm10, stat as stat5, utimes, writeFile as writeFile7 } from "node:fs/promises";
-import { dirname as dirname6, join as join17, resolve as resolve11 } from "node:path";
+import { readFileSync as readFileSync5 } from "node:fs";
+import { appendFile, link as link2, mkdir as mkdir8, readdir as readdir7, readFile as readFile8, rename as rename6, rm as rm10, stat as stat5, utimes, writeFile as writeFile7 } from "node:fs/promises";
+import { dirname as dirname7, join as join19, resolve as resolve13 } from "node:path";
 function checkSessionId(id) {
   if (!SESSION_ID.test(id) || id.includes("..")) throw new MirageError("BAD_INPUT", `"${id}" is not a session id`, "A session id is letters, digits, dots, dashes and underscores.");
   return id;
@@ -34098,11 +34427,11 @@ async function readLines(path8, schema) {
 }
 async function appendLine(path8, schema, value) {
   const parsed = schema.parse(value);
-  await mkdir7(dirname6(path8), { recursive: true });
+  await mkdir8(dirname7(path8), { recursive: true });
   await appendFile(path8, JSON.stringify(parsed) + "\n", "utf8");
 }
 async function writeProgress(dir, p) {
-  await mkdir7(dir, { recursive: true });
+  await mkdir8(dir, { recursive: true });
   await writeJsonFile(progressPath(dir), ProgressSchema, p, "progress.json");
 }
 async function readProgress(dir) {
@@ -34128,22 +34457,22 @@ async function writeControlIfNone(path8, control) {
 }
 async function claimedControl(project, n2, written) {
   const dir = episodeDir(project, n2);
-  const names = (await readdir6(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
+  const names = (await readdir7(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
   let best = null;
   const stale = [];
   for (const name of names) {
-    const info = await stat5(join17(dir, name)).catch(() => null);
+    const info = await stat5(join19(dir, name)).catch(() => null);
     if (!info) continue;
     if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
     if (written) continue;
-    const control = await readControlFile(join17(dir, name));
+    const control = await readControlFile(join19(dir, name));
     if (control && (!best || info.mtimeMs > best.mtime)) best = { control, mtime: info.mtimeMs };
   }
   const claimed = best ? { ...best.control, correction: null } : null;
   if (stale.length) {
     try {
       if (claimed && stale.length === names.length) await writeControlIfNone(controlPath(project, n2), claimed);
-      for (const name of stale) await rm10(join17(dir, name), { force: true });
+      for (const name of stale) await rm10(join19(dir, name), { force: true });
     } catch {
     }
   }
@@ -34159,7 +34488,7 @@ async function readControl(project, n2) {
 }
 async function writeControl(project, n2, patch) {
   const next = ControlSchema.parse({ ...await readControl(project, n2), ...patch, version: 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
-  await mkdir7(episodeDir(project, n2), { recursive: true });
+  await mkdir8(episodeDir(project, n2), { recursive: true });
   await writeJsonFile(controlPath(project, n2), ControlSchema, next, "control.json");
   return next;
 }
@@ -34167,7 +34496,7 @@ async function takeCorrection(project, n2, o2 = {}) {
   const path8 = controlPath(project, n2);
   const peek = await readControlFile(path8);
   if (!peek || peek.correction === null) return null;
-  const claim2 = join17(episodeDir(project, n2), claimName());
+  const claim2 = join19(episodeDir(project, n2), claimName());
   try {
     await rename6(path8, claim2);
   } catch (e) {
@@ -34204,7 +34533,7 @@ async function readSessionState(project, sessionId) {
 async function writeSessionState(project, sessionId, patch) {
   const path8 = sessionStatePath(project, sessionId);
   const next = SessionStateSchema.parse({ ...await readSessionState(project, sessionId), ...patch });
-  await mkdir7(dirname6(path8), { recursive: true });
+  await mkdir8(dirname7(path8), { recursive: true });
   await writeJsonFile(path8, SessionStateSchema, next, `.mirage/sessions/${sessionId}.json`);
   return next;
 }
@@ -34219,16 +34548,16 @@ async function touchSessionState(project, sessionId) {
 }
 function claudeProcessPath(project, pid) {
   if (!Number.isInteger(pid) || pid <= 0) throw new MirageError("BAD_INPUT", `"${pid}" is not a process id`, "A process id is a whole number above 0.");
-  return join17(resolve11(project), ".mirage", "claude", `${pid}.json`);
+  return join19(resolve13(project), ".mirage", "claude", `${pid}.json`);
 }
 async function writeClaudeProcess(project, pid, sessionId, at2 = /* @__PURE__ */ new Date()) {
   const path8 = claudeProcessPath(project, pid);
-  await mkdir7(dirname6(path8), { recursive: true });
+  await mkdir8(dirname7(path8), { recursive: true });
   await writeJsonFile(path8, ClaudeProcessSchema, { sessionId: checkSessionId(sessionId), updatedAt: at2.toISOString() }, `.mirage/claude/${pid}.json`);
 }
 function readClaudeProcess(project, pid) {
   try {
-    const r = ClaudeProcessSchema.safeParse(JSON.parse(readFileSync4(claudeProcessPath(project, pid), "utf8")));
+    const r = ClaudeProcessSchema.safeParse(JSON.parse(readFileSync5(claudeProcessPath(project, pid), "utf8")));
     return r.success ? r.data.sessionId : null;
   } catch {
     return null;
@@ -34243,16 +34572,16 @@ var init_session_files = __esm({
     init_json_file();
     init_render_episode();
     SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-    sessionDir = (project, n2, sessionId) => join17(episodeDir(project, n2), "sessions", checkSessionId(sessionId));
-    stepsPath = (dir) => join17(dir, "steps.jsonl");
-    logPath = (dir) => join17(dir, "log.jsonl");
-    progressPath = (dir) => join17(dir, "progress.json");
+    sessionDir = (project, n2, sessionId) => join19(episodeDir(project, n2), "sessions", checkSessionId(sessionId));
+    stepsPath = (dir) => join19(dir, "steps.jsonl");
+    logPath = (dir) => join19(dir, "log.jsonl");
+    progressPath = (dir) => join19(dir, "progress.json");
     appendStep = (dir, line) => appendLine(stepsPath(dir), StepLineSchema, line);
     readSteps = (dir) => readLines(stepsPath(dir), StepLineSchema);
     appendLog = (dir, entry) => appendLine(logPath(dir), LogEntrySchema, entry);
     readLog = (dir) => readLines(logPath(dir), LogEntrySchema);
     clearProgress = (dir) => rm10(progressPath(dir), { force: true });
-    controlPath = (project, n2) => join17(episodeDir(project, n2), "control.json");
+    controlPath = (project, n2) => join19(episodeDir(project, n2), "control.json");
     CLAIM = "control.json.take-";
     defaultControl = () => ({ version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
     CLAIM_STALE_MS = 6e4;
@@ -34261,66 +34590,14 @@ var init_session_files = __esm({
       const m = /^control\.json\.take-(\d{13})-/.exec(name);
       return m ? Number(m[1]) : mtime;
     };
-    sessionStatePath = (project, sessionId) => join17(resolve11(project), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
+    sessionStatePath = (project, sessionId) => join19(resolve13(project), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
     emptySession = () => ({ video: null, overnight: null, awakePid: null });
-  }
-});
-
-// packages/core/src/mirage/video.ts
-import { access as access4, mkdir as mkdir8, readdir as readdir7 } from "node:fs/promises";
-import { join as join18, resolve as resolve12 } from "node:path";
-async function newVideo(project, v) {
-  const video = VideoSchema.parse({ ...v, version: 1, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
-  const root = join18(resolve12(project), "episodes");
-  await mkdir8(root, { recursive: true });
-  for (; ; ) {
-    const highest = (await readdir7(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
-    const n2 = highest + 1;
-    try {
-      await mkdir8(episodeDir(project, n2));
-    } catch (e) {
-      if (e.code === "EEXIST") continue;
-      throw e;
-    }
-    await writeJsonFile(videoPath(project, n2), VideoSchema, video, `episodes/${n2}/video.json`);
-    return n2;
-  }
-}
-async function readVideo(project, n2) {
-  try {
-    return await readJsonFile(videoPath(project, n2), VideoSchema, `episodes/${n2}/video.json`);
-  } catch (e) {
-    if (e.code === "ENOENT") return null;
-    throw e;
-  }
-}
-async function videoStage(project, n2) {
-  const dir = episodeDir(project, n2);
-  let stage = "new";
-  for (const s of ["final", "guide", "rough"]) {
-    if (await access4(join18(dir, `${s}.mp4`)).then(() => true, () => false)) {
-      stage = s;
-      break;
-    }
-  }
-  const deliveries = (await listVersions(project, n2)).filter((v) => v.kind === "delivery").length;
-  return { stage, deliveries };
-}
-var videoPath;
-var init_video2 = __esm({
-  "packages/core/src/mirage/video.ts"() {
-    "use strict";
-    init_src();
-    init_json_file();
-    init_render_episode();
-    init_versions2();
-    videoPath = (project, n2) => join18(episodeDir(project, n2), "video.json");
   }
 });
 
 // packages/core/src/mirage/notes.ts
 import { mkdir as mkdir9, readdir as readdir8, rm as rm11 } from "node:fs/promises";
-import { join as join19 } from "node:path";
+import { join as join20 } from "node:path";
 async function readNotes(project, n2) {
   try {
     return (await readJsonFile(notesPath(project, n2), NotesFileSchema, `episodes/${n2}/notes.json`)).notes;
@@ -34339,8 +34616,8 @@ async function addNote(project, n2, o2) {
   const notes = await readNotes(project, n2);
   const id = `n${notes.reduce((m, x) => Math.max(m, Number(x.id.slice(1))), 0) + 1}`;
   const note = NoteSchema.parse({ id, versionId: o2.versionId, t: o2.t, text: o2.text, box: o2.box, still: `notes/${id}.jpg`, createdAt: (/* @__PURE__ */ new Date()).toISOString(), round: null });
-  const out = join19(episodeDir(project, n2), note.still);
-  await mkdir9(join19(episodeDir(project, n2), "notes"), { recursive: true });
+  const out = join20(episodeDir(project, n2), note.still);
+  await mkdir9(join20(episodeDir(project, n2), "notes"), { recursive: true });
   try {
     await o2.tools.runFfmpeg(["-ss", o2.t.toFixed(3), "-i", o2.videoPath, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", out]);
   } catch (e) {
@@ -34362,7 +34639,7 @@ async function deleteNote(project, n2, id) {
   const note = find(notes, id);
   if (!NOTE_STILL.test(note.still)) throw new MirageError("BAD_INPUT", `Note ${id} has a still outside notes/.`, "Check notes.json.");
   await saveNotes(project, n2, notes.filter((x) => x.id !== id));
-  await rm11(join19(episodeDir(project, n2), note.still), { force: true });
+  await rm11(join20(episodeDir(project, n2), note.still), { force: true });
 }
 async function sendNotes(project, n2) {
   const notes = await readNotes(project, n2);
@@ -34374,12 +34651,12 @@ async function sendNotes(project, n2) {
   return next.filter((x) => unsent.some((u2) => u2.id === x.id));
 }
 async function noteStatuses(project, n2) {
-  const sessions = join19(episodeDir(project, n2), "sessions");
+  const sessions = join20(episodeDir(project, n2), "sessions");
   const entries = await readdir8(sessions, { withFileTypes: true }).catch(() => []);
   const names = entries.filter((d) => d.isDirectory()).map((d) => d.name).sort();
   const newest = /* @__PURE__ */ new Map();
   for (const name of names) {
-    for (const e of await readLog(join19(sessions, name))) {
+    for (const e of await readLog(join20(sessions, name))) {
       if (e.kind !== "note-status" || !e.noteId || !e.status) continue;
       const at2 = Date.parse(e.at);
       const prev = newest.get(e.noteId);
@@ -34398,14 +34675,14 @@ var init_notes2 = __esm({
     init_json_file();
     init_render_episode();
     init_session_files();
-    notesPath = (project, n2) => join19(episodeDir(project, n2), "notes.json");
+    notesPath = (project, n2) => join20(episodeDir(project, n2), "notes.json");
     saveNotes = (project, n2, notes) => writeJsonFile(notesPath(project, n2), NotesFileSchema, { version: 1, notes }, `episodes/${n2}/notes.json`);
     sentError = () => new MirageError("BAD_INPUT", "This note was already sent.", "Add a new note instead.");
   }
 });
 
 // packages/core/src/mirage/reports.ts
-function checkReport({ episode: ep, warnings, notes }) {
+function checkReport({ episode: ep, warnings, notes, problems = [] }) {
   const lines = [];
   for (const l of layoutTimeline(ep)) {
     const it = l.item;
@@ -34413,6 +34690,7 @@ function checkReport({ episode: ep, warnings, notes }) {
     lines.push(`${String(l.index + 1).padStart(3)}  ${it.beat.padEnd(9)} ${it.id.padEnd(12)} ${what}  ${l.start.toFixed(2)}\u2013${l.end.toFixed(2)}${it.quiet ? "  quiet" : ""}`);
   }
   lines.push(`total ${formatTime(timelineDuration(ep))} \xB7 ${ep.items.length} items \xB7 ${ep.overlays.length} overlays \xB7 ${ep.music.length} music cues${ep.sfx ? ` \xB7 ${ep.sfx.length} sound effects` : ""}`);
+  lines.push(...problems);
   for (const m of notes) lines.push(`\u2022 ${m}`);
   for (const w of warnings) lines.push(`\u26A0 ${w}`);
   return lines;
@@ -34555,102 +34833,6 @@ var init_one_line = __esm({
   }
 });
 
-// packages/core/src/mirage/formats.ts
-import { readdirSync, readFileSync as readFileSync5 } from "node:fs";
-import { dirname as dirname7, join as join20, resolve as resolve13 } from "node:path";
-import { fileURLToPath as fileURLToPath4 } from "node:url";
-function formatsDir(from = import.meta.url) {
-  const here = dirname7(from.startsWith("file:") ? fileURLToPath4(from) : resolve13(from));
-  return SOURCE_LAYOUT2.test(here) ? resolve13(here, "..", "..", "..", "..", "plugin", "formats") : resolve13(here, "..", "formats");
-}
-function splitFile(text) {
-  const lines = text.replace(/^﻿/, "").replace(/\r\n/g, "\n").split("\n");
-  if (lines[0]?.trimEnd() !== "---") return "no front matter: the file must start with a --- line, a JSON object, and a --- line";
-  const end = lines.findIndex((l, i2) => i2 > 0 && l.trimEnd() === "---");
-  if (end < 0) return "front matter has no closing --- line";
-  let front;
-  try {
-    front = JSON.parse(lines.slice(1, end).join("\n"));
-  } catch (e) {
-    return `front matter is not valid JSON (${e.message})`;
-  }
-  if (front === null || typeof front !== "object" || Array.isArray(front)) return "front matter must be a JSON object";
-  return { front, rules: lines.slice(end + 1).join("\n") };
-}
-function loadFormats(dir = formatsDir()) {
-  let names;
-  try {
-    names = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
-  } catch {
-    return { formats: [], problems: ["\u2716 plugin/formats: the folder is missing or unreadable"] };
-  }
-  const formats = [];
-  const problems = [];
-  for (const file2 of names) {
-    const problem = (why) => problems.push(`\u2716 plugin/formats/${file2}: ${why}`);
-    let text;
-    try {
-      text = readFileSync5(join20(dir, file2), "utf8");
-    } catch (e) {
-      problem(`can't be read (${e.message})`);
-      continue;
-    }
-    const split = splitFile(text);
-    if (typeof split === "string") {
-      problem(split);
-      continue;
-    }
-    const parsed = FormatSchema.safeParse(split.front);
-    if (!parsed.success) {
-      problem(describeZodError(parsed.error));
-      continue;
-    }
-    const stem = file2.slice(0, -".md".length);
-    if (parsed.data.id !== stem) {
-      problem(`id: the id "${parsed.data.id}" must be the file name, "${stem}"`);
-      continue;
-    }
-    formats.push({ ...parsed.data, rules: split.rules, file: file2 });
-  }
-  return { formats, problems };
-}
-function formatOf(video, formats) {
-  const id = video?.format ?? "build-story";
-  const found = formats.find((f) => f.id === id) ?? formats.find((f) => f.id === "build-story");
-  if (!found) throw new MirageError("BAD_INPUT", "Mirage's build-story format is missing or broken", "Run the formats tool to see what is wrong with plugin/formats, or reinstall the Mirage plugin.");
-  return found;
-}
-var even2, FormatSchema, SOURCE_LAYOUT2;
-var init_formats = __esm({
-  "packages/core/src/mirage/formats.ts"() {
-    "use strict";
-    init_src();
-    init_zod();
-    init_errors4();
-    init_json_file();
-    even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
-    FormatSchema = strictObject2({
-      /** Equal to the file's name without `.md`. */
-      id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
-      name: external_exports.string().min(1),
-      describe: external_exports.string().min(1),
-      /** Words a person uses for this kind of video ("reel", "day in the life"): Claude picks the format from them. */
-      words: external_exports.array(external_exports.string().min(1)),
-      /** The beat words the format's videos are built from, in the order they usually come. */
-      beats: external_exports.array(BeatSchema).min(1),
-      /** The length the format aims for, in seconds. */
-      targetSec: external_exports.number().positive().optional(),
-      /** A video longer than this gets a warning. */
-      warnPastSec: external_exports.number().positive().optional(),
-      output: strictObject2({ width: even2, height: even2 }).optional(),
-      captions: CaptionsSchema.optional(),
-      /** The kind of short a video of this format is made as when it doesn't say. */
-      short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
-    });
-    SOURCE_LAYOUT2 = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
-  }
-});
-
 // packages/core/src/mirage/index.ts
 var init_mirage = __esm({
   "packages/core/src/mirage/index.ts"() {
@@ -34704,6 +34886,7 @@ __export(src_exports2, {
   MAX_SPEEDUP: () => MAX_SPEEDUP,
   MirageError: () => MirageError,
   NARRATION_GAPS: () => NARRATION_GAPS,
+  OVERLAY_STYLE: () => OVERLAY_STYLE,
   PAD_SEC: () => PAD_SEC,
   PASS: () => PASS,
   PEAK_DB: () => PEAK_DB,
@@ -34813,6 +34996,7 @@ __export(src_exports2, {
   oneLine: () => oneLine,
   onsetEnvelope: () => onsetEnvelope,
   placedStatus: () => placedStatus,
+  planVideo: () => planVideo,
   previewSize: () => previewSize,
   readClaudeProcess: () => readClaudeProcess,
   readControl: () => readControl,
@@ -34863,6 +35047,7 @@ __export(src_exports2, {
   splitScript: () => splitScript,
   splitSentences: () => splitSentences,
   spreadWords: () => spreadWords,
+  styleGeometry: () => styleGeometry,
   takeCorrection: () => takeCorrection,
   textTokens: () => textTokens,
   tidy: () => tidy,
@@ -34962,7 +35147,7 @@ function failure2(input2) {
   const detail = lines.find((l) => l.startsWith("\u2716")) ?? lines[0] ?? "";
   return { detail: detail.slice(0, 500) };
 }
-var STOP_REASON, HELD_TOO_LONG, correctionReason, BEFORE_LABEL, PAUSE_POLL_MS, MAX_HOLD_MS, MODES, result, preDecision, videoNumbers, Handler;
+var STOP_REASON, HELD_TOO_LONG, correctionReason, BEFORE_LABEL, PAUSE_POLL_MS, MAX_HOLD_MS, MODES, result, preDecision, videoNumbers2, Handler;
 var init_hook = __esm({
   "packages/hooks/src/hook.ts"() {
     "use strict";
@@ -34977,7 +35162,7 @@ var init_hook = __esm({
     MODES = { cut: "rough", guide: "guide", render: "final" };
     result = (stdout = "") => ({ stdout, exitCode: 0 });
     preDecision = (permissionDecision, reason) => result(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, ...reason === void 0 ? {} : { permissionDecisionReason: reason } } }));
-    videoNumbers = (project) => {
+    videoNumbers2 = (project) => {
       try {
         return readdirSync2(join21(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
       } catch {
@@ -35025,7 +35210,7 @@ var init_hook = __esm({
       /** The footage folders of every video of the project. */
       async footage() {
         const all = [];
-        for (const n2 of videoNumbers(this.project)) {
+        for (const n2 of videoNumbers2(this.project)) {
           const v = await this.soft(() => this.core.readVideo(this.project, n2));
           if (v) all.push(...v.footage);
         }
@@ -35037,12 +35222,12 @@ var init_hook = __esm({
       }
       async sessionStart() {
         await this.core.writeSessionState(this.project, this.sid, {});
-        for (const n2 of videoNumbers(this.project)) {
+        for (const n2 of videoNumbers2(this.project)) {
           const control = await this.soft(() => this.core.readControl(this.project, n2));
           if (control?.stop) await this.soft(() => this.core.writeControl(this.project, n2, { stop: null }));
         }
         const p = await this.core.readProject(this.project);
-        const k = videoNumbers(this.project).length;
+        const k = videoNumbers2(this.project).length;
         const line = `This folder is a Mirage project (\u201C${this.core.oneLine(p?.title ?? "", 200)}\u201D, ${k} ${k === 1 ? "video" : "videos"}). Use the mirage:edit skill to make or change a video.`;
         const additionalContext = this.deps.setupNotice ? `${line} ${this.deps.setupNotice}` : line;
         return result(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext } }));
@@ -35113,7 +35298,7 @@ var init_hook = __esm({
       async stop() {
         const { core, project, sid } = this;
         const session = await this.session();
-        const numbers = videoNumbers(project);
+        const numbers = videoNumbers2(project);
         const touched = new Set(numbers.filter((n2) => {
           try {
             return existsSync11(core.sessionDir(project, n2, sid));

@@ -47,7 +47,7 @@ async function setUp(page: Page, d: Driver): Promise<void> {
   expect((await d.tool('new_project', { title: 'Build story' })).text).toBe(`created ${d.project}`);
   // The monitor starts the viewer once mirage.json is there; its first line carries the address.
   const url = await d.viewerUrl();
-  expect((await d.tool('new_video', { title: 'The first cut', about: 'Testing Mirage end to end', footage: [d.clips] })).text).toBe('video 1 created');
+  expect((await d.tool('new_video', { title: 'The first cut', about: 'Testing Mirage end to end', footage: [d.clips] })).text).toMatch(/^video 1 created \(format build-story: /);
   await page.goto(`${url}#/v/1/edit`);
   await expect(page.getByRole('heading', { name: 'Steps' })).toBeVisible();
   const ingest = await d.tool('ingest', { folder: d.clips });

@@ -9,7 +9,7 @@ import { ViewerInfoSchema } from '@wordedits/shared';
 import { LATER_DAYS, writeSetupState } from '@wordedits/shared/setup-state';
 import {
   analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, formatsDir, ingestClips, ingestReport, initProject, listVersions, loadFormats,
-  MirageError, musicReport, newVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
+  MirageError, musicReport, newVideo, planVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
   sessionDir, slotsReport, speakNarration, speakReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
 import { DEFAULT_VOICE, KOKORO_VOICES, kokoroSpeaker, type Speaker } from '@wordedits/sidecars';
@@ -188,24 +188,33 @@ export function createEngineServer(ctx: EngineContext): McpServer {
 
   tool(
     'new_video',
-    'Start a new video in the project: what it is about, what to mention or hide, and the folders its footage is in.',
+    'Start a new video in the project: what it is about, what to mention or hide, the folders its footage is in, and its format (see formats). With from, a short made from a big video: its footage and answers are copied.',
     {
       title: z.string().min(1).max(200),
-      about: z.string().describe('What the video is about, in the person\'s words'),
+      about: z.string().optional().describe('What the video is about, in the person\'s words (needed unless from is given)'),
       mention: z.string().optional().describe('Things the person wants mentioned'),
       hide: z.string().optional().describe('Things that must not show (keys, names, private windows)'),
-      footage: z.array(z.string()).describe('Folders with the footage for this video'),
+      footage: z.array(z.string()).optional().describe('Folders with the footage for this video (needed unless from is given)'),
+      format: z.string().min(1).optional().describe('The format id from formats, e.g. short or vlog (default build-story, or short with from)'),
+      from: z.number().int().positive().optional().describe('The big video this one is made from: its footage, about, mention and hide are copied (what you pass is added)'),
+      vlog: z.object({
+        name: z.string().min(1).describe('The vlog series, e.g. Ibiza'),
+        number: z.number().int().positive().optional().describe('Which vlog this is (default: one more than the highest so far)'),
+        date: z.string().min(1).describe('The date the vlog covers, as the person confirmed it'),
+      }).optional(),
+      targetSec: z.number().positive().optional().describe('The length to aim for, in seconds, when the person asks for one (overrides the format\'s)'),
     },
     async (a) => {
-      const folders = a.footage.map((f) => resolveUserPath(f, project));
+      const folders = (a.footage ?? []).map((f) => resolveUserPath(f, project));
       const refused = folders.flatMap((f) => {
         const why = footageProblem(f, project);
         return why ? [why] : [];
       });
       if (refused.length) return { content: [{ type: 'text', text: refused.join('\n') }], isError: true };
-      const n = await newVideo(project, { title: a.title, about: a.about, mention: a.mention ?? '', hide: a.hide ?? '', footage: folders });
+      const { video: v, format } = await planVideo(project, { ...a, footage: a.footage && folders }, loadFormats(formatFiles()));
+      const n = await newVideo(project, v);
       await writeSessionState(project, sid(), { video: n });
-      return ok(`video ${n} created`);
+      return ok(`video ${n} created${format ? ` (format ${format.id}: ${format.beats.join(' → ')})` : ''}`);
     },
   );
 
@@ -226,7 +235,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     return report(await sessionVideo(), musicReport(dir, await analyzeLibrary(dir, tools)));
   });
 
-  tool('check', 'Check the timeline of a video against the catalog and music, snap montages to the beat, and list it.', { video }, async ({ video: n }) => report(n, checkReport(await checkEpisode(project, n, tools))));
+  tool('check', 'Check the timeline of a video against the catalog and music, snap montages to the beat, and list it.', { video }, async ({ video: n }) => report(n, checkReport(await checkEpisode(project, n, tools, { formatsDir: formatFiles() }))));
 
   for (const [name, mode] of Object.entries(MODES) as ['cut' | 'guide' | 'render', EpisodeMode][]) {
     const what = { cut: 'Check the timeline, then render the rough cut (picture, music, overlays).', guide: 'Render the guide video, with the narration lines on screen to record against.', render: 'Render the final video with captions.' }[name];
@@ -236,7 +245,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
         renderEpisode({
           project, episode: n, mode, tools, signal: h.signal, onProgress: h.progress,
           // As the CLI's cut: the check runs under the episode's lock.
-          beforeRender: name === 'cut' ? async () => { lines.push(...checkReport(await checkEpisode(project, n, tools))); } : undefined,
+          beforeRender: name === 'cut' ? async () => { lines.push(...checkReport(await checkEpisode(project, n, tools, { formatsDir: formatFiles() }))); } : undefined,
         }),
       );
       return report(n, [...lines, ...renderReport(r)]);

@@ -5,8 +5,10 @@ import { EpisodeSchema, isCard, type Catalog, type ClipItem, type TimelineItem }
 import { describe, expect, it } from 'vitest';
 import { realMediaTools } from '../media-tools.js';
 import { checkEpisode } from './check.js';
+import { formatsDir } from './formats.js';
 import { saveCatalog } from './ingest.js';
 import { saveEpisode } from './render-episode.js';
+import { checkReport } from './reports.js';
 import { cutOf } from './slots.js';
 import { fitVoiceover, holdAt } from './voiceover.js';
 
@@ -403,5 +405,216 @@ describe('checkEpisode with cards', () => {
     } finally {
       await chmod(join(dir, 'locked.png'), 0o644);
     }
+  });
+});
+
+describe('checkEpisode against the video format', () => {
+  const VIDEO = { version: 1, title: 't', about: '', mention: '', hide: '', footage: [], createdAt: '2026-11-06T00:00:00.000Z' };
+  const writeVideo = (dir: string, extra: object = {}) => writeFile(join(dir, 'episodes', '1', 'video.json'), JSON.stringify({ ...VIDEO, ...extra }, null, 2) + '\n');
+  /** A vertical short: a hook that keeps its sound, a payoff, a pointer; pop captions in the middle. */
+  const short = (extra: object = {}) =>
+    EpisodeSchema.parse({
+      version: 2, number: 1, title: 't', output: { width: 1080, height: 1920, fps: 30 },
+      items: [
+        { id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' },
+        { id: 'b', beat: 'tease', clip: 'c001', src: { in: 5, out: 10 } },
+        { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 12, out: 14 } },
+      ],
+      captions: { style: 'pop', position: 'middle' },
+      ...extra,
+    });
+  /** Spoken words of the clip at these source times. */
+  const spoken = (...starts: number[]) => ({ words: starts.map((s, i) => ({ w: `w${i}`, start: s, end: s + 0.3, conf: 1 })), segments: [], speech: [] });
+  const SHORT_BEATS = '(hook, tease, pointer, payoff, loop)';
+  const BUILD_BEATS = '(cold-open, title, recap, new-toy, problem, montage, twist, truth, outro, blooper)';
+  const covered = (what: string, area: string) => `${what} falls where the Shorts and Reels buttons cover it (${area}) — move it`;
+  async function formatsFolder(files: Record<string, string>) {
+    const dir = await mkdtemp(join(tmpdir(), 'we-formats-'));
+    for (const [name, text] of Object.entries(files)) await writeFile(join(dir, name), text);
+    return dir;
+  }
+  const shortFile = async () => readFile(join(formatsDir(), 'short.md'), 'utf8');
+
+  it('gives an existing build-story episode exactly the report it had before formats, video.json or not, vertical or not', async () => {
+    const { dir } = await project(spoken(3));
+    const ep = base({
+      output: { width: 1080, height: 1920, fps: 30 },
+      items: [
+        { id: 'a', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1.3 }, onBeat: true, audio: 'keep' },
+        { id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 10 } },
+        { id: 'z', beat: 'outro', clip: 'c001', src: { in: 12, out: 14 } },
+      ],
+      overlays: [{ kind: 'badge', text: 'FAILED', start: 2, end: 3 }, { kind: 'label', text: 'later', start: 3, end: 4 }, { kind: 'badge', text: 'LATE', start: 40, end: 41 }],
+    });
+    await saveEpisode(dir, ep);
+    const before = checkReport(await checkEpisode(dir, 1));
+    // The report as it was before formats existed (taken from the code at a2c8458).
+    expect(before).toEqual([
+      '  1  cold-open a            c001  0.00–1.50  ×1  0.00–1.50',
+      '  2  problem   b            c001  5.00–10.00  ×1  1.50–6.50',
+      '  3  outro     z            c001  12.00–14.00  ×1  6.50–8.50',
+      'total 0:09 · 3 items · 3 overlays · 1 music cues',
+      '⚠ overlay 3 ("LATE") starts at 40.20 s, after the episode ends (8.50 s) — it will never show',
+    ]);
+    await writeVideo(dir);
+    await saveEpisode(dir, ep);
+    expect(checkReport(await checkEpisode(dir, 1))).toEqual(before);
+  });
+
+  it("warns about a beat that isn't one of the format's, and in a build story only about beats outside the old list", async () => {
+    const { dir } = await project(spoken(0.2));
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'b', beat: 'montage', clip: 'c001', src: { in: 5, out: 10 } }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 12, out: 14 } }] }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([`item b's beat "montage" isn't one of the Short format's beats ${SHORT_BEATS}`]);
+    await saveEpisode(dir, base({ items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 2 } }, { id: 'b', beat: 'bit', clip: 'c001', src: { in: 5, out: 10 } }], music: [] }));
+    await writeVideo(dir);
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([`item b's beat "bit" isn't one of the Build story format's beats ${BUILD_BEATS}`]);
+  });
+
+  it("warns when the video is longer than the format's limit, which the video's own target moves", async () => {
+    const { dir } = await project(spoken(0.2));
+    const items = (n: number) => [
+      { id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 25 }, audio: 'keep' },
+      { id: 'b', beat: 'tease', clip: 'c001', src: { in: 0, out: 25 } },
+      { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 0, out: n } },
+    ];
+    await saveEpisode(dir, short({ items: items(15) }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1:05, longer than the Short format's 1:00 — cut whole bits rather than thinning laughs"]);
+    await saveEpisode(dir, short({ items: items(10) }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]); // exactly 60 s
+    await saveEpisode(dir, short({ items: items(15) }));
+    await writeVideo(dir, { format: 'short', from: 1, targetSec: 90 }); // twice the format's 45 s: the limit is 2:00
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+  });
+
+  it('warns when a short opens on silence, measured from the first item\'s own sound', async () => {
+    const { dir } = await project(spoken(2, 6));
+    await saveEpisode(dir, short());
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a short opens on its hook: item a starts with 2.0 s of silence']);
+    // No word in the first item at all: all of it is silence.
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 3, out: 4.5 }, audio: 'keep' }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 }, audio: 'keep' }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a short opens on its hook: item a starts with 1.5 s of silence']);
+    // A muted first item has no sound of its own to check.
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 } }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 } }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+  });
+
+  it('starts speaking within half a second: no silence warning', async () => {
+    const { dir } = await project(spoken(0.5, 3));
+    await saveEpisode(dir, short());
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+  });
+
+  it('a short whose first item is a card: no silence warning, the beat warnings still apply', async () => {
+    const { dir } = await project(spoken(3));
+    await saveEpisode(dir, short({ items: [{ id: 'k', beat: 'title', card: { text: 'MY SHORT', style: 'bold', sec: 2 } }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 }, audio: 'keep' }] }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([
+      `item k's beat "title" isn't one of the Short format's beats ${SHORT_BEATS}`,
+      'a short opens on its hook, not a title: item k',
+    ]);
+  });
+
+  it('warns when a short opens on a cold open or has an outro', async () => {
+    const { dir } = await project(spoken(0.1));
+    await saveEpisode(dir, short({
+      items: [
+        { id: 'a', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' },
+        { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 12, out: 14 } },
+        { id: 'z', beat: 'outro', clip: 'c001', src: { in: 15, out: 17 } },
+      ],
+    }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([
+      `item a's beat "cold-open" isn't one of the Short format's beats ${SHORT_BEATS}`,
+      `item z's beat "outro" isn't one of the Short format's beats ${SHORT_BEATS}`,
+      'a short opens on its hook, not a cold-open: item a',
+      'a short has no outro: item z',
+    ]);
+  });
+
+  it('a teaser (made from a big video) ends on a pointer; a standalone short loops, so its last cue must not fade out at the end', async () => {
+    const { dir } = await project(spoken(0.1));
+    const standalone = [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'b', beat: 'payoff', clip: 'c001', src: { in: 5, out: 9 } }, { id: 'c', beat: 'loop', clip: 'c001', src: { in: 10, out: 12 } }];
+    const music = (fadeOut?: number) => [{ track: 'beat.wav', start: 0, end: 4 }, { track: 'beat.wav', start: 4, end: 10, ...(fadeOut === undefined ? {} : { fadeOut }) }];
+    await saveEpisode(dir, short({ items: standalone, music: music() }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a teaser short ends pointing to the full video: add a pointer beat at the end']);
+    await writeVideo(dir, { format: 'short' }); // no big video behind it: standalone
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a standalone short loops: the last music cue fades out at the end — set its fadeOut to 0']);
+    await saveEpisode(dir, short({ items: standalone, music: music(0) }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    // A cue that ends before the video does doesn't fade out at the end.
+    await saveEpisode(dir, short({ items: standalone, music: [{ track: 'beat.wav', start: 0, end: 4 }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+  });
+
+  it("warns about overlays and captions where the Shorts and Reels buttons cover a vertical video, from the styles' own boxes", async () => {
+    const { dir } = await project(spoken(0.1));
+    const overlays = (['badge', 'counter', 'before', 'after', 'timecard', 'label', 'name', 'subtitle', 'callout', 'chapter'] as const).map((kind) => ({ kind, text: kind.toUpperCase(), start: 1, end: 2 }));
+    await saveEpisode(dir, short({ overlays, captions: { style: 'chosen', position: 'middle' } }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([
+      covered('overlay badge ("BADGE")', 'top 10%, right 15%'),
+      covered('overlay counter ("COUNTER")', 'top 10%'),
+      covered('overlay before ("BEFORE")', 'top 10%'),
+      covered('overlay after ("AFTER")', 'top 10%'),
+      covered('overlay timecard ("TIMECARD")', 'top 10%'),
+      covered('overlay label ("LABEL")', 'bottom 20%'),
+      covered('overlay name ("NAME")', 'bottom 20%'),
+    ]);
+    // A subtitle sits where captions do: at the bottom it is covered too.
+    await saveEpisode(dir, short({ overlays: [{ kind: 'subtitle', text: 'So I went back.', start: 1, end: 2 }], captions: { style: 'chosen' } }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([covered('overlay subtitle ("So I went back.")', 'bottom 20%')]);
+    // Automatic captions at the bottom (set, or by default), not in the middle and not when there are none.
+    for (const captions of [{ style: 'pop', position: 'bottom' }, { style: 'phrase' }, undefined]) {
+      await saveEpisode(dir, short({ captions }));
+      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([covered('captions at the bottom', 'bottom 20%')]);
+    }
+    for (const captions of [{ style: 'karaoke', position: 'middle' }, { style: 'off' }]) {
+      await saveEpisode(dir, short({ captions }));
+      expect((await checkEpisode(dir, 1)).warnings, JSON.stringify(captions)).toEqual([]);
+    }
+  });
+
+  it('never warns about covered areas on a 16:9 video', async () => {
+    const { dir } = await project(spoken(0.1));
+    const overlays = (['badge', 'counter', 'timecard', 'label', 'name'] as const).map((kind) => ({ kind, text: kind, start: 1, end: 2 }));
+    await saveEpisode(dir, short({ output: { width: 1920, height: 1080, fps: 30 }, overlays, captions: { style: 'pop', position: 'bottom' } }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+  });
+
+  it('reports an unknown format as ✖ with the ids, and checks the rest as a build story', async () => {
+    const { dir } = await project(spoken(0.1));
+    await saveEpisode(dir, base({ items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 2 } }, { id: 'b', beat: 'bit', clip: 'c001', src: { in: 5, out: 10 } }], music: [] }));
+    await writeVideo(dir, { format: 'reel' });
+    const r = await checkEpisode(dir, 1);
+    expect(r.problems).toEqual(['✖ video.json: unknown format "reel"\n  The formats are: build-story, short, vlog.']);
+    expect(r.warnings).toEqual([`item b's beat "bit" isn't one of the Build story format's beats ${BUILD_BEATS}`]);
+    expect(checkReport(r)).toContain('✖ video.json: unknown format "reel"\n  The formats are: build-story, short, vlog.');
+  });
+
+  it('a broken or missing build-story.md is one ✖, not a failed check; a broken other format still lets a short be checked', async () => {
+    const { dir } = await project(spoken(0.1));
+    await saveEpisode(dir, base());
+    const broken = await formatsFolder({ 'build-story.md': '---\n{"id":"build-story",}\n---\n', 'short.md': await shortFile() });
+    const r = await checkEpisode(dir, 1, undefined, { formatsDir: broken });
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toMatch(/^✖ plugin\/formats\/build-story\.md: front matter is not valid JSON/);
+    expect(r.warnings).toEqual([]);
+    const missing = await formatsFolder({ 'short.md': await shortFile() });
+    expect((await checkEpisode(dir, 1, undefined, { formatsDir: missing })).problems).toEqual(['✖ plugin/formats/build-story.md: the file is missing']);
+    expect((await checkEpisode(dir, 1, undefined, { formatsDir: join(missing, 'nowhere') })).problems).toEqual(['✖ plugin/formats: the folder is missing or unreadable']);
+    // A short checked while vlog.md has a typo: the ✖ for vlog.md, and the short's own warnings.
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'title', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 } }] }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    const typo = await formatsFolder({ 'build-story.md': await readFile(join(formatsDir(), 'build-story.md'), 'utf8'), 'short.md': await shortFile(), 'vlog.md': '---\n{"id":"vlog","nmae":"Vlog"}\n---\n' });
+    const s = await checkEpisode(dir, 1, undefined, { formatsDir: typo });
+    expect(s.problems).toEqual([expect.stringMatching(/^✖ plugin\/formats\/vlog\.md: /)]);
+    expect(s.warnings).toContain('a short opens on its hook, not a title: item a');
   });
 });
