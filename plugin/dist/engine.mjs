@@ -38411,16 +38411,38 @@ function spills(ep, sources, laid) {
   });
   return { spills: out, shortened };
 }
+var singleFade = (s) => s.kind === "lead" ? { t: "in", st: 0, sec: s.sec } : { t: "out", st: 0, sec: s.sec };
 function fadesFor(laid, spills2) {
-  const out = /* @__PURE__ */ new Map();
+  const items = /* @__PURE__ */ new Map();
+  const at2 = (id) => laid.findIndex((l) => l.item.id === id);
+  const tails = /* @__PURE__ */ new Map();
+  const leads = /* @__PURE__ */ new Map();
   for (const s of spills2) {
-    const i2 = laid.findIndex((l) => l.item.id === s.item);
+    const i2 = at2(s.item);
     if (i2 < 0) continue;
-    const n2 = laid[s.kind === "lead" ? i2 - 1 : i2 + 1]?.item;
-    if (!playsOwnSound(n2)) continue;
-    out.set(n2.id, { ...out.get(n2.id), ...s.kind === "lead" ? { fadeOutSec: s.sec } : { fadeInSec: s.sec } });
+    if (s.kind === "tail") tails.set(i2, s);
+    else leads.set(i2 - 1, s);
   }
-  return out;
+  const fades = spills2.map((s) => {
+    const i2 = at2(s.item);
+    const cut = s.kind === "tail" ? i2 : i2 - 1;
+    const [tail, lead] = [tails.get(cut), leads.get(cut)];
+    if (!tail || !lead) return singleFade(s);
+    const sec = r62(lead.sec + tail.sec);
+    return s.kind === "lead" ? { t: "in", st: 0, sec } : { t: "out", st: r62(-lead.sec), sec };
+  });
+  for (const cut of /* @__PURE__ */ new Set([...tails.keys(), ...leads.keys()])) {
+    const [tail, lead] = [tails.get(cut), leads.get(cut)];
+    const sec = r62((lead?.sec ?? 0) + (tail?.sec ?? 0));
+    const [before, after] = [laid[cut], laid[cut + 1]];
+    if (lead && before && playsOwnSound(before.item)) {
+      items.set(before.item.id, { ...items.get(before.item.id), fadeOut: { t: "out", st: r62(before.end - before.start - lead.sec), sec } });
+    }
+    if (tail && after && playsOwnSound(after.item)) {
+      items.set(after.item.id, { ...items.get(after.item.id), fadeIn: { t: "in", st: lead ? r62(-lead.sec) : 0, sec } });
+    }
+  }
+  return { items, spills: fades };
 }
 
 // packages/core/src/mirage/overlays.ts
@@ -39737,9 +39759,12 @@ function readFrom(src, sec) {
   return ["-noaccurate_seek", "-ss", ffNum(sec), "-i", src.path];
 }
 var ownSound = (k, src, sec) => `[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(sec)}`;
-function crossfades(f, dur) {
-  return (f?.fadeInSec ? `,afade=t=in:d=${ffNum(f.fadeInSec)}:curve=qsin` : "") + (f?.fadeOutSec ? `,afade=t=out:st=${ffNum(Math.max(0, dur - f.fadeOutSec))}:d=${ffNum(f.fadeOutSec)}:curve=qsin` : "");
+function fadeFilter(f) {
+  const d = `d=${ffNum(f.sec)}:curve=qsin`;
+  if (f.st < 0) return `asetpts=PTS-STARTPTS+${ffNum(-f.st)}/TB,afade=t=${f.t}${f.t === "out" ? ":st=0" : ""}:${d},asetpts=PTS-STARTPTS`;
+  return f.t === "in" && f.st === 0 ? `afade=t=in:${d}` : `afade=t=${f.t}:st=${ffNum(f.st)}:${d}`;
 }
+var crossfades = (f) => [f?.fadeIn, f?.fadeOut].map((x) => x ? `,${fadeFilter(x)}` : "").join("");
 function itemChunkArgs(laid, o2, sources, output2) {
   const inputs = [];
   const chains = [];
@@ -39774,7 +39799,7 @@ function itemChunkArgs(laid, o2, sources, output2) {
       item.move ? `${head}${hold}${moveFilters(l, item, k, o2, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]` : `${head}${zoom}${framed(item.frame, at2, o2, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`
     );
     if (item.audio === "keep" && item.speed === 1 && src.hasAudio) {
-      chains.push(`${ownSound(k, src, l.srcFrames / o2.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS${crossfades(o2.fades?.get(item.id), l.frames / o2.fps)}[a${k}]`);
+      chains.push(`${ownSound(k, src, l.srcFrames / o2.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS${crossfades(o2.fades?.get(item.id))}[a${k}]`);
     } else {
       chains.push(silence);
     }
@@ -39886,7 +39911,7 @@ function spillTrackArgs(list, sources, durationSec, output2, under) {
     const src = sources.get(s.clip);
     inputs.push(...readFrom(src, s.srcIn));
     const sec = ffNum(s.sec);
-    const fade = s.kind === "lead" ? `afade=t=in:d=${sec}:curve=qsin` : `afade=t=out:st=0:d=${sec}:curve=qsin`;
+    const fade = fadeFilter(s.fade ?? singleFade(s));
     chains.push(`${ownSound(i2, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},adelay=delays=${Math.round(s.at * SR2)}S:all=1[s${i2}]`);
   });
   if (under) inputs.push("-i", under);
@@ -40099,7 +40124,8 @@ async function renderLocked(o2) {
   try {
     const sfx = await placeSfx(project2, sfxCues, D, ep.loudnessLufs, o2.tools, work, o2.signal);
     const spilled = spills(ep, sources, laid).spills;
-    const shape = { width: W, height: H, fps, cardImages, ...spilled.length ? { fades: fadesFor(laid, spilled) } : {} };
+    const crossfaded = spilled.length ? fadesFor(laid, spilled) : void 0;
+    const shape = { width: W, height: H, fps, cardImages, ...crossfaded ? { fades: crossfaded.items } : {} };
     const chunks = episodeChunks(laid, shape, sources, join11(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i2, chunk] of chunks.entries()) {
@@ -40133,7 +40159,7 @@ async function renderLocked(o2) {
     }
     let spillWav;
     if (spilled.length) {
-      for (const args of spillTrackCommands(spilled, sources, D, work)) {
+      for (const args of spillTrackCommands(spilled.map((s, i2) => ({ ...s, fade: crossfaded.spills[i2] })), sources, D, work)) {
         o2.signal?.throwIfAborted();
         await o2.tools.runFfmpeg(args, { expectedDurationSec: D, timeoutMs: Math.max(12e4, D * 10 * 1e3), signal: o2.signal });
       }

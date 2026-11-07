@@ -155,30 +155,56 @@ describe('fadesFor', () => {
   };
 
   it('nothing to fade without spills', () => {
-    expect(fades(ep([live('a', 'c1', 2, 4), live('b', 'c2', 5, 7)]))).toEqual(new Map());
+    expect(fades(ep([live('a', 'c1', 2, 4), live('b', 'c2', 5, 7)]))).toEqual({ items: new Map(), spills: [] });
   });
 
-  it("a lead fades out the shot before's own sound over the lead's length, at its end", () => {
-    expect(fades(ep([live('a', 'c1', 2, 4), live('b', 'c2', 5, 7, { leadIn: 0.6 })]))).toEqual(new Map([['a', { fadeOutSec: 0.6 }]]));
+  it("a lead fades in over its length while the shot before's own sound fades out over the lead's length, at its end", () => {
+    expect(fades(ep([live('a', 'c1', 2, 4), live('b', 'c2', 5, 7, { leadIn: 0.6 })]))).toEqual({
+      items: new Map([['a', { fadeOut: { t: 'out', st: 1.4, sec: 0.6 } }]]),
+      spills: [{ t: 'in', st: 0, sec: 0.6 }],
+    });
   });
 
-  it("a tail fades in the shot after's own sound over the tail's length, at its start", () => {
-    expect(fades(ep([live('a', 'c1', 2, 4, { tailOut: 0.7 }), live('b', 'c2', 5, 7)]))).toEqual(new Map([['b', { fadeInSec: 0.7 }]]));
+  it("a tail fades out over its length while the shot after's own sound fades in over the tail's length, at its start", () => {
+    expect(fades(ep([live('a', 'c1', 2, 4, { tailOut: 0.7 }), live('b', 'c2', 5, 7)]))).toEqual({
+      items: new Map([['b', { fadeIn: { t: 'in', st: 0, sec: 0.7 } }]]),
+      spills: [{ t: 'out', st: 0, sec: 0.7 }],
+    });
   });
 
-  it('a lead and the tail of the shot before at one cut: each fades the other', () => {
-    expect(fades(ep([live('a', 'c1', 2, 4, { tailOut: 0.7 }), live('b', 'c2', 5, 7, { leadIn: 0.4 })]))).toEqual(new Map([['a', { fadeOutSec: 0.4 }], ['b', { fadeInSec: 0.7 }]]));
+  it('a lead and the tail of the shot before at one cut: one crossfade over the whole window, cut − lead to cut + tail', () => {
+    // The window is 1.6 – 2.7 s (1.1 s). a's own sound fades out from 1.6 s and its tail carries the same fade on from
+    // 0.4 s into it; b's lead fades in from 1.6 s and b's own sound carries it on, 0.4 s into it at its start.
+    expect(fades(ep([live('a', 'c1', 2, 4, { tailOut: 0.7 }), live('b', 'c2', 5, 7, { leadIn: 0.4 })]))).toEqual({
+      items: new Map([['a', { fadeOut: { t: 'out', st: 1.6, sec: 1.1 } }], ['b', { fadeIn: { t: 'in', st: -0.4, sec: 1.1 } }]]),
+      spills: [{ t: 'out', st: -0.4, sec: 1.1 }, { t: 'in', st: 0, sec: 1.1 }],
+    });
   });
 
   it('a shot between two spills fades in and out', () => {
     const e = ep([live('a', 'c1', 2, 4, { tailOut: 0.5 }), live('b', 'c2', 5, 7), live('c', 'c1', 10, 12, { leadIn: 0.3 })]);
-    expect(fades(e)).toEqual(new Map([['b', { fadeInSec: 0.5, fadeOutSec: 0.3 }]]));
+    expect(fades(e).items).toEqual(new Map([['b', { fadeIn: { t: 'in', st: 0, sec: 0.5 }, fadeOut: { t: 'out', st: 1.7, sec: 0.3 } }]]));
+  });
+
+  it('a shot whose own lead and tail each meet a spill: each cut crossfades once, on its own', () => {
+    const e = ep([live('a', 'c1', 2, 4, { tailOut: 0.5 }), live('b', 'c2', 5, 7, { leadIn: 0.5, tailOut: 0.25 }), live('c', 'c1', 10, 12, { leadIn: 0.25 })]);
+    expect(fades(e)).toEqual({
+      items: new Map([
+        ['a', { fadeOut: { t: 'out', st: 1.5, sec: 1 } }],
+        ['b', { fadeIn: { t: 'in', st: -0.5, sec: 1 }, fadeOut: { t: 'out', st: 1.75, sec: 0.5 } }],
+        ['c', { fadeIn: { t: 'in', st: -0.25, sec: 0.5 } }],
+      ]),
+      spills: [{ t: 'out', st: -0.5, sec: 1 }, { t: 'in', st: 0, sec: 1 }, { t: 'out', st: -0.25, sec: 0.5 }, { t: 'in', st: 0, sec: 0.5 }],
+    });
   });
 
   it('a muted, sped-up or card neighbour has no sound to fade: only the spill fades', () => {
     const card = { id: 'k', beat: 'title', card: { style: 'bold', text: 'Hi', sec: 2 } };
     for (const n of [muted('n', 10, 12), live('n', 'c2', 10, 14, { speed: 2 }), card]) {
-      expect(fades(ep([n, live('b', 'c1', 5, 7, { leadIn: 0.5, tailOut: 0.5 }), n === card ? { ...card, id: 'k2' } : { ...n, id: 'n2' }]))).toEqual(new Map());
+      expect(fades(ep([n, live('b', 'c1', 5, 7, { leadIn: 0.5, tailOut: 0.5 }), n === card ? { ...card, id: 'k2' } : { ...n, id: 'n2' }]))).toEqual({
+        items: new Map(),
+        spills: [{ t: 'in', st: 0, sec: 0.5 }, { t: 'out', st: 0, sec: 0.5 }],
+      });
     }
   });
 });

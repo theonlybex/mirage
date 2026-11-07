@@ -18,7 +18,7 @@ import { moveExprs } from './move.js';
 import { checkCueFiles, cueTrack, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, keptSegments, speechWords, toSrt } from './overlays.js';
 import { decodeMono } from './tempo.js';
-import { fadesFor, spills, type Spill } from './spill.js';
+import { fadesFor, singleFade, spills, type Fade, type ItemFades, type Spill } from './spill.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
 import { cutChanged, cutChangedError, fittedRecordingSha, lineChangeWarnings } from './voiceover.js';
 
@@ -185,7 +185,7 @@ export interface ChunkShape {
   height: number;
   fps: number;
   cardImages?: Map<string, CardImage>;
-  fades?: Map<string, { fadeInSec?: number; fadeOutSec?: number }>;
+  fades?: Map<string, ItemFades>;
 }
 
 /**
@@ -205,13 +205,18 @@ function readFrom(src: ClipSource, sec: number): string[] {
  */
 const ownSound = (k: number, src: ClipSource, sec: number) => `[${k}:a:${src.audioStream ?? 0}]aresample=48000:async=1:first_pts=0,${FLTP_STEREO},atrim=end=${ffNum(sec)}`;
 
-/** Equal-power fades (a quarter sine in, its mirror out: the two add to one level) on a sound `dur` seconds long. */
-function crossfades(f: { fadeInSec?: number; fadeOutSec?: number } | undefined, dur: number): string {
-  return (
-    (f?.fadeInSec ? `,afade=t=in:d=${ffNum(f.fadeInSec)}:curve=qsin` : '') +
-    (f?.fadeOutSec ? `,afade=t=out:st=${ffNum(Math.max(0, dur - f.fadeOutSec))}:d=${ffNum(f.fadeOutSec)}:curve=qsin` : '')
-  );
+/**
+ * An equal-power fade (Fade) on a sound whose timestamps start at 0. One that starts before the sound does is the later
+ * part of a longer fade: the sound's timestamps are moved on to where it begins in the fade (afade goes by them), then back.
+ */
+function fadeFilter(f: Fade): string {
+  const d = `d=${ffNum(f.sec)}:curve=qsin`;
+  if (f.st < 0) return `asetpts=PTS-STARTPTS+${ffNum(-f.st)}/TB,afade=t=${f.t}${f.t === 'out' ? ':st=0' : ''}:${d},asetpts=PTS-STARTPTS`;
+  return f.t === 'in' && f.st === 0 ? `afade=t=in:${d}` : `afade=t=${f.t}:st=${ffNum(f.st)}:${d}`;
 }
+
+/** An item's own sound's fades (fadesFor), in then out, each after a comma; nothing without them. */
+const crossfades = (f: ItemFades | undefined) => [f?.fadeIn, f?.fadeOut].map((x) => (x ? `,${fadeFilter(x)}` : '')).join('');
 
 export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<string, ClipSource>, output: string): string[] {
   const inputs: string[] = [];
@@ -276,7 +281,7 @@ export function itemChunkArgs(laid: LaidItem[], o: ChunkShape, sources: Map<stri
     if (item.audio === 'keep' && item.speed === 1 && src.hasAudio) {
       // Cut at src.out before padding silence under a hold. Where a neighbour's lead or tail plays over this shot, its
       // sound fades out under the lead or in under the tail.
-      chains.push(`${ownSound(k, src, l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS${crossfades(o.fades?.get(item.id), l.frames / o.fps)}[a${k}]`);
+      chains.push(`${ownSound(k, src, l.srcFrames / o.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS${crossfades(o.fades?.get(item.id))}[a${k}]`);
     } else {
       chains.push(silence);
     }
@@ -398,13 +403,15 @@ export function sfxTrackArgs(sounds: PlacedSfx[], durationSec: number, output: s
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', output];
 }
 
+/** A spill and its fade (fadesFor; without one, singleFade: a lead fades in over its length, a tail out). */
+export type FadedSpill = Spill & { fade?: Fade };
+
 /**
  * The spill track of J- and L-cuts (48 kHz stereo float WAV, `durationSec` long): each spill is its clip's sound from
- * `srcIn` to `srcOut`, read as the shot reads it, faded over its whole length with an equal-power curve (a lead in, a tail
- * out: the shot's sound under it fades the other way) and placed sample-exact at `at`. `under`, an earlier part of the
- * track, is mixed in as it is.
+ * `srcIn` to `srcOut`, read as the shot reads it, faded with an equal-power curve (the shot's sound under it fades the
+ * other way) and placed sample-exact at `at`. `under`, an earlier part of the track, is mixed in as it is.
  */
-export function spillTrackArgs(list: Spill[], sources: Map<string, ClipSource>, durationSec: number, output: string, under?: string): string[] {
+export function spillTrackArgs(list: FadedSpill[], sources: Map<string, ClipSource>, durationSec: number, output: string, under?: string): string[] {
   const SR = 48000;
   const inputs: string[] = [];
   const chains: string[] = [];
@@ -412,7 +419,7 @@ export function spillTrackArgs(list: Spill[], sources: Map<string, ClipSource>, 
     const src = sources.get(s.clip)!;
     inputs.push(...readFrom(src, s.srcIn));
     const sec = ffNum(s.sec);
-    const fade = s.kind === 'lead' ? `afade=t=in:d=${sec}:curve=qsin` : `afade=t=out:st=0:d=${sec}:curve=qsin`;
+    const fade = fadeFilter(s.fade ?? singleFade(s));
     chains.push(`${ownSound(i, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},adelay=delays=${Math.round(s.at * SR)}S:all=1[s${i}]`);
   });
   if (under) inputs.push('-i', under);
@@ -425,11 +432,11 @@ export function spillTrackArgs(list: Spill[], sources: Map<string, ClipSource>, 
  * The commands that make the spill track `dir`/spill.wav: one, or as many as keep each under MAX_COMMAND (every spill
  * opens an input), each writing a part that the next mixes in.
  */
-export function spillTrackCommands(list: Spill[], sources: Map<string, ClipSource>, durationSec: number, dir: string): string[][] {
+export function spillTrackCommands(list: FadedSpill[], sources: Map<string, ClipSource>, durationSec: number, dir: string): string[][] {
   const out = join(dir, 'spill.wav');
   const part = (n: number) => join(dir, `spill-${n}.wav`);
-  const groups: Spill[][] = [];
-  let group: Spill[] = [];
+  const groups: FadedSpill[][] = [];
+  let group: FadedSpill[] = [];
   for (const s of list) {
     const under = groups.length ? part(groups.length - 1) : undefined;
     // Measured with a part's name, the longer of the two it may write.
@@ -733,7 +740,8 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     const sfx = await placeSfx(project, sfxCues, D, ep.loudnessLufs, o.tools, work, o.signal);
     // J- and L-cuts: the shots' own sound played over the cut, and the fades they ask of the shots' sound under them.
     const spilled = spills(ep, sources, laid).spills;
-    const shape: ChunkShape = { width: W, height: H, fps, cardImages, ...(spilled.length ? { fades: fadesFor(laid, spilled) } : {}) };
+    const crossfaded = spilled.length ? fadesFor(laid, spilled) : undefined;
+    const shape: ChunkShape = { width: W, height: H, fps, cardImages, ...(crossfaded ? { fades: crossfaded.items } : {}) };
     const chunks = episodeChunks(laid, shape, sources, join(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i, chunk] of chunks.entries()) {
@@ -768,7 +776,7 @@ async function renderLocked(o: RenderOptions): Promise<RenderResult> {
     }
     let spillWav: string | undefined;
     if (spilled.length) {
-      for (const args of spillTrackCommands(spilled, sources, D, work)) {
+      for (const args of spillTrackCommands(spilled.map((s, i) => ({ ...s, fade: crossfaded!.spills[i] })), sources, D, work)) {
         o.signal?.throwIfAborted();
         await o.tools.runFfmpeg(args, { expectedDurationSec: D, timeoutMs: Math.max(120_000, D * 10 * 1000), signal: o.signal });
       }

@@ -106,18 +106,65 @@ export function spills(ep: Episode, sources: SoundSources, laid?: LaidItem[]): {
 }
 
 /**
- * The fades the spills ask of the neighbouring shots' own sound, per item id: a lead fades out the shot before over its
- * last `sec` seconds (`fadeOutSec`), a tail fades in the shot after over its first `sec` seconds (`fadeInSec`), so the
- * two sounds crossfade. A neighbour that doesn't play its own sound (muted, a card, sped up) has nothing to fade.
+ * An equal-power fade (a quarter sine, `curve=qsin`: a fade in and a fade out over one window add to one level) on a
+ * sound: `t` in or out, over `sec` seconds starting `st` seconds into that sound. A negative `st` starts the fade before
+ * the sound does: the sound is the later part of a longer fade, and begins part-way through it.
  */
-export function fadesFor(laid: LaidItem[], spills: Spill[]): Map<string, { fadeInSec?: number; fadeOutSec?: number }> {
-  const out = new Map<string, { fadeInSec?: number; fadeOutSec?: number }>();
+export interface Fade {
+  t: 'in' | 'out';
+  st: number;
+  sec: number;
+}
+
+/** The fades on an item's own sound: in at its start, out at its end. */
+export interface ItemFades {
+  fadeIn?: Fade;
+  fadeOut?: Fade;
+}
+
+/** A spill's own fade where it meets no spill from the other side of its cut: a lead fades in over its length, a tail out. */
+export const singleFade = (s: Spill): Fade => (s.kind === 'lead' ? { t: 'in', st: 0, sec: s.sec } : { t: 'out', st: 0, sec: s.sec });
+
+/**
+ * The crossfades of the spills, per cut, for the spills themselves (`spills`, in the order given) and the shots' own
+ * sound under them (`items`, by item id).
+ *
+ * A lead alone fades in over its length while the shot before's own sound fades out over its last `sec` seconds; a tail
+ * alone fades out over its length while the shot after's own sound fades in over its first `sec` seconds. Where a lead
+ * and the tail of the shot before meet at one cut, the two sides crossfade once, over the whole window from `cut − lead`
+ * to `cut + tail`: the shot before's own sound and its tail fade out as one fade, the lead and the shot after's own sound
+ * fade in as one. A neighbour that doesn't play its own sound (muted, a card, sped up) has nothing to fade.
+ */
+export function fadesFor(laid: LaidItem[], spills: Spill[]): { items: Map<string, ItemFades>; spills: Fade[] } {
+  const items = new Map<string, ItemFades>();
+  const at = (id: string) => laid.findIndex((l) => l.item.id === id);
+  // Each cut by the index of the shot before it: the tail that plays after it, the lead that plays before it.
+  const tails = new Map<number, Spill>();
+  const leads = new Map<number, Spill>();
   for (const s of spills) {
-    const i = laid.findIndex((l) => l.item.id === s.item);
+    const i = at(s.item);
     if (i < 0) continue;
-    const n = laid[s.kind === 'lead' ? i - 1 : i + 1]?.item;
-    if (!playsOwnSound(n)) continue;
-    out.set(n.id, { ...out.get(n.id), ...(s.kind === 'lead' ? { fadeOutSec: s.sec } : { fadeInSec: s.sec }) });
+    if (s.kind === 'tail') tails.set(i, s);
+    else leads.set(i - 1, s);
   }
-  return out;
+  const fades = spills.map((s): Fade => {
+    const i = at(s.item);
+    const cut = s.kind === 'tail' ? i : i - 1;
+    const [tail, lead] = [tails.get(cut), leads.get(cut)];
+    if (!tail || !lead) return singleFade(s);
+    const sec = r6(lead.sec + tail.sec);
+    return s.kind === 'lead' ? { t: 'in', st: 0, sec } : { t: 'out', st: r6(-lead.sec), sec };
+  });
+  for (const cut of new Set([...tails.keys(), ...leads.keys()])) {
+    const [tail, lead] = [tails.get(cut), leads.get(cut)];
+    const sec = r6((lead?.sec ?? 0) + (tail?.sec ?? 0));
+    const [before, after] = [laid[cut], laid[cut + 1]];
+    if (lead && before && playsOwnSound(before.item)) {
+      items.set(before.item.id, { ...items.get(before.item.id), fadeOut: { t: 'out', st: r6(before.end - before.start - lead.sec), sec } });
+    }
+    if (tail && after && playsOwnSound(after.item)) {
+      items.set(after.item.id, { ...items.get(after.item.id), fadeIn: { t: 'in', st: lead ? r6(-lead.sec) : 0, sec } });
+    }
+  }
+  return { items, spills: fades };
 }

@@ -511,13 +511,22 @@ describe('J- and L-cut arguments', () => {
   const shape = { width: 960, height: 540, fps: 30 };
   const keep = (id: string, clip: string, from: number, to: number, extra: object = {}) => ({ id, beat: 'problem', clip, src: { in: from, out: to }, audio: 'keep', ...extra });
   const plain = ep([keep('a', 'c001', 2, 4), keep('b', 'c003', 2, 4), keep('s', 'c002', 0, 2), keep('c', 'c001', 6, 8)]);
-  // a's tail plays under b, b's lead under a (both at one cut), c's lead under the silent clip s.
-  const both = ep([keep('a', 'c001', 2, 4, { tailOut: 1 }), keep('b', 'c003', 2, 4, { leadIn: 0.5 }), keep('s', 'c002', 0, 2), keep('c', 'c001', 6, 8, { leadIn: 0.5 })]);
+  // Each on its own side of its cut: a's tail plays under b, c's lead under b, d's lead under the silent clip s.
+  const single = ep([keep('a', 'c001', 2, 4, { tailOut: 1 }), keep('b', 'c003', 2, 4), keep('c', 'c001', 6, 8, { leadIn: 0.5 }), keep('s', 'c002', 0, 2), keep('d', 'c003', 6, 8, { leadIn: 0.5 })]);
+  // A lead and a tail at one cut: a's tail plays under b, b's lead under a.
+  const both = ep([keep('a', 'c001', 2, 4, { tailOut: 1 }), keep('b', 'c003', 2, 4, { leadIn: 0.5 })]);
   const chunk = (e: typeof plain) => {
     const laid = layoutTimeline(e);
     const sources = sourcesFor(e, jl);
-    const fades = fadesFor(laid, spills(e, sources, laid).spills);
+    const fades = fadesFor(laid, spills(e, sources, laid).spills).items;
     return itemChunkArgs(laid, { ...shape, fades }, sources, '/w/chunk-000.mov');
+  };
+  const faded = (e: typeof plain) => {
+    const sources = sourcesFor(e, jl);
+    const laid = layoutTimeline(e);
+    const sp = spills(e, sources, laid).spills;
+    const f = fadesFor(laid, sp).spills;
+    return { sources, list: sp.map((s, i) => ({ ...s, fade: f[i] })) };
   };
   const graphOf = (a: string[]) => a[a.indexOf('-filter_complex') + 1];
 
@@ -539,38 +548,50 @@ describe('J- and L-cut arguments', () => {
     `);
   });
 
+  const chain = (lines: string[], k: number) => lines.find((c) => c.endsWith(`[a${k}]`))!;
   it("fades the neighbours' own sound with an equal-power curve where a spill plays over them; the shot that spills is unchanged", () => {
-    const g = graphOf(chunk(both)).split(';');
-    const p = graphOf(chunk(plain)).split(';');
-    const chain = (lines: string[], k: number) => lines.find((c) => c.endsWith(`[a${k}]`))!;
-    // b's lead fades a out over its last 0.5 s; a's tail fades b in over its first 1 s.
-    expect(chain(g, 0)).toBe(chain(p, 0).replace('[a0]', ',afade=t=out:st=1.5:d=0.5:curve=qsin[a0]'));
-    expect(chain(g, 1)).toBe(chain(p, 1).replace('[a1]', ',afade=t=in:d=1:curve=qsin[a1]'));
-    // s's clip has no sound: its silence stays as it was. c (which spills) is unchanged.
-    expect(chain(g, 2)).toBe(chain(p, 2));
-    expect(chain(g, 3)).toBe(chain(p, 3));
-    expect(g.filter((c) => !/\[a\d\]$/.test(c))).toEqual(p.filter((c) => !/\[a\d\]$/.test(c)));
+    const g = graphOf(chunk(single)).split(';');
+    const unfaded = graphOf(itemChunkArgs(layoutTimeline(single), shape, sourcesFor(single, jl), '/w/chunk-000.mov')).split(';');
+    // a's tail fades b in over its first 1 s; c's lead fades b out over its last 0.5 s.
+    expect(chain(g, 1)).toBe(chain(unfaded, 1).replace('[a1]', ',afade=t=in:d=1:curve=qsin,afade=t=out:st=1.5:d=0.5:curve=qsin[a1]'));
+    // a and c (which spill) are unchanged; s's clip has no sound: its silence stays as it was.
+    for (const k of [0, 2, 3, 4]) expect(chain(g, k)).toBe(chain(unfaded, k));
+    expect(g.filter((c) => !/\[a\d\]$/.test(c))).toEqual(unfaded.filter((c) => !/\[a\d\]$/.test(c)));
     // A middle shot under a tail from before and a lead from after fades in and out.
     const mid = ep([keep('a', 'c001', 2, 4, { tailOut: 0.5 }), keep('b', 'c003', 2, 4), keep('c', 'c001', 6, 8, { leadIn: 0.4 })]);
     expect(graphOf(chunk(mid))).toContain('asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,afade=t=out:st=1.6:d=0.4:curve=qsin[a1]');
   });
 
   it("decodes each spill from its clip, fades a lead in and a tail out over its length (equal power), and places it sample-exact", () => {
-    const sources = sourcesFor(both, jl);
-    const sp = spills(both, sources).spills;
-    const a = spillTrackArgs(sp, sources, 8, '/w/spill.wav');
+    const { sources, list } = faded(single);
+    const a = spillTrackArgs(list, sources, 10, '/w/spill.wav');
     expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual([
       '-noaccurate_seek', '-ss', '4', '-i', join(CLIPS, 'c001.mp4'),
-      '-noaccurate_seek', '-ss', '1.5', '-i', join(CLIPS, 'c003.mp4'),
       '-noaccurate_seek', '-ss', '5.5', '-i', join(CLIPS, 'c001.mp4'),
+      '-noaccurate_seek', '-ss', '5.5', '-i', join(CLIPS, 'c003.mp4'),
     ]);
     expect(graphOf(a).split(';')).toEqual([
       '[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=1,apad,atrim=end=1,asetpts=PTS-STARTPTS,afade=t=out:st=0:d=1:curve=qsin,adelay=delays=96000S:all=1[s0]',
-      '[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=72000S:all=1[s1]',
-      '[2:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=264000S:all=1[s2]',
-      '[s0][s1][s2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=end=8[out]',
+      '[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=168000S:all=1[s1]',
+      '[2:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=360000S:all=1[s2]',
+      '[s0][s1][s2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=end=10[out]',
     ]);
     expect(a.slice(a.indexOf('-map'))).toEqual(['-map', '[out]', '-c:a', 'pcm_f32le', '-ar', '48000', '-ac', '2', '/w/spill.wav']);
+    // Without a fade given, a spill fades on its own side only.
+    expect(spillTrackArgs(list.map(({ fade: _, ...s }) => s), sources, 10, '/w/spill.wav')).toEqual(a);
+  });
+
+  it('a lead and a tail at one cut crossfade once, over the whole window (1.5 – 3 s): own sound and spill carry one fade on', () => {
+    const g = graphOf(chunk(both)).split(';');
+    const unfaded = graphOf(itemChunkArgs(layoutTimeline(both), shape, sourcesFor(both, jl), '/w/chunk-000.mov')).split(';');
+    // a's own sound fades out from 1.5 s over 1.5 s (cut short at its end, 2 s); b's own sound is 0.5 s into a fade in.
+    expect(chain(g, 0)).toBe(chain(unfaded, 0).replace('[a0]', ',afade=t=out:st=1.5:d=1.5:curve=qsin[a0]'));
+    expect(chain(g, 1)).toBe(chain(unfaded, 1).replace('[a1]', ',asetpts=PTS-STARTPTS+0.5/TB,afade=t=in:d=1.5:curve=qsin,asetpts=PTS-STARTPTS[a1]'));
+    // a's tail is 0.5 s into the same fade out; b's lead starts the fade in.
+    const { sources, list } = faded(both);
+    const s = graphOf(spillTrackArgs(list, sources, 4, '/w/spill.wav')).split(';');
+    expect(s[0]).toContain('asetpts=PTS-STARTPTS,asetpts=PTS-STARTPTS+0.5/TB,afade=t=out:st=0:d=1.5:curve=qsin,asetpts=PTS-STARTPTS,adelay=delays=96000S:all=1[s0]');
+    expect(s[1]).toContain('asetpts=PTS-STARTPTS,afade=t=in:d=1.5:curve=qsin,adelay=delays=72000S:all=1[s1]');
   });
 
   it('reads a spill before a late video stream from the start of the clip, as the shot itself does, from its audio stream', () => {
@@ -2054,16 +2075,32 @@ describe('J- and L-cuts (real ffmpeg)', () => {
     expect(tone(x, 440, T + 0.1, 5)).toBeLessThan(a440 - 40);
   }, 120_000);
 
-  it('both at one cut: each crossfade plays, and the two sounds are never both at full level', async () => {
+  it('both at one cut: one crossfade over both windows, each sound continuous across the cut, at one level', async () => {
     const { x } = await render(4, pair({ tailOut: 1 }, { leadIn: 1 }));
     const [a440, b880] = [tone(x, 440, 0.5, 1.4), tone(x, 880, 4, 5)];
     const total = equalPower(x, T - 1, T + 1, [level(x, 0.5, 1.4), level(x, 4, 5)]);
-    const both = windows(T - 1, T + 1).filter((t) => tone(x, 440, t, t + 0.05) > a440 - 3 && tone(x, 880, t, t + 0.05) > b880 - 3);
-    console.log(`both at one cut: all ${total.map((d) => d.toFixed(1)).join(' ')}`);
+    const lo = windows(T - 1, T + 1).map((t) => tone(x, 440, t, t + 0.05));
+    const hi = windows(T - 1, T + 1).map((t) => tone(x, 880, t, t + 0.05));
+    // Each tone's level just before the cut and just after (4 cycles of 440 Hz, 8 of 880 Hz: about 9 ms).
+    const c = 4 / 440;
+    const edges = [440, 880].map((f) => [tone(x, f, T - c, T), tone(x, f, T, T + c)] as const);
+    console.log(
+      `both at one cut:\n  440 ${lo.map((d) => d.toFixed(1)).join(' ')}\n  880 ${hi.map((d) => d.toFixed(1)).join(' ')}\n  all ${total.map((d) => d.toFixed(2)).join(' ')}\n` +
+        `  either side of the cut: 440 ${edges[0]!.map((d) => d.toFixed(2)).join(' → ')}, 880 ${edges[1]!.map((d) => d.toFixed(2)).join(' → ')}`,
+    );
+    for (const [before, after] of edges) expect(Math.abs(after - before)).toBeLessThanOrEqual(1);
+    // Within 0.2 dB of one shot's sound alone all the way through (the 50 ms windows of the AAC-coded tones vary ±0.15 dB).
+    const alone = (level(x, 0.5, 1.4) + level(x, 4, 5)) / 2;
+    console.log(`  alone ${alone.toFixed(2)} dB, the mix ${Math.min(...total).toFixed(2)} to ${Math.max(...total).toFixed(2)} dB`);
+    for (const d of total) expect(Math.abs(d - alone)).toBeLessThanOrEqual(0.2);
+    // One fade each over the whole 2 s: 440 Hz falls and 880 Hz rises all the way, crossing at the cut (both 3 dB down).
+    expect(falls(lo)).toBe(true);
+    expect(falls([...hi].reverse())).toBe(true);
+    expect(Math.abs(tone(x, 440, T - 1, T - 0.95) - a440)).toBeLessThanOrEqual(1.5);
+    expect(Math.abs(tone(x, 880, T + 0.95, T + 1) - b880)).toBeLessThanOrEqual(1.5);
+    for (const [f, alone] of [[440, a440], [880, b880]] as const) expect(Math.abs(tone(x, f, T - 0.05, T + 0.05) - (alone - 3))).toBeLessThanOrEqual(1);
+    const both = windows(T - 1, T + 1).filter((t) => tone(x, 440, t, t + 0.05) > a440 - 2 && tone(x, 880, t, t + 0.05) > b880 - 2);
     expect(both).toEqual([]);
-    // The lead is in full just before the cut, the tail just after.
-    expect(Math.abs(tone(x, 880, T - 0.1, T) - b880)).toBeLessThanOrEqual(1.5);
-    expect(Math.abs(tone(x, 440, T, T + 0.1) - a440)).toBeLessThanOrEqual(1.5);
   }, 120_000);
 
   it('plays an L-cut across a chunk boundary (items 30 and 31)', async () => {
