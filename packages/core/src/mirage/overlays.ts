@@ -308,8 +308,11 @@ export function buildAss(o: {
       if (!parts.length) continue;
       // Growing from 115% widens the newest word, which would re-centre the line and move the words already shown. So it
       // pops in on a layer of its own over the same line drawn invisibly, and holds its place invisibly in the line itself.
-      ev(2, line.start, line.end, style, text((p) => (p.hidden || p.pop ? 'hide' : 'show')));
-      if (parts.some(([p]) => p.pop && !p.hidden)) ev(1, line.start, line.end, style, text((p) => (p.pop && !p.hidden ? 'pop' : 'hide')));
+      // The settled words sit on layer 1 and the popping copy on layer 2, so the newest word draws over its neighbours
+      // (its outline is not covered by theirs). Not layer 3: Counter and Label use it, and libass pushes apart events
+      // that overlap on one layer. Karaoke has no popping copy and stays on layer 2 with the phrase captions.
+      ev(style === 'Pop' ? 1 : 2, line.start, line.end, style, text((p) => (p.hidden || p.pop ? 'hide' : 'show')));
+      if (parts.some(([p]) => p.pop && !p.hidden)) ev(2, line.start, line.end, style, text((p) => (p.pop && !p.hidden ? 'pop' : 'hide')));
     }
   }
   for (const ov of o.overlays) {

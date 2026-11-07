@@ -38225,8 +38225,8 @@ function buildAss(o2) {
       const parts = line.parts.map((p) => [p, draw(p.text)]).filter(([, text2]) => text2);
       const text = (mode) => parts.map(([p, t], i2) => part(p, t, mode(p), i2 === parts.length - 1)).join(" ");
       if (!parts.length) continue;
-      ev(2, line.start, line.end, style, text((p) => p.hidden || p.pop ? "hide" : "show"));
-      if (parts.some(([p]) => p.pop && !p.hidden)) ev(1, line.start, line.end, style, text((p) => p.pop && !p.hidden ? "pop" : "hide"));
+      ev(style === "Pop" ? 1 : 2, line.start, line.end, style, text((p) => p.hidden || p.pop ? "hide" : "show"));
+      if (parts.some(([p]) => p.pop && !p.hidden)) ev(2, line.start, line.end, style, text((p) => p.pop && !p.hidden ? "pop" : "hide"));
     }
   }
   for (const ov of o2.overlays) {
