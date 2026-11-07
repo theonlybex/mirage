@@ -27333,7 +27333,7 @@ var CatalogSchema = strictObject2({ version: external_exports.literal(1), clips:
 
 // packages/shared/src/schemas/episode.ts
 var range = (shape, what) => strictObject2({ start: external_exports.number().min(0), end: external_exports.number().positive(), ...shape }).refine((r) => r.end > r.start, { message: `${what}: end must be after start` });
-var BeatSchema = external_exports.enum(["cold-open", "title", "recap", "new-toy", "problem", "montage", "twist", "truth", "outro", "blooper"]);
+var BeatSchema = external_exports.string().regex(/^[a-z][a-z0-9-]*$/);
 var MoveSchema = strictObject2({
   /** The zoom at the end of the move. */
   zoom: external_exports.number().min(1).max(2),
@@ -27601,7 +27601,15 @@ var VideoSchema = strictObject2({
   hide: external_exports.string(),
   /** Absolute paths of the folders the footage is in. */
   footage: external_exports.array(external_exports.string()),
-  createdAt: external_exports.string()
+  createdAt: external_exports.string(),
+  /** The id of the video's format (a file in the plugin's formats folder); absent = a build story. */
+  format: external_exports.string().min(1).optional(),
+  /** The big video a short was made from. */
+  from: external_exports.number().int().positive().optional(),
+  /** A vlog's series: its name, which one it is, and the date it covers. */
+  vlog: strictObject2({ name: external_exports.string().min(1), number: external_exports.number().int().positive(), date: external_exports.string().min(1) }).optional(),
+  /** The length the video aims for, in seconds; overrides the format's. */
+  targetSec: external_exports.number().positive().optional()
 });
 
 // packages/shared/src/schemas/notes.ts
@@ -28793,6 +28801,27 @@ function oneLine(text, max = 1e3) {
   const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
+
+// packages/core/src/mirage/formats.ts
+var even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
+var FormatSchema = strictObject2({
+  /** Equal to the file's name without `.md`. */
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+  name: external_exports.string().min(1),
+  describe: external_exports.string().min(1),
+  /** Words a person uses for this kind of video ("reel", "day in the life"): Claude picks the format from them. */
+  words: external_exports.array(external_exports.string().min(1)),
+  /** The beat words the format's videos are built from, in the order they usually come. */
+  beats: external_exports.array(BeatSchema).min(1),
+  /** The length the format aims for, in seconds. */
+  targetSec: external_exports.number().positive().optional(),
+  /** A video longer than this gets a warning. */
+  warnPastSec: external_exports.number().positive().optional(),
+  output: strictObject2({ width: even2, height: even2 }).optional(),
+  captions: CaptionsSchema.optional(),
+  /** The kind of short a video of this format is made as when it doesn't say. */
+  short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
+});
 
 // packages/viewer/src/fallback.ts
 import { readFileSync as readFileSync4 } from "node:fs";

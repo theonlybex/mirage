@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { formatsDir, loadFormats } from '../packages/core/src/mirage/formats.js';
 import { buildPlugin } from './build-plugin.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -86,6 +87,15 @@ describe('buildPlugin', () => {
       expect(existsSync(join(PLUGIN, f)), `plugin/${f} is missing: run pnpm build:plugin`).toBe(true);
       expect(readFileSync(join(PLUGIN, f), 'utf8'), `plugin/${f} is stale: run pnpm build:plugin`).toBe(readFileSync(join(built, f), 'utf8'));
     }
+  });
+});
+
+describe('plugin formats', () => {
+  it('the plugin ships plugin/formats (written by hand, like skills/ and fonts/), and the bundle finds it next to dist/', () => {
+    const dir = formatsDir(join(PLUGIN, 'dist', 'engine.mjs'));
+    expect(dir).toBe(join(PLUGIN, 'formats'));
+    expect(loadFormats(dir)).toMatchObject({ problems: [] });
+    expect(readdirSync(dir).sort()).toEqual(['build-story.md', 'short.md', 'vlog.md']);
   });
 });
 

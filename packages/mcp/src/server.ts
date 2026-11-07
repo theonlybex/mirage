@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { ViewerInfoSchema } from '@wordedits/shared';
 import { LATER_DAYS, writeSetupState } from '@wordedits/shared/setup-state';
 import {
-  analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, ingestClips, ingestReport, initProject, listVersions,
+  analyzeLibrary, appendLog, checkEpisode, checkReport, describeError, episodeDir, fitRecording, formatsDir, ingestClips, ingestReport, initProject, listVersions, loadFormats,
   MirageError, musicReport, newVideo, readClaudeProcess, readJsonFile, readNotes, readProject, readSessionState, readVideo, renderEpisode, renderReport, requireProject, resolveUserPath, restoreVersion,
   sessionDir, slotsReport, speakNarration, speakReport, updateSlots, videoStage, voReport, writeSessionState, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
@@ -17,7 +17,7 @@ import { preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } fro
 import { runLong } from './run-long.js';
 
 export const TOOL_NAMES: readonly string[] = [
-  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later',
+  'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later', 'formats',
 ];
 
 export interface EngineContext {
@@ -39,6 +39,8 @@ export interface EngineContext {
   speaker?: Speaker;
   /** Mirage's data folder, where it remembers things across sessions. Default: MIRAGE_PLUGIN_DATA. */
   pluginData?: string;
+  /** The folder of format files (tests). Default: the plugin's own `formats` folder. */
+  formatsDir?: string;
   /** The clock for `setup_later`. Default: the real time. */
   now?: () => Date;
 }
@@ -128,6 +130,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   const speaker = ctx.speaker ?? kokoroSpeaker();
   const ppid = ctx.ppid ?? process.ppid;
   const now = ctx.now ?? (() => new Date());
+  const formatFiles = () => ctx.formatsDir ?? formatsDir();
   const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project, ppid) ?? newestSessionId(project));
   const sid = () => knownSession() ?? 'unknown';
   const server = new McpServer({ name: 'engine', version: '0.0.1' });
@@ -358,6 +361,8 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     // A missing or broken viewer.json, or a pid that is gone (the viewer died without cleaning up), means it is not running.
     const viewer = await readJsonFile(join(project, '.mirage', 'viewer.json'), ViewerInfoSchema, '.mirage/viewer.json').catch(() => null);
     lines.push(viewer && alive(viewer.pid) ? `Viewer: running at ${viewer.url}` : 'Viewer: not running');
+    const { formats, problems } = loadFormats(formatFiles());
+    lines.push(`Formats: ${formats.map((f) => f.id).join(', ') || 'none'}`, ...problems);
     for (const t of ['ffmpeg', 'ffprobe']) {
       const found = await deps.which(t);
       const captions = t === 'ffmpeg' && found ? await deps.captions() : null;
@@ -370,6 +375,20 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     lines.push(Number(process.versions.node.split('.')[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
   }, false);
+
+  tool(
+    'formats',
+    'The kinds of video Mirage knows (build story, short, vlog …): with no id, one line each with the words people use for it; with an id, that format\'s whole file: its beats, length and the rules to follow. Works without a project.',
+    { id: z.string().min(1).optional().describe('A format id, e.g. short') },
+    async ({ id }) => {
+      const { formats, problems } = loadFormats(formatFiles());
+      if (id === undefined) return ok([...formats.map((f) => `${f.id} — ${f.name}: ${f.describe} (words: ${f.words.join(', ')})`), ...problems]);
+      const found = formats.find((f) => f.id === id);
+      if (!found) throw new MirageError('BAD_INPUT', `unknown format "${id}"`, [`The formats are: ${formats.map((f) => f.id).join(', ') || 'none'}.`, ...problems].join('\n  '));
+      return ok(readFileSync(join(formatFiles(), found.file), 'utf8'));
+    },
+    false,
+  );
 
   tool('setup_later', 'The person said "not now" to installing the tools Mirage needs: stop asking about setup for 7 days.', {}, async () => {
     const dataDir = ctx.pluginData ?? process.env.MIRAGE_PLUGIN_DATA;

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  loadEpisode, readLog, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeClaudeProcess, writeControl, writeSessionState,
+  formatsDir, loadEpisode, readLog, readSessionState, saveCatalog, saveEpisode, sessionDir, snapshotVersion, writeClaudeProcess, writeControl, writeSessionState,
   type MediaTools,
 } from '@wordedits/core';
 import { EpisodeSchema } from '@wordedits/shared';
@@ -64,7 +64,7 @@ describe('engine tools', () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names.sort()).toEqual([...TOOL_NAMES].sort());
     expect([...TOOL_NAMES]).toEqual([
-      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later',
+      'new_project', 'new_video', 'ingest', 'music', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render', 'versions', 'restore', 'get_notes', 'note_status', 'log', 'overnight', 'status', 'setup_later', 'formats',
     ]);
   });
 
@@ -481,6 +481,62 @@ describe('engine tools', () => {
     } finally {
       if (was !== undefined) process.env.MIRAGE_PLUGIN_DATA = was;
     }
+  });
+
+  it('status lists the formats', async () => {
+    const dir = await projectWithVideo();
+    const { call } = await connect(dir);
+    expect((await call('status')).text.split('\n')).toContain('Formats: build-story, short, vlog');
+    const bare = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')));
+    expect((await bare.call('status')).text.split('\n')).toContain('Formats: build-story, short, vlog');
+  });
+
+  describe('formats', () => {
+    const FM = { id: 'demo', name: 'Demo', describe: 'A demo format.', words: ['demo', 'try'], beats: ['open', 'close'] };
+    async function formatsFolder(files: Record<string, string>) {
+      const dir = await mkdtemp(join(tmpdir(), 'mirage-formats-'));
+      for (const [name, text] of Object.entries(files)) await writeFile(join(dir, name), text);
+      return dir;
+    }
+
+    it('lists one line per format, in a folder that is not a project too', async () => {
+      const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')));
+      const r = await call('formats');
+      expect(r.isError).toBe(false);
+      expect(r.text.split('\n')).toEqual([
+        'build-story — Build story: A build told as a story: the stakes, the failures, a montage, the reveal. (words: build, episode, part, series, project, devlog)',
+        'short — Short: 20–45 s vertical video that opens on its hook; made from a big video it\'s a teaser pointing to it. (words: short, shorts, reel, reels, tiktok, teaser, clip)',
+        'vlog — Vlog: A day or a week of someone\'s life told as a few funny bits, ending on the headline bit. (words: vlog, day in the life, trip, week, hanging out, weekend)',
+      ]);
+    });
+
+    it('with an id gives the whole file', async () => {
+      const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')));
+      const r = await call('formats', { id: 'short' });
+      expect(r.isError).toBe(false);
+      expect(r.text).toBe(await readFile(join(formatsDir(), 'short.md'), 'utf8'));
+      expect(r.text.startsWith('---\n{')).toBe(true);
+    });
+
+    it('says an unknown id is unknown and names the ids', async () => {
+      const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')));
+      expect(await call('formats', { id: 'podcast' })).toEqual({ isError: true, text: '✖ unknown format "podcast"\n  The formats are: build-story, short, vlog.' });
+    });
+
+    it('a broken file is one ✖ line and the rest still list (and status shows it too)', async () => {
+      const dir = await formatsFolder({
+        'demo.md': `---\n${JSON.stringify(FM)}\n---\nRules.\n`,
+        'bad.md': `---\n${JSON.stringify({ ...FM, id: 'bad', wrods: [] })}\n---\nRules.\n`,
+      });
+      const { call } = await connect(await mkdtemp(join(tmpdir(), 'mirage-mcp-')), { formatsDir: dir });
+      const bad = '✖ plugin/formats/bad.md: unknown key "wrods" (valid keys: id, name, describe, words, beats, targetSec, warnPastSec, output, captions, short)';
+      expect(await call('formats')).toEqual({ isError: false, text: ['demo — Demo: A demo format. (words: demo, try)', bad].join('\n') });
+      expect((await call('formats', { id: 'demo' })).isError).toBe(false);
+      expect((await call('formats', { id: 'bad' })).text).toBe(`✖ unknown format "bad"\n  The formats are: demo.\n  ${bad}`);
+      const lines = (await call('status')).text.split('\n');
+      expect(lines).toContain('Formats: demo');
+      expect(lines).toContain(bad);
+    });
   });
 
   it('status on a folder that is not a project yet says so', async () => {

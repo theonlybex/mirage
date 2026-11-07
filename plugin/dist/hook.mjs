@@ -214,9 +214,9 @@ var init_policy = __esm({
     engineTool = (tool) => tool.startsWith(ENGINE_PREFIX) ? tool.slice(ENGINE_PREFIX.length) : null;
     SAVE_TOOLS = /* @__PURE__ */ new Set(["Write", "Edit", "MultiEdit"]);
     FILE_TOOLS = /* @__PURE__ */ new Set([...SAVE_TOOLS, "NotebookEdit"]);
-    READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log"]);
+    READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log", "formats"]);
     STAGES = /* @__PURE__ */ new Set(["ingest", "check", "cut", "slots", "guide", "vo", "speak", "render"]);
-    NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video", "setup_later"]);
+    NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video", "setup_later", "formats"]);
     ENGINE_LABELS = {
       new_project: ["Starting the project", "Project started"],
       new_video: ["Setting up the video", "Video set up"],
@@ -236,7 +236,8 @@ var init_policy = __esm({
       note_status: ["Updating a note", "Note updated"],
       log: ["Making a note for you", "Noted"],
       overnight: ["Getting ready for overnight", "Ready for overnight"],
-      setup_later: ["Noting that for later", "Noted for later"]
+      setup_later: ["Noting that for later", "Noted for later"],
+      formats: ["Looking up the formats", "Formats looked up"]
     };
     record = (input2) => input2 !== null && typeof input2 === "object" && !Array.isArray(input2) ? input2 : {};
     baseName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
@@ -1338,12 +1339,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve13, reject) {
+        return new Promise(function(resolve14, reject) {
           isexe(path8, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve13(is);
+              resolve14(is);
             }
           });
         });
@@ -1409,27 +1410,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve13, reject) => {
+      const step = (i2) => new Promise((resolve14, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve13(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve14(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path8.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve13(subStep(p, i2, 0));
+        resolve14(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve13, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve14, reject) => {
         if (ii === pathExt.length)
-          return resolve13(step(i2 + 1));
+          return resolve14(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve13(p + ext);
+              return resolve14(p + ext);
           }
-          return resolve13(subStep(p, i2, ii + 1));
+          return resolve14(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -2509,8 +2510,8 @@ var init_deferred = __esm({
   "node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js"() {
     createDeferred = () => {
       const methods = {};
-      const promise2 = new Promise((resolve13, reject) => {
-        Object.assign(methods, { resolve: resolve13, reject });
+      const promise2 = new Promise((resolve14, reject) => {
+        Object.assign(methods, { resolve: resolve14, reject });
       });
       return Object.assign(promise2, methods);
     };
@@ -7808,11 +7809,11 @@ var init_concurrent = __esm({
       const promises = weakMap.get(stream);
       const promise2 = createDeferred();
       promises.push(promise2);
-      const resolve13 = promise2.resolve.bind(promise2);
-      return { resolve: resolve13, promises };
+      const resolve14 = promise2.resolve.bind(promise2);
+      return { resolve: resolve14, promises };
     };
-    waitForConcurrentStreams = async ({ resolve: resolve13, promises }, subprocess) => {
-      resolve13();
+    waitForConcurrentStreams = async ({ resolve: resolve14, promises }, subprocess) => {
+      resolve14();
       const [isSubprocessExit] = await Promise.race([
         Promise.allSettled([true, subprocess]),
         Promise.all([false, ...promises])
@@ -13221,7 +13222,7 @@ function isRef(value) {
 function cloneIssues(issues) {
   return issues.map((iss) => iss.path ? { ...iss, path: iss.path.slice() } : { ...iss });
 }
-function isRecursive(inst, stack, resolve13) {
+function isRecursive(inst, stack, resolve14) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -13231,7 +13232,7 @@ function isRecursive(inst, stack, resolve13) {
   let result2 = NONE;
   const check2 = (child) => {
     if (result2 !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve13);
+      const answer = isRecursive(child, stack, resolve14);
       if (answer > result2)
         result2 = answer;
     }
@@ -13242,7 +13243,7 @@ function isRecursive(inst, stack, resolve13) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve13) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve14) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -13306,7 +13307,7 @@ function isRecursive(inst, stack, resolve13) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve13 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve14 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -29207,7 +29208,7 @@ var init_episode = __esm({
     init_zod();
     init_strict2();
     range = (shape, what) => strictObject2({ start: external_exports.number().min(0), end: external_exports.number().positive(), ...shape }).refine((r) => r.end > r.start, { message: `${what}: end must be after start` });
-    BeatSchema = external_exports.enum(["cold-open", "title", "recap", "new-toy", "problem", "montage", "twist", "truth", "outro", "blooper"]);
+    BeatSchema = external_exports.string().regex(/^[a-z][a-z0-9-]*$/);
     MoveSchema = strictObject2({
       /** The zoom at the end of the move. */
       zoom: external_exports.number().min(1).max(2),
@@ -29507,7 +29508,15 @@ var init_video = __esm({
       hide: external_exports.string(),
       /** Absolute paths of the folders the footage is in. */
       footage: external_exports.array(external_exports.string()),
-      createdAt: external_exports.string()
+      createdAt: external_exports.string(),
+      /** The id of the video's format (a file in the plugin's formats folder); absent = a build story. */
+      format: external_exports.string().min(1).optional(),
+      /** The big video a short was made from. */
+      from: external_exports.number().int().positive().optional(),
+      /** A vlog's series: its name, which one it is, and the date it covers. */
+      vlog: strictObject2({ name: external_exports.string().min(1), number: external_exports.number().int().positive(), date: external_exports.string().min(1) }).optional(),
+      /** The length the video aims for, in seconds; overrides the format's. */
+      targetSec: external_exports.number().positive().optional()
     });
   }
 });
@@ -32887,8 +32896,8 @@ function itemChunkArgs(laid, o2, sources, output2) {
 }
 function previewSize(width, height) {
   const scale = Math.min(1, 960 / Math.max(width, height));
-  const even2 = (n2) => Math.max(2, Math.round(n2 * scale / 2) * 2);
-  return [even2(width), even2(height)];
+  const even3 = (n2) => Math.max(2, Math.round(n2 * scale / 2) * 2);
+  return [even3(width), even3(height)];
 }
 function chunkTimeoutMs(chunk, fps) {
   const srcSec = chunk.reduce((s, l) => s + (isCard(l.item) ? 0 : l.item.src.out - l.item.src.in), 0);
@@ -34546,6 +34555,102 @@ var init_one_line = __esm({
   }
 });
 
+// packages/core/src/mirage/formats.ts
+import { readdirSync, readFileSync as readFileSync5 } from "node:fs";
+import { dirname as dirname7, join as join20, resolve as resolve13 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+function formatsDir(from = import.meta.url) {
+  const here = dirname7(from.startsWith("file:") ? fileURLToPath4(from) : resolve13(from));
+  return SOURCE_LAYOUT2.test(here) ? resolve13(here, "..", "..", "..", "..", "plugin", "formats") : resolve13(here, "..", "formats");
+}
+function splitFile(text) {
+  const lines = text.replace(/^﻿/, "").replace(/\r\n/g, "\n").split("\n");
+  if (lines[0]?.trimEnd() !== "---") return "no front matter: the file must start with a --- line, a JSON object, and a --- line";
+  const end = lines.findIndex((l, i2) => i2 > 0 && l.trimEnd() === "---");
+  if (end < 0) return "front matter has no closing --- line";
+  let front;
+  try {
+    front = JSON.parse(lines.slice(1, end).join("\n"));
+  } catch (e) {
+    return `front matter is not valid JSON (${e.message})`;
+  }
+  if (front === null || typeof front !== "object" || Array.isArray(front)) return "front matter must be a JSON object";
+  return { front, rules: lines.slice(end + 1).join("\n") };
+}
+function loadFormats(dir = formatsDir()) {
+  let names;
+  try {
+    names = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+  } catch {
+    return { formats: [], problems: ["\u2716 plugin/formats: the folder is missing or unreadable"] };
+  }
+  const formats = [];
+  const problems = [];
+  for (const file2 of names) {
+    const problem = (why) => problems.push(`\u2716 plugin/formats/${file2}: ${why}`);
+    let text;
+    try {
+      text = readFileSync5(join20(dir, file2), "utf8");
+    } catch (e) {
+      problem(`can't be read (${e.message})`);
+      continue;
+    }
+    const split = splitFile(text);
+    if (typeof split === "string") {
+      problem(split);
+      continue;
+    }
+    const parsed = FormatSchema.safeParse(split.front);
+    if (!parsed.success) {
+      problem(describeZodError(parsed.error));
+      continue;
+    }
+    const stem = file2.slice(0, -".md".length);
+    if (parsed.data.id !== stem) {
+      problem(`id: the id "${parsed.data.id}" must be the file name, "${stem}"`);
+      continue;
+    }
+    formats.push({ ...parsed.data, rules: split.rules, file: file2 });
+  }
+  return { formats, problems };
+}
+function formatOf(video, formats) {
+  const id = video?.format ?? "build-story";
+  const found = formats.find((f) => f.id === id) ?? formats.find((f) => f.id === "build-story");
+  if (!found) throw new MirageError("BAD_INPUT", "Mirage's build-story format is missing or broken", "Run the formats tool to see what is wrong with plugin/formats, or reinstall the Mirage plugin.");
+  return found;
+}
+var even2, FormatSchema, SOURCE_LAYOUT2;
+var init_formats = __esm({
+  "packages/core/src/mirage/formats.ts"() {
+    "use strict";
+    init_src();
+    init_zod();
+    init_errors4();
+    init_json_file();
+    even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
+    FormatSchema = strictObject2({
+      /** Equal to the file's name without `.md`. */
+      id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+      name: external_exports.string().min(1),
+      describe: external_exports.string().min(1),
+      /** Words a person uses for this kind of video ("reel", "day in the life"): Claude picks the format from them. */
+      words: external_exports.array(external_exports.string().min(1)),
+      /** The beat words the format's videos are built from, in the order they usually come. */
+      beats: external_exports.array(BeatSchema).min(1),
+      /** The length the format aims for, in seconds. */
+      targetSec: external_exports.number().positive().optional(),
+      /** A video longer than this gets a warning. */
+      warnPastSec: external_exports.number().positive().optional(),
+      output: strictObject2({ width: even2, height: even2 }).optional(),
+      captions: CaptionsSchema.optional(),
+      /** The kind of short a video of this format is made as when it doesn't say. */
+      short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
+    });
+    SOURCE_LAYOUT2 = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
+  }
+});
+
 // packages/core/src/mirage/index.ts
 var init_mirage = __esm({
   "packages/core/src/mirage/index.ts"() {
@@ -34577,6 +34682,7 @@ var init_mirage = __esm({
     init_one_line();
     init_sfx();
     init_cards();
+    init_formats();
   }
 });
 
@@ -34589,6 +34695,7 @@ __export(src_exports2, {
   CHUNK_ITEMS_LARGE: () => CHUNK_ITEMS_LARGE,
   DELIVERY_LABEL: () => DELIVERY_LABEL,
   FILLERS: () => FILLERS,
+  FormatSchema: () => FormatSchema,
   JsonFileError: () => JsonFileError,
   MAX_BACKUPS: () => MAX_BACKUPS,
   MAX_CHECKPOINTS: () => MAX_CHECKPOINTS,
@@ -34656,7 +34763,9 @@ __export(src_exports2, {
   fitRecording: () => fitRecording,
   fitVoiceover: () => fitVoiceover,
   fittedRecordingSha: () => fittedRecordingSha,
+  formatOf: () => formatOf,
   formatTime: () => formatTime,
+  formatsDir: () => formatsDir,
   frameInterval: () => frameInterval,
   frameTolerance: () => frameTolerance,
   groupCaptions: () => groupCaptions,
@@ -34683,6 +34792,7 @@ __export(src_exports2, {
   listVersions: () => listVersions,
   loadCatalog: () => loadCatalog,
   loadEpisode: () => loadEpisode,
+  loadFormats: () => loadFormats,
   loadLibrary: () => loadLibrary,
   loadVoiceoverTranscripts: () => loadVoiceoverTranscripts,
   lockEpisode: () => lockEpisode,
@@ -34793,15 +34903,15 @@ __export(hook_exports, {
   logHookError: () => logHookError,
   runHook: () => runHook
 });
-import { appendFileSync as appendFileSync2, existsSync as existsSync11, mkdirSync as mkdirSync2, readdirSync } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync11, mkdirSync as mkdirSync2, readdirSync as readdirSync2 } from "node:fs";
 import { mkdir as mkdir10, writeFile as writeFile8 } from "node:fs/promises";
-import { join as join20 } from "node:path";
+import { join as join21 } from "node:path";
 function logHookError(pluginData2, event2, e) {
   if (!pluginData2) return;
   try {
     mkdirSync2(pluginData2, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync2(join20(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
+    appendFileSync2(join21(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
 `);
   } catch {
   }
@@ -34869,7 +34979,7 @@ var init_hook = __esm({
     preDecision = (permissionDecision, reason) => result(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, ...reason === void 0 ? {} : { permissionDecisionReason: reason } } }));
     videoNumbers = (project) => {
       try {
-        return readdirSync(join20(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+        return readdirSync2(join21(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
       } catch {
         return [];
       }
@@ -35054,7 +35164,7 @@ var init_hook = __esm({
           ...last ? { stoppedAt: last.label } : {}
         });
         await mkdir10(dir, { recursive: true });
-        await writeFile8(join20(dir, "report.md"), md);
+        await writeFile8(join21(dir, "report.md"), md);
       }
     };
   }
@@ -35062,9 +35172,9 @@ var init_hook = __esm({
 
 // packages/hooks/src/main.ts
 init_project_root();
-import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync5 } from "node:fs";
+import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync6 } from "node:fs";
 import { homedir as homedir4 } from "node:os";
-import { join as join21 } from "node:path";
+import { join as join22 } from "node:path";
 
 // packages/hooks/src/setup-notice.ts
 init_setup_state();
@@ -35167,7 +35277,7 @@ function logError2(e) {
   try {
     mkdirSync3(pluginData, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync3(join21(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
+    appendFileSync3(join22(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
 `);
   } catch {
   }
@@ -35181,7 +35291,7 @@ function pluginVersion() {
   try {
     const root = process.env.CLAUDE_PLUGIN_ROOT;
     if (!root) return "unknown";
-    const version2 = JSON.parse(readFileSync5(join21(root, ".claude-plugin", "plugin.json"), "utf8")).version;
+    const version2 = JSON.parse(readFileSync6(join22(root, ".claude-plugin", "plugin.json"), "utf8")).version;
     return typeof version2 === "string" && version2 !== "" ? version2 : "unknown";
   } catch {
     return "unknown";

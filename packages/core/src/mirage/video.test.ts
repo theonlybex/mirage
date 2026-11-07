@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DELIVERY_LABEL } from './labels.js';
 import { snapshotVersion } from './versions.js';
+import { VideoSchema } from '@wordedits/shared';
 import { newVideo, readVideo, videoStage } from './video.js';
 
 const v = (title: string) => ({ title, about: 'a build story', mention: 'the bug', hide: 'the API key', footage: ['/clips/a'] });
@@ -42,6 +43,44 @@ describe('videos', () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
     await expect(newVideo(dir, v(''))).rejects.toThrow(/title/);
     expect(await newVideo(dir, v('ok'))).toBe(1);
+  });
+});
+
+describe('video.json and formats', () => {
+  const OLD = {
+    version: 1, title: 'Weather app, part 1', about: 'a build story', mention: 'the bug', hide: '', footage: ['/clips/a', '/clips/b'], createdAt: '2026-01-02T03:04:05.000Z',
+  };
+
+  it('a video.json from before formats round-trips byte for byte, with no new key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    await mkdir(join(dir, 'episodes', '1'), { recursive: true });
+    const text = JSON.stringify(OLD, null, 2) + '\n';
+    await writeFile(join(dir, 'episodes', '1', 'video.json'), text);
+    const read = await readVideo(dir, 1);
+    expect(JSON.stringify(read, null, 2) + '\n').toBe(text);
+    expect(JSON.stringify(VideoSchema.parse(OLD), null, 2) + '\n').toBe(text);
+  });
+
+  it('newVideo without the new fields writes none of them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const n = await newVideo(dir, v('Plain'));
+    const written = JSON.parse(await readFile(join(dir, 'episodes', String(n), 'video.json'), 'utf8'));
+    expect(Object.keys(written).sort()).toEqual(['about', 'createdAt', 'footage', 'hide', 'mention', 'title', 'version']);
+  });
+
+  it('takes format, from, vlog and targetSec, all optional, and keeps them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const n = await newVideo(dir, { ...v('Teaser'), format: 'short', from: 3, vlog: { name: 'Ibiza', number: 2, date: '2026-07-01' }, targetSec: 30 });
+    expect(await readVideo(dir, n)).toMatchObject({ format: 'short', from: 3, vlog: { name: 'Ibiza', number: 2, date: '2026-07-01' }, targetSec: 30 });
+  });
+
+  it('refuses a misspelled key and bad values', () => {
+    expect(VideoSchema.safeParse({ ...OLD, formt: 'short' }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...OLD, from: 0 }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...OLD, from: 1.5 }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...OLD, targetSec: -1 }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...OLD, vlog: { name: 'x', number: 0, date: 'd' } }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...OLD, vlog: { name: 'x', number: 1, date: 'd', extra: 1 } }).success).toBe(false);
   });
 });
 

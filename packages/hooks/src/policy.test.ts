@@ -31,6 +31,7 @@ describe('stepLabel', () => {
     [E('log'), { video: 1 }, 'Making a note for you', 'Noted'],
     [E('overnight'), {}, 'Getting ready for overnight', 'Ready for overnight'],
     [E('setup_later'), {}, 'Noting that for later', 'Noted for later'],
+    [E('formats'), {}, 'Looking up the formats', 'Formats looked up'],
     ['Read', { file_path: '/p/frames/c001/0001.jpg' }, 'Looking at clips', 'Looked at clips'],
     ['Read', { file_path: '/p/episodes/1/summary.md' }, 'Reading summary.md', 'Read summary.md'],
     ['Write', { file_path: '/p/episodes/1/episode.json' }, 'Writing the timeline', 'Timeline written'],
@@ -71,6 +72,7 @@ describe('videoOf', () => {
     expect(videoOf(E('new_project'), { title: 'x' }, p, session(2))).toBeNull();
     expect(videoOf(E('new_video'), { title: 'x' }, p, session(2))).toBeNull();
     expect(videoOf(E('setup_later'), {}, p, session(2))).toBeNull();
+    expect(videoOf(E('formats'), { id: 'short' }, p, session(2))).toBeNull();
   });
 
   it('ignores odd input', () => {
@@ -87,7 +89,7 @@ describe('isChanging and isStage', () => {
   const p = '/proj';
   it('counts engine tools but the read-only ones, and saves inside episodes/ or of catalog.json', () => {
     for (const t of ['check', 'cut', 'ingest', 'restore', 'note_status', 'new_video', 'vo', 'speak']) expect(isChanging(E(t), {}, p)).toBe(true);
-    for (const t of ['versions', 'status', 'get_notes', 'log']) expect(isChanging(E(t), {}, p)).toBe(false);
+    for (const t of ['versions', 'status', 'get_notes', 'log', 'formats']) expect(isChanging(E(t), {}, p)).toBe(false);
     expect(isChanging('Write', { file_path: '/proj/episodes/1/episode.json' }, p)).toBe(true);
     expect(isChanging('Edit', { file_path: '/proj/episodes/1/notes/x.txt' }, p)).toBe(true);
     expect(isChanging('MultiEdit', { file_path: '/proj/catalog.json' }, p)).toBe(true);
@@ -99,7 +101,7 @@ describe('isChanging and isStage', () => {
 
   it('isStage is true only for the engine stages', () => {
     for (const t of ['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']) expect(isStage(E(t))).toBe(true);
-    for (const t of ['new_project', 'new_video', 'music', 'versions', 'restore', 'status', 'log', 'overnight', 'setup_later']) expect(isStage(E(t))).toBe(false);
+    for (const t of ['new_project', 'new_video', 'music', 'versions', 'restore', 'status', 'log', 'overnight', 'setup_later', 'formats']) expect(isStage(E(t))).toBe(false);
     expect(isStage('check')).toBe(false);
     expect(isStage('Write')).toBe(false);
   });

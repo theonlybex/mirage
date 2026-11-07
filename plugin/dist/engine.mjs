@@ -133,12 +133,12 @@ var require_isexe = __commonJS({
         if (typeof Promise !== "function") {
           throw new TypeError("callback not provided");
         }
-        return new Promise(function(resolve14, reject) {
+        return new Promise(function(resolve15, reject) {
           isexe(path6, options || {}, function(er, is) {
             if (er) {
               reject(er);
             } else {
-              resolve14(is);
+              resolve15(is);
             }
           });
         });
@@ -204,27 +204,27 @@ var require_which = __commonJS({
         opt = {};
       const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt);
       const found = [];
-      const step = (i2) => new Promise((resolve14, reject) => {
+      const step = (i2) => new Promise((resolve15, reject) => {
         if (i2 === pathEnv.length)
-          return opt.all && found.length ? resolve14(found) : reject(getNotFoundError(cmd));
+          return opt.all && found.length ? resolve15(found) : reject(getNotFoundError(cmd));
         const ppRaw = pathEnv[i2];
         const pathPart = /^".*"$/.test(ppRaw) ? ppRaw.slice(1, -1) : ppRaw;
         const pCmd = path6.join(pathPart, cmd);
         const p = !pathPart && /^\.[\\\/]/.test(cmd) ? cmd.slice(0, 2) + pCmd : pCmd;
-        resolve14(subStep(p, i2, 0));
+        resolve15(subStep(p, i2, 0));
       });
-      const subStep = (p, i2, ii) => new Promise((resolve14, reject) => {
+      const subStep = (p, i2, ii) => new Promise((resolve15, reject) => {
         if (ii === pathExt.length)
-          return resolve14(step(i2 + 1));
+          return resolve15(step(i2 + 1));
         const ext = pathExt[ii];
         isexe(p + ext, { pathExt: pathExtExe }, (er, is) => {
           if (!er && is) {
             if (opt.all)
               found.push(p + ext);
             else
-              return resolve14(p + ext);
+              return resolve15(p + ext);
           }
-          return resolve14(subStep(p, i2, ii + 1));
+          return resolve15(subStep(p, i2, ii + 1));
         });
       });
       return cb ? step(0).then((res) => cb(null, res), cb) : step(0);
@@ -3487,7 +3487,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve14.call(this, root, ref);
+      let _sch = resolve15.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -3514,7 +3514,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s13, s22) {
       return s13.schema === s22.schema && s13.root === s22.root && s13.baseId === s22.baseId;
     }
-    function resolve14(root, ref) {
+    function resolve15(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -4378,7 +4378,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve14(baseURI, relativeURI, options) {
+    function resolve15(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -4769,7 +4769,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve14,
+      resolve: resolve15,
       resolveComponent,
       equal,
       serialize: serialize2,
@@ -7759,7 +7759,7 @@ var require_dist = __commonJS({
 });
 
 // packages/mcp/src/main.ts
-import { resolve as resolve13 } from "node:path";
+import { resolve as resolve14 } from "node:path";
 
 // node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.2_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
@@ -12790,7 +12790,7 @@ var recursive = /* @__PURE__ */ new WeakMap();
 var NONE = 0;
 var ASSUMED = 1;
 var PROVEN = 2;
-function isRecursive(inst, stack, resolve14) {
+function isRecursive(inst, stack, resolve15) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -12800,7 +12800,7 @@ function isRecursive(inst, stack, resolve14) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve14);
+      const answer = isRecursive(child, stack, resolve15);
       if (answer > result)
         result = answer;
     }
@@ -12811,7 +12811,7 @@ function isRecursive(inst, stack, resolve14) {
       const desc = Object.getOwnPropertyDescriptor(sh, key);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve14) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve15) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -12875,7 +12875,7 @@ function isRecursive(inst, stack, resolve14) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve14 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve15 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -29056,12 +29056,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve14) => {
+    return new Promise((resolve15) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve14();
+        resolve15();
       } else {
-        this._stdout.once("drain", resolve14);
+        this._stdout.once("drain", resolve15);
       }
     });
   }
@@ -30690,8 +30690,8 @@ var disconnect = (anyProcess) => {
 // node_modules/.pnpm/execa@9.6.1/node_modules/execa/lib/utils/deferred.js
 var createDeferred = () => {
   const methods = {};
-  const promise2 = new Promise((resolve14, reject) => {
-    Object.assign(methods, { resolve: resolve14, reject });
+  const promise2 = new Promise((resolve15, reject) => {
+    Object.assign(methods, { resolve: resolve15, reject });
   });
   return Object.assign(promise2, methods);
 };
@@ -35334,11 +35334,11 @@ var addConcurrentStream = (concurrentStreams, stream, waitName) => {
   const promises = weakMap.get(stream);
   const promise2 = createDeferred();
   promises.push(promise2);
-  const resolve14 = promise2.resolve.bind(promise2);
-  return { resolve: resolve14, promises };
+  const resolve15 = promise2.resolve.bind(promise2);
+  return { resolve: resolve15, promises };
 };
-var waitForConcurrentStreams = async ({ resolve: resolve14, promises }, subprocess) => {
-  resolve14();
+var waitForConcurrentStreams = async ({ resolve: resolve15, promises }, subprocess) => {
+  resolve15();
   const [isSubprocessExit] = await Promise.race([
     Promise.allSettled([true, subprocess]),
     Promise.all([false, ...promises])
@@ -36193,7 +36193,7 @@ var CatalogSchema = strictObject2({ version: external_exports.literal(1), clips:
 
 // packages/shared/src/schemas/episode.ts
 var range = (shape, what) => strictObject2({ start: external_exports.number().min(0), end: external_exports.number().positive(), ...shape }).refine((r) => r.end > r.start, { message: `${what}: end must be after start` });
-var BeatSchema = external_exports.enum(["cold-open", "title", "recap", "new-toy", "problem", "montage", "twist", "truth", "outro", "blooper"]);
+var BeatSchema = external_exports.string().regex(/^[a-z][a-z0-9-]*$/);
 var MoveSchema = strictObject2({
   /** The zoom at the end of the move. */
   zoom: external_exports.number().min(1).max(2),
@@ -36461,7 +36461,15 @@ var VideoSchema = strictObject2({
   hide: external_exports.string(),
   /** Absolute paths of the folders the footage is in. */
   footage: external_exports.array(external_exports.string()),
-  createdAt: external_exports.string()
+  createdAt: external_exports.string(),
+  /** The id of the video's format (a file in the plugin's formats folder); absent = a build story. */
+  format: external_exports.string().min(1).optional(),
+  /** The big video a short was made from. */
+  from: external_exports.number().int().positive().optional(),
+  /** A vlog's series: its name, which one it is, and the date it covers. */
+  vlog: strictObject2({ name: external_exports.string().min(1), number: external_exports.number().int().positive(), date: external_exports.string().min(1) }).optional(),
+  /** The length the video aims for, in seconds; overrides the format's. */
+  targetSec: external_exports.number().positive().optional()
 });
 
 // packages/shared/src/schemas/notes.ts
@@ -39646,8 +39654,8 @@ function itemChunkArgs(laid, o2, sources, output2) {
 }
 function previewSize(width, height) {
   const scale = Math.min(1, 960 / Math.max(width, height));
-  const even2 = (n2) => Math.max(2, Math.round(n2 * scale / 2) * 2);
-  return [even2(width), even2(height)];
+  const even3 = (n2) => Math.max(2, Math.round(n2 * scale / 2) * 2);
+  return [even3(width), even3(height)];
 }
 function chunkTimeoutMs(chunk, fps) {
   const srcSec = chunk.reduce((s, l) => s + (isCard(l.item) ? 0 : l.item.src.out - l.item.src.in), 0);
@@ -40952,22 +40960,102 @@ function speakReport(r, n2, voice) {
 // packages/core/src/mirage/report.ts
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
+// packages/core/src/mirage/formats.ts
+import { readdirSync as readdirSync2, readFileSync as readFileSync5 } from "node:fs";
+import { dirname as dirname7, join as join20, resolve as resolve12 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+var even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
+var FormatSchema = strictObject2({
+  /** Equal to the file's name without `.md`. */
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+  name: external_exports.string().min(1),
+  describe: external_exports.string().min(1),
+  /** Words a person uses for this kind of video ("reel", "day in the life"): Claude picks the format from them. */
+  words: external_exports.array(external_exports.string().min(1)),
+  /** The beat words the format's videos are built from, in the order they usually come. */
+  beats: external_exports.array(BeatSchema).min(1),
+  /** The length the format aims for, in seconds. */
+  targetSec: external_exports.number().positive().optional(),
+  /** A video longer than this gets a warning. */
+  warnPastSec: external_exports.number().positive().optional(),
+  output: strictObject2({ width: even2, height: even2 }).optional(),
+  captions: CaptionsSchema.optional(),
+  /** The kind of short a video of this format is made as when it doesn't say. */
+  short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
+});
+var SOURCE_LAYOUT2 = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
+function formatsDir(from = import.meta.url) {
+  const here = dirname7(from.startsWith("file:") ? fileURLToPath4(from) : resolve12(from));
+  return SOURCE_LAYOUT2.test(here) ? resolve12(here, "..", "..", "..", "..", "plugin", "formats") : resolve12(here, "..", "formats");
+}
+function splitFile(text) {
+  const lines = text.replace(/^﻿/, "").replace(/\r\n/g, "\n").split("\n");
+  if (lines[0]?.trimEnd() !== "---") return "no front matter: the file must start with a --- line, a JSON object, and a --- line";
+  const end = lines.findIndex((l, i2) => i2 > 0 && l.trimEnd() === "---");
+  if (end < 0) return "front matter has no closing --- line";
+  let front;
+  try {
+    front = JSON.parse(lines.slice(1, end).join("\n"));
+  } catch (e) {
+    return `front matter is not valid JSON (${e.message})`;
+  }
+  if (front === null || typeof front !== "object" || Array.isArray(front)) return "front matter must be a JSON object";
+  return { front, rules: lines.slice(end + 1).join("\n") };
+}
+function loadFormats(dir = formatsDir()) {
+  let names;
+  try {
+    names = readdirSync2(dir).filter((f) => f.endsWith(".md")).sort();
+  } catch {
+    return { formats: [], problems: ["\u2716 plugin/formats: the folder is missing or unreadable"] };
+  }
+  const formats = [];
+  const problems = [];
+  for (const file2 of names) {
+    const problem = (why) => problems.push(`\u2716 plugin/formats/${file2}: ${why}`);
+    let text;
+    try {
+      text = readFileSync5(join20(dir, file2), "utf8");
+    } catch (e) {
+      problem(`can't be read (${e.message})`);
+      continue;
+    }
+    const split = splitFile(text);
+    if (typeof split === "string") {
+      problem(split);
+      continue;
+    }
+    const parsed = FormatSchema.safeParse(split.front);
+    if (!parsed.success) {
+      problem(describeZodError(parsed.error));
+      continue;
+    }
+    const stem = file2.slice(0, -".md".length);
+    if (parsed.data.id !== stem) {
+      problem(`id: the id "${parsed.data.id}" must be the file name, "${stem}"`);
+      continue;
+    }
+    formats.push({ ...parsed.data, rules: split.rules, file: file2 });
+  }
+  return { formats, problems };
+}
+
 // packages/mcp/src/fallback-viewer.ts
 import { spawn as spawn2 } from "node:child_process";
 import { existsSync as existsSync11 } from "node:fs";
-import { dirname as dirname7, join as join20 } from "node:path";
-import { fileURLToPath as fileURLToPath4 } from "node:url";
+import { dirname as dirname8, join as join21 } from "node:path";
+import { fileURLToPath as fileURLToPath5 } from "node:url";
 function fallbackViewerArgs(o2) {
   if (o2.env.MIRAGE_FALLBACK_VIEWER === "0") return null;
   const exists3 = o2.exists ?? existsSync11;
-  const script = join20(o2.here, "viewer.mjs");
-  const ui = join20(o2.here, "viewer-ui");
+  const script = join21(o2.here, "viewer.mjs");
+  const ui = join21(o2.here, "viewer-ui");
   if (!exists3(script) || !exists3(ui)) return null;
   const data = o2.env.MIRAGE_PLUGIN_DATA;
   return [script, "--project", o2.project, "--ui", ui, ...data ? ["--data", data] : [], "--fallback"];
 }
 function startFallbackViewer(project2) {
-  const args = fallbackViewerArgs({ here: dirname7(fileURLToPath4(import.meta.url)), project: project2, env: process.env });
+  const args = fallbackViewerArgs({ here: dirname8(fileURLToPath5(import.meta.url)), project: project2, env: process.env });
   if (!args) return;
   const child = spawn2(process.execPath, args, { stdio: ["pipe", "ignore", "inherit"], windowsHide: true });
   child.on("error", (e) => console.error(`mirage engine: the viewer didn't start: ${e.message}`));
@@ -40976,9 +41064,9 @@ function startFallbackViewer(project2) {
 }
 
 // packages/mcp/src/server.ts
-import { existsSync as existsSync12, readdirSync as readdirSync2, realpathSync, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync12, readdirSync as readdirSync3, readFileSync as readFileSync6, realpathSync, statSync as statSync5 } from "node:fs";
 import { readdir as readdir9 } from "node:fs/promises";
-import { isAbsolute as isAbsolute2, join as join22, relative as relative2, resolve as resolve12, sep } from "node:path";
+import { isAbsolute as isAbsolute2, join as join23, relative as relative2, resolve as resolve13, sep } from "node:path";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v3/helpers/util.js
 var util;
@@ -46954,7 +47042,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve14) => setTimeout(resolve14, pollInterval));
+        await new Promise((resolve15) => setTimeout(resolve15, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error62) {
@@ -46971,7 +47059,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve14, reject) => {
+    return new Promise((resolve15, reject) => {
       const earlyReject = (error62) => {
         reject(error62);
       };
@@ -47049,7 +47137,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve14(parseResult.data);
+            resolve15(parseResult.data);
           }
         } catch (error62) {
           reject(error62);
@@ -47311,12 +47399,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve14, reject) => {
+    return new Promise((resolve15, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve14, interval);
+      const timeoutId = setTimeout(resolve15, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -48456,7 +48544,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve14) => setTimeout(resolve14, pollInterval));
+      await new Promise((resolve15) => setTimeout(resolve15, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -49027,7 +49115,7 @@ var EMPTY_COMPLETION_RESULT = {
 // packages/mcp/src/preflight.ts
 import { execFile, spawn as spawn3 } from "node:child_process";
 import { readdir as readdir8, stat as stat6, statfs } from "node:fs/promises";
-import { join as join21 } from "node:path";
+import { join as join22 } from "node:path";
 import { promisify as promisify3 } from "node:util";
 var GB = 1024 ** 3;
 async function preflight(o2) {
@@ -49057,7 +49145,7 @@ var execFileAsync = promisify3(execFile);
 async function folderBytes(dir) {
   let total = 0;
   for (const e of await readdir8(dir, { withFileTypes: true }).catch(() => [])) {
-    const path6 = join21(dir, e.name);
+    const path6 = join22(dir, e.name);
     if (e.isDirectory()) total += await folderBytes(path6);
     else if (e.isFile()) total += (await stat6(path6).catch(() => null))?.size ?? 0;
   }
@@ -49149,11 +49237,11 @@ async function runLong(o2) {
 // packages/mcp/src/server.ts
 var SESSION_FILE = /^([A-Za-z0-9][A-Za-z0-9._-]*)\.json$/;
 function newestSessionId(project2) {
-  const dir = join22(resolve12(project2), ".mirage", "sessions");
+  const dir = join23(resolve13(project2), ".mirage", "sessions");
   let best = null;
   let names;
   try {
-    names = readdirSync2(dir);
+    names = readdirSync3(dir);
   } catch {
     return null;
   }
@@ -49162,7 +49250,7 @@ function newestSessionId(project2) {
     if (!id || id === "unknown" || id.includes("..")) continue;
     let mtime;
     try {
-      mtime = statSync5(join22(dir, name)).mtimeMs;
+      mtime = statSync5(join23(dir, name)).mtimeMs;
     } catch {
       continue;
     }
@@ -49205,13 +49293,14 @@ var alive2 = (pid) => {
 var video = external_exports.number().int().positive().describe("The video number, e.g. 1");
 var MODES = { cut: "rough", guide: "guide", render: "final" };
 function createEngineServer(ctx) {
-  const project2 = resolve12(ctx.project);
+  const project2 = resolve13(ctx.project);
   const { tools } = ctx;
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
   const speaker = ctx.speaker ?? kokoroSpeaker();
   const ppid = ctx.ppid ?? process.ppid;
   const now = ctx.now ?? (() => /* @__PURE__ */ new Date());
+  const formatFiles = () => ctx.formatsDir ?? formatsDir();
   const knownSession = ctx.sessionId ?? (() => readClaudeProcess(project2, ppid) ?? newestSessionId(project2));
   const sid = () => knownSession() ?? "unknown";
   const server = new McpServer({ name: "engine", version: "0.0.1" });
@@ -49226,7 +49315,7 @@ function createEngineServer(ctx) {
     }));
   }
   async function newestVideo() {
-    const numbers = (await readdir9(join22(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+    const numbers = (await readdir9(join23(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
     return numbers.length ? Math.max(...numbers) : null;
   }
   async function report(n2, lines) {
@@ -49278,7 +49367,7 @@ function createEngineServer(ctx) {
     }
   });
   tool("music", "Find the tempo and mood of the tracks in the project's music folder.", {}, async () => {
-    const dir = join22(project2, "music");
+    const dir = join23(project2, "music");
     if (!existsSync12(dir)) throw new MirageError("NO_MUSIC_TRACK", `${dir} does not exist`, "Create it and put your music tracks in it.");
     return report(await sessionVideo(), musicReport(dir, await analyzeLibrary(dir, tools)));
   });
@@ -49370,7 +49459,7 @@ function createEngineServer(ctx) {
       inRound.map((x) => [
         `Note ${x.id} at ${x.t.toFixed(1)} s: ${x.text}`,
         ...x.box ? [`(about the area ${pct(x.box.x)}%\u2013${pct(x.box.x + x.box.w)}% across, ${pct(x.box.y)}%\u2013${pct(x.box.y + x.box.h)}% down)`] : [],
-        `Still: ${join22(episodeDir(project2, n2), x.still)}`
+        `Still: ${join23(episodeDir(project2, n2), x.still)}`
       ].join("\n")).join("\n\n")
     );
   });
@@ -49410,14 +49499,16 @@ function createEngineServer(ctx) {
     });
     if (meta3 === null) lines.push(`No Mirage project here yet (${project2}). Use new_project to start one.`);
     else if (meta3) lines.push(`Project: ${meta3.title}`);
-    const numbers = (await readdir9(join22(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+    const numbers = (await readdir9(join23(project2, "episodes")).catch(() => [])).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
     for (const n2 of numbers) {
       const { stage, deliveries } = await videoStage(project2, n2);
       const title = (await readVideo(project2, n2).catch(() => null))?.title;
       lines.push(`Video ${n2}${title ? ` \u201C${title}\u201D` : ""}: ${stage} \xB7 ${deliveries} ${deliveries === 1 ? "delivery" : "deliveries"}`);
     }
-    const viewer = await readJsonFile(join22(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
+    const viewer = await readJsonFile(join23(project2, ".mirage", "viewer.json"), ViewerInfoSchema, ".mirage/viewer.json").catch(() => null);
     lines.push(viewer && alive2(viewer.pid) ? `Viewer: running at ${viewer.url}` : "Viewer: not running");
+    const { formats, problems } = loadFormats(formatFiles());
+    lines.push(`Formats: ${formats.map((f) => f.id).join(", ") || "none"}`, ...problems);
     for (const t of ["ffmpeg", "ffprobe"]) {
       const found = await deps.which(t);
       const captions = t === "ffmpeg" && found ? await deps.captions() : null;
@@ -49430,6 +49521,19 @@ function createEngineServer(ctx) {
     lines.push(Number(process.versions.node.split(".")[0]) >= 22 ? `Node: ${process.version} ok` : `Node: ${process.version} is too old, Mirage needs 22 or newer`);
     return ok(lines);
   }, false);
+  tool(
+    "formats",
+    "The kinds of video Mirage knows (build story, short, vlog \u2026): with no id, one line each with the words people use for it; with an id, that format's whole file: its beats, length and the rules to follow. Works without a project.",
+    { id: external_exports.string().min(1).optional().describe("A format id, e.g. short") },
+    async ({ id }) => {
+      const { formats, problems } = loadFormats(formatFiles());
+      if (id === void 0) return ok([...formats.map((f) => `${f.id} \u2014 ${f.name}: ${f.describe} (words: ${f.words.join(", ")})`), ...problems]);
+      const found = formats.find((f) => f.id === id);
+      if (!found) throw new MirageError("BAD_INPUT", `unknown format "${id}"`, [`The formats are: ${formats.map((f) => f.id).join(", ") || "none"}.`, ...problems].join("\n  "));
+      return ok(readFileSync6(join23(formatFiles(), found.file), "utf8"));
+    },
+    false
+  );
   tool("setup_later", 'The person said "not now" to installing the tools Mirage needs: stop asking about setup for 7 days.', {}, async () => {
     const dataDir = ctx.pluginData ?? process.env.MIRAGE_PLUGIN_DATA;
     if (!dataDir) throw new MirageError("BAD_INPUT", "Mirage has no data folder here, so it can't remember that.", "It will ask again next session.");
@@ -49441,7 +49545,7 @@ function createEngineServer(ctx) {
 }
 
 // packages/mcp/src/main.ts
-var project = resolve13(process.env.MIRAGE_PROJECT || process.cwd());
+var project = resolve14(process.env.MIRAGE_PROJECT || process.cwd());
 createEngineServer({ project, tools: await realMediaTools() }).connect(new StdioServerTransport()).catch((e) => {
   console.error(`mirage engine: ${e instanceof Error ? e.message : String(e)}`);
   process.exit(1);

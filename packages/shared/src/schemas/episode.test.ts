@@ -18,6 +18,23 @@ describe('EpisodeSchema', () => {
     expect(ep.items[0]).toMatchObject({ speed: 1, audio: 'mute', zoom: 1, frame: 'fit', focus: { x: 0.5, y: 0.5 }, hold: 0, quiet: false, onBeat: false });
     expect(ep).toMatchObject({ overlays: [], music: [], slots: [], voiceover: null, loudnessLufs: -14 });
   });
+  describe('beat', () => {
+    const beatOf = (beat: string) => EpisodeSchema.safeParse({ ...base, items: [{ ...item, beat }] });
+    it('is any lower-case word, with digits and hyphens after the first letter', () => {
+      for (const beat of ['title-card', 'hook', 'bit', 'a1-b2']) expect(beatOf(beat).success, beat).toBe(true);
+    });
+    it('refuses anything else', () => {
+      for (const beat of ['Title Card', 'Hook', 'title card', 'title_card', '1st', '-x', '', 'x-é']) expect(beatOf(beat).success, beat).toBe(false);
+    });
+    it('still takes every beat of the build story', () => {
+      for (const beat of ['cold-open', 'title', 'recap', 'new-toy', 'problem', 'montage', 'twist', 'truth', 'outro', 'blooper']) expect(beatOf(beat).success, beat).toBe(true);
+    });
+    it('is a word on a card too', () => {
+      const card = { id: 'k1', beat: 'title-card', card: { style: 'bold', text: 'Hi', sec: 2 } };
+      expect(EpisodeSchema.safeParse({ ...base, items: [card] }).success).toBe(true);
+      expect(EpisodeSchema.safeParse({ ...base, items: [{ ...card, beat: 'Title Card' }] }).success).toBe(false);
+    });
+  });
   it('rejects src.out <= src.in, naming the item', () => {
     const r = EpisodeSchema.safeParse({ ...base, items: [{ ...item, src: { in: 2, out: 2 } }] });
     expect(JSON.stringify(r.error?.issues)).toContain('item i1');

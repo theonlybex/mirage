@@ -14,10 +14,10 @@ export const engineTool = (tool: string): string | null => (tool.startsWith(ENGI
 
 const SAVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 const FILE_TOOLS = new Set([...SAVE_TOOLS, 'NotebookEdit']);
-const READ_ONLY = new Set(['versions', 'status', 'get_notes', 'log']);
+const READ_ONLY = new Set(['versions', 'status', 'get_notes', 'log', 'formats']);
 const STAGES = new Set(['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']);
-/** Engine tools that make a project or a video, or are about Mirage and not a video (setup_later): they belong to no video. */
-const NO_VIDEO = new Set(['new_project', 'new_video', 'setup_later']);
+/** Engine tools that make a project or a video, or are about Mirage and not a video (setup_later, formats): they belong to no video. */
+const NO_VIDEO = new Set(['new_project', 'new_video', 'setup_later', 'formats']);
 
 const ENGINE_LABELS: Record<string, [string, string]> = {
   new_project: ['Starting the project', 'Project started'],
@@ -39,6 +39,7 @@ const ENGINE_LABELS: Record<string, [string, string]> = {
   log: ['Making a note for you', 'Noted'],
   overnight: ['Getting ready for overnight', 'Ready for overnight'],
   setup_later: ['Noting that for later', 'Noted for later'],
+  formats: ['Looking up the formats', 'Formats looked up'],
 };
 
 const record = (input: unknown): Record<string, unknown> =>

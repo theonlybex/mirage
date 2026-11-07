@@ -7,7 +7,10 @@ type Span = { start: number; end: number };
 const range = <T extends z.ZodRawShape>(shape: T, what: string) =>
   strictObject({ start: z.number().min(0), end: z.number().positive(), ...shape }).refine((r) => (r as Span).end > (r as Span).start, { message: `${what}: end must be after start` });
 
-export const BeatSchema = z.enum(['cold-open', 'title', 'recap', 'new-toy', 'problem', 'montage', 'twist', 'truth', 'outro', 'blooper']);
+/** The beats of the build story, the only ones before formats; a format names its own, and any such word is a beat. */
+export const BUILD_STORY_BEATS = ['cold-open', 'title', 'recap', 'new-toy', 'problem', 'montage', 'twist', 'truth', 'outro', 'blooper'] as const;
+/** A beat is a lower-case word (digits and hyphens after the first letter); the format a video has says which words it expects. */
+export const BeatSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
 export type Beat = z.infer<typeof BeatSchema>;
 
 /**
