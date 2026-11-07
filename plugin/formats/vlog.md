@@ -19,6 +19,7 @@ Pass `vlog: { name, date }` to `new_video`: `name` is what the person calls thei
 
 ## Cutting
 - Cut out on the laugh. The person's own laugh works as a laugh track: end the shot as it lands. Cut in on the line just before the joke, and drop setup chatter the joke doesn't need.
+- Cut out on the laugh, and let the laugh ring with a short `tailOut` when the next shot is quiet.
 - Speech is front-loaded: most of the talking comes in the first minute (55–74% of all words in the classic vlogs), then a music-led back half.
 - Show it instead of explaining it: B-roll over explanations and sponsor reads; phone screens, texts and video calls full frame.
 - Spectacle is what viewers replay (a physical gag, a kiss, fireworks, an animal or a stunt moment): give it room.

@@ -120,6 +120,19 @@ describe('the plugin skills', () => {
     expect(edit).toContain("move starts at");
   });
 
+  it('edit teaches J- and L-cuts: the fields, the rules, the sentence and each new warning', () => {
+    const edit = read('edit');
+    for (const key of ['leadIn', 'tailOut']) expect(edit, `edit never names ${key}`).toContain(`\`${key}\``);
+    expect(edit).toContain('An L-cut lets a laugh or a reaction ring under the next shot; a J-cut lets the next scene\'s sound arrive first.');
+    for (const message of [
+      "`⚠ item <id> has leadIn/tailOut but doesn't keep its own sound (audio \"keep\" at speed 1) — it does nothing`",
+      "`⚠ item <id>'s leadIn of <x> s is shortened to <y> s — <reason>`",
+      "`⚠ voice-over line <slot> plays over item <id>'s carried-over sound (<a>–<b> s) — shorten the leadIn/tailOut or move the line`",
+    ]) expect(edit, `edit never explains ${message}`).toContain(message);
+    const vlog = readFileSync(join(ROOT, 'plugin', 'formats', 'vlog.md'), 'utf8');
+    expect(vlog).toContain('tailOut');
+  });
+
   it('edit teaches card items and the name, subtitle and timecard overlays', () => {
     const edit = read('edit');
     expect(edit).toContain('`card`');
