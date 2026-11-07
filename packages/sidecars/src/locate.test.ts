@@ -141,7 +141,7 @@ sh('ffmpegCaptions', () => {
     const hang = await fake('hang', 'exec /bin/sleep 20');
     process.env.PATH = hang;
     process.env.MIRAGE_PLUGIN_DATA = join(root, 'data');
-    _setCaptionsCheck({ timeoutMs: 300 });
+    _setCaptionsCheck({ timeoutMs: 2000 }); // long enough that a busy machine still starts the fake before it is stopped; the fake never ends by itself
     expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(hang, 'ffmpeg') });
     expect(await runs(hang)).toBe(1);
     expect(readSetupState(join(root, 'data')).ffmpeg).toBeUndefined();

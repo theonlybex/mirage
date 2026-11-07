@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,6 +18,35 @@ const deny = (reason: string) => JSON.stringify({ hookSpecificOutput: { hookEven
 const STOP = 'The person stopped the edit. Stop now and say in one line what was finished.';
 
 const tmp = async (prefix = 'mirage-hook-') => realpathSync(await mkdtemp(join(tmpdir(), prefix)));
+
+/**
+ * How much CPU the bundled hook uses for one run, as a multiple of what a bare Node start uses on the same machine at
+ * the same moment. Both are read from inside the process as it exits, and each is the fastest of several runs.
+ * "Fast" means the hook does little beyond starting Node, and the ratio says that without depending on how busy the
+ * machine is: a wall-clock bound on a spawn fails whenever the suite runs in parallel, and even CPU time alone grows
+ * threefold under load, but a loaded machine slows Node's start and the hook alike (the ratio is about 2 idle or busy).
+ */
+const hookCpuRatio = async (args: string[], stdin: string, env: Record<string, string>, runs = 7): Promise<{ ratio: number; out: string }> => {
+  const probe = join(await tmp('mirage-probe-'), 'probe.cjs');
+  await writeFile(probe, "process.on('exit', () => { const u = process.cpuUsage(); require('node:fs').writeSync(2, `CPU ${(u.user + u.system) / 1000}`); });");
+  const cpu = (script: string[]): { ms: number; out: string } => {
+    const r = spawnSync(process.execPath, ['--require', probe, ...script], { input: stdin, encoding: 'utf8', env });
+    const m = /CPU ([\d.]+)/.exec(r.stderr);
+    expect(m, `the process ran and reported its CPU time: ${r.stderr}`).not.toBeNull();
+    return { ms: Number(m![1]), out: r.stdout };
+  };
+  let hook = Infinity;
+  let bare = Infinity;
+  let out = '';
+  for (let i = 0; i < runs; i++) {
+    bare = Math.min(bare, cpu(['-e', '']).ms);
+    const run = cpu([DIST, ...args]);
+    hook = Math.min(hook, run.ms);
+    out += run.out; // every run must print nothing
+  }
+  return { ratio: hook / bare, out };
+};
+const CPU_RATIO_LIMIT = 4; // the hook was about 2 on an idle machine and 2 under load; 150 ms of wall clock was about 4 times
 
 /** Fake deps: a clock that `sleep` advances. */
 async function fakeDeps(over: Partial<HookDeps> = {}) {
@@ -64,15 +93,8 @@ describe('runHook', () => {
   it.skipIf(!existsSync(DIST))('does nothing outside a Mirage project, fast, through the bundled script', async () => {
     const dir = await tmp();
     const json = JSON.stringify(input(dir, { tool_name: 'Read', tool_input: { file_path: 'x' } }));
-    execFileSync(process.execPath, [DIST, 'pre'], { input: json }); // warm the disk cache
-    let fastest = Infinity; // the fastest of 3 runs, so one slow spawn on a loaded machine does not fail the test
-    let out = 'x';
-    for (let i = 0; i < 3; i++) {
-      const start = performance.now();
-      out = execFileSync(process.execPath, [DIST, 'pre'], { input: json, encoding: 'utf8' });
-      fastest = Math.min(fastest, performance.now() - start);
-    }
-    expect(fastest).toBeLessThan(150);
+    const { ratio, out } = await hookCpuRatio(['pre'], json, { PATH: '' });
+    expect(ratio).toBeLessThan(CPU_RATIO_LIMIT);
     expect(out).toBe('');
   });
 
@@ -513,9 +535,10 @@ describe.skipIf(!existsSync(DIST))('session start through the bundled script', (
     expect(JSON.parse(await readFile(join(data, 'setup.json'), 'utf8')).askedVersion).toBe(
       JSON.parse(await readFile(join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'), 'utf8')).version,
     );
-    const seconds = [await sessionStart({ ...env, CLAUDE_PLUGIN_DATA: data }), await sessionStart({ ...env, CLAUDE_PLUGIN_DATA: data }), await sessionStart({ ...env, CLAUDE_PLUGIN_DATA: data })];
-    for (const second of seconds) expect(second.out).toBe('');
-    expect(Math.min(...seconds.map((r) => r.ms))).toBeLessThan(150); // the fastest of 3, so one slow spawn does not fail the test
+    const stdin = JSON.stringify(input(await tmp(), { hook_event_name: 'SessionStart' }));
+    const second = await hookCpuRatio(['session-start'], stdin, { PATH: '', ...env, CLAUDE_PLUGIN_DATA: data });
+    expect(second.out).toBe('');
+    expect(second.ratio).toBeLessThan(CPU_RATIO_LIMIT);
   });
 
   it('says nothing outside a Mirage project without a data folder', async () => {
