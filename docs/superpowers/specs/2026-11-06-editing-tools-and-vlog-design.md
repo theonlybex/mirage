@@ -190,11 +190,48 @@ L-cut to let a laugh or a reaction ring under the next shot. Not inside fast mon
 
 ## Part 5 · Video formats: build story, short, vlog
 
-**New:** `video.json` gets `format`: `build-story` (default, and what every existing video is), `short` or `vlog`.
-`new_video` takes it; the edit skill asks for it with the three questions it asks now (or infers it from what the
-person says, and says which it picked).
+**New:** `video.json` gets `format`: `build-story` (default, and what every existing video is), `short` or `vlog`,
+and more later.
 
-The beat list grows. `BeatSchema` gains `hook`, `payoff`, `tease`, `pointer`, `loop` (short) and `title-card`, `premise`, `bit`, `headline`,
+**The format is picked from the person's own words** (their request): when they start a video, Claude matches what
+they say ("a vlog of our trip", "the next episode of the lamp build", "a few shorts from this") and the footage
+against each format's description, and the whole editing style follows from the format: beats and their order,
+length target, pacing, caption style, music and sound-effect habits, cards and overlays, thumbnail and title style.
+- Claude says which format it picked in one line ("Editing this as a vlog: cold open, title card, …"), so the person
+  can say "no, make it an episode" — switching it is one word, and the edit is re-planned in the new format.
+- When the words fit two formats equally, Claude asks one question instead of guessing.
+- Changing a finished video's format means a re-cut in the new style (a new version; the old one stays in Versions).
+
+**Formats are added as files, not code** (the person plans "many more to add"): each format is one Markdown file in
+the plugin, `plugin/formats/<id>.md`, with a small front matter block for what the engine checks and a body of rules
+for Claude:
+
+```markdown
+---
+id: vlog
+name: Vlog
+describe: A day or a week of someone's life told as a few funny bits, ending on the headline bit.
+words: [vlog, day in the life, trip, week, hanging out]
+beats: [cold-open, title-card, premise, bit, headline, sponsor, plugs, tag]
+targetSec: 260
+warnPastSec: 400
+output: { width: 1920, height: 1080 }
+captions: { style: chosen }
+---
+Rules for the editor: … (pacing, cutting, music, text, sound effects, packaging — the playbook's numbers)
+```
+- `describe` and `words` are what Claude matches the person's wording against; `beats`, `targetSec`/`warnPastSec`,
+  `output` and `captions` are what `check` and the new-episode defaults use. The body is read by Claude through the
+  edit skill (which says: read the video's format file before planning the edit).
+- Adding a format = adding one file; the edit skill and `check` pick it up without code changes. `status` lists the
+  formats available.
+- `beat` in `episode.json` becomes any lower-case word (it was a fixed list): `check` warns when an item's beat isn't
+  in its video's format, and the existing beat names keep working. The build-story beats move into
+  `plugin/formats/build-story.md`, with today's edit-skill rules for them.
+- This design ships three: `build-story`, `short`, `vlog`. Others the person has in mind come later as files, each
+  from its own research or the person's notes.
+
+The beats of the three formats (each listed in its format file): `hook`, `payoff`, `tease`, `pointer`, `loop` (short) and `title-card`, `premise`, `bit`, `headline`,
 `sponsor`, `plugs`, `tag` (vlog). `check` warns when an item's beat isn't one of its video's format (an existing
 build-story episode is never refused for this).
 
@@ -368,6 +405,8 @@ After each: `pnpm test`, `pnpm typecheck`, `pnpm build:plugin`, a real render sh
   your own files in `sfx/` replace them by name.
 - Shorts are made from the big video's footage with `from: <n>`, and one file serves both YouTube Shorts and
   Instagram Reels by keeping text out of both apps' button areas.
+- The format is picked from the person's words and said in one line; formats are Markdown files in `plugin/formats/`,
+  so new ones are added without code.
 - Shorts made from a big video are teasers by default: they stop before the payoff and end pointing to the full
   video (1–2 s).
 - Two bundled fonts so captions look the same on every computer.
