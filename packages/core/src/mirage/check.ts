@@ -3,16 +3,19 @@ import { BUILD_STORY_BEATS, isCard, type Catalog, type ClipItem, type Episode, t
 import type { MediaTools } from '../media-tools.js';
 import { checkCardImages } from './cards.js';
 import { describeError } from './errors.js';
-import { loadFormats, type Format } from './formats.js';
+import { loadFormats, type Format, type Playbook } from './formats.js';
+import { formulasDir, loadFormulas, mineId } from './formulas.js';
 import { loadCatalog } from './ingest.js';
 import { checkCueFiles, findTrack, loadLibrary, snapToBeats } from './music.js';
 import { splitShots } from './move.js';
-import { keptSegments, OVERLAY_STYLE, shotWords, speechWords, spilledWords, styleGeometry, undrawable, type StyleGeometry } from './overlays.js';
+import { keptSegments, OVERLAY_STYLE, shotWords, spilledWords, styleGeometry, undrawable, type StyleGeometry } from './overlays.js';
+import { lengthWarning, measurePlaybook, playbookFor, playbookSection, type PlaybookReport, type PlaybookResult } from './playbook.js';
 import { loadEpisode, saveEpisode, sourcesFor } from './render-episode.js';
+import { seriesOf } from './series.js';
 import { fileUnreadable, sfxSource, unreadableSfx } from './sfx.js';
 import { slotsStale, SPEECH_PAD_SEC } from './slots.js';
 import { hasSpill, keepsOwnSound, spills } from './spill.js';
-import { dropCollapsed, formatTime, layoutTimeline, timelineDuration } from './timeline.js';
+import { dropCollapsed, layoutTimeline, timelineDuration } from './timeline.js';
 import { readVideo } from './video.js';
 import { cutChanged, cutChangedError, hasWords, lineChangeWarnings } from './voiceover.js';
 
@@ -162,8 +165,6 @@ function spillWarnings(ep: Episode, catalog: Catalog): string[] {
 const MAX_SFX_PER_MINUTE = 6;
 const SFX_WINDOW_SEC = 60;
 
-/** A short opening on more silence than this gets a warning. */
-const MAX_OPENING_SILENCE_SEC = 0.5;
 /** What the Shorts and Reels buttons cover of a vertical frame (Instagram's cover more than YouTube's: these are both). */
 const COVERED = { top: 0.1, bottom: 0.2, right: 0.15 };
 
@@ -180,15 +181,19 @@ function coveredBy(s: StyleGeometry, width: number, height: number): string[] {
 
 /**
  * What the video's format asks that the cut doesn't do. A video without a format (a build story) is only told about a
- * beat outside the build story's own list; `formatted` is false for it.
+ * beat outside the build story's own list; `formatted` is false for it. `measured` is the cut against its playbook: a
+ * short's opening, ending and payoff are judged there once, and their ⚠ lines are passed on here.
  */
-function formatWarnings(ep: Episode, catalog: Catalog, video: Video | null, format: Format, formatted: boolean): string[] {
+function formatWarnings(ep: Episode, video: Video | null, format: Format, formatted: boolean, measured: PlaybookResult[], pb: { playbook: Playbook; overrides: string[] }): string[] {
   const out: string[] = [];
   const known: readonly string[] = formatted ? format.beats : BUILD_STORY_BEATS;
   for (const item of ep.items) {
     if (!known.includes(item.beat)) out.push(`item ${item.id}'s beat "${item.beat}" isn't one of the ${format.name} format's beats (${format.beats.join(', ')})`);
   }
-  if (!formatted) return out;
+  const mine = pb.overrides.some((k) => k === 'targetSec' || k === 'warnPastSec');
+  // A build story with no format on record still has the length its person's formula sets.
+  const tooLong = lengthWarning(timelineDuration(ep), format, video, pb.playbook, mine);
+  if (!formatted) return tooLong ? [...out, tooLong] : out;
   const { width: w, height: h } = ep.output;
   if (format.output && (w !== format.output.width || h !== format.output.height)) {
     out.push(`the video is ${w}×${h}, not the ${format.name} format's ${format.output.width}×${format.output.height}`);
@@ -203,38 +208,22 @@ function formatWarnings(ep: Episode, catalog: Catalog, video: Video | null, form
       out.push(`captions are ${keys.map((k) => own[k]).join('/')}, not the ${format.name} format's ${keys.map((k) => stated[k]).join('/')}`);
     }
   }
-  const D = timelineDuration(ep);
-  if (format.warnPastSec !== undefined) {
-    // A video's own target scales the limit: a vlog aiming at 15 min instead of 4:20 is warned past 400 s × 900 / 260.
-    const own = video?.targetSec !== undefined && format.targetSec !== undefined;
-    const limit = own ? (format.warnPastSec * video!.targetSec!) / format.targetSec! : format.warnPastSec;
-    const whose = own ? `this video's ${formatTime(limit)} limit` : `the ${format.name} format's ${formatTime(limit)}`;
-    const cut = format.short ? 'cut whole moments' : 'cut whole bits rather than thinning laughs';
-    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than ${whose} — ${cut}`);
-  }
+  if (tooLong) out.push(tooLong);
   if (format.short) {
-    const laid = layoutTimeline(ep);
-    const first = laid[0];
-    const opening = first?.item;
-    // The opening silence of the first item's own live sound; a card or a muted item has none to measure.
-    if (opening && !isCard(opening) && opening.audio === 'keep' && opening.speed === 1) {
-      const clip = catalog.clips.find((c) => c.id === opening.clip);
-      if (clip?.probe.hasAudio && clip.transcript) {
-        const word = speechWords(ep, catalog, null).find((w) => w.start >= first.start - 1e-6 && w.start < first.end);
-        const silence = (word?.start ?? first.end) - first.start;
-        if (silence > MAX_OPENING_SILENCE_SEC + 1e-6) out.push(`a short opens on its hook: item ${opening.id} starts with ${s1(silence)} s of silence`);
-      }
-    }
-    if (first && (first.item.beat === 'title' || first.item.beat === 'cold-open')) out.push(`a short opens on its hook, not a ${first.item.beat}: item ${first.item.id}`);
-    for (const item of ep.items) if (item.beat === 'outro') out.push(`a short has no outro: item ${item.id}`);
-    // A short made from a big video is the format's kind (a teaser pointing to it); one with no big video behind it stands alone.
-    const kind = video?.from !== undefined ? format.short.kind : 'standalone';
-    if (kind === 'standalone') {
-      const last = [...ep.music].sort((a, b) => b.end - a.end)[0];
-      if (last && last.end >= D - 0.5 / ep.output.fps && last.fadeOut > 0) out.push('a standalone short loops: the last music cue fades out at the end — set its fadeOut to 0');
-    } else if (!ep.items.some((i) => i.beat === 'pointer')) {
-      out.push('a teaser short ends pointing to the full video: add a pointer beat at the end');
-    }
+    // The first word of a short is a playbook line (within firstWordSec), not a warning.
+    for (const rule of ['opening', 'ending', 'answer', 'loop'] as const) out.push(...measured.filter((r) => r.rule === rule).flatMap((r) => r.warnings ?? []));
+    out.push(...coveredWarnings(ep));
+  }
+  return out;
+}
+
+/**
+ * The ⚠ lines of a vertical cut whose overlays or captions fall where the Shorts and Reels buttons cover the picture
+ * (COVERED); none for a frame that is not vertical. `predict` holds a short against each platform with the same lines.
+ */
+export function coveredWarnings(ep: Episode): string[] {
+  const out: string[] = [];
+  {
     const { width, height } = ep.output;
     if (height > width) {
       // An overlay's place is fixed by its style on a vertical frame, so it can't be moved: left out, or a callout instead.
@@ -281,15 +270,19 @@ async function videoFormat(root: string, n: number, dir?: string): Promise<{ vid
  * tracks listed and present) and the sound effects (each a built-in or a file in sfx/; with `tools`, a file FFmpeg can
  * read), snaps montages to the beat (not once a voice-over is fitted), saves it if that changed anything, and collects
  * what the user should know: `warnings` (⚠), `notes`, and `problems` (✖ lines that don't stop the check: a format file
- * that can't be used, a format id that isn't one). It also warns about what the video's format asks (`formatsDir`: the
- * folder of format files, default the plugin's own).
+ * that can't be used, a format id that isn't one; the person's own formula for the format when it is broken). It also
+ * warns about what the video's format asks (`formatsDir`: the folder of format files, default the plugin's own), and
+ * measures the cut against the format's playbook (`playbook`: the lines of the `Playbook (<format>):` section, one per
+ * rule, met or missed; `measured` holds the same results). A playbook miss is neither a warning nor a problem: it never
+ * stops a cut or a render. The playbook's numbers are the format's, with the ones the person's `<format>-mine` formula
+ * sets in the project's `formulas` folder replacing them (`formulasDir`: Mirage's own formulas, default the plugin's).
  */
 export async function checkEpisode(
   project: string,
   n: number,
   tools?: MediaTools,
-  opts: { formatsDir?: string } = {},
-): Promise<{ episode: Episode; warnings: string[]; notes: string[]; problems: string[] }> {
+  opts: { formatsDir?: string; formulasDir?: string } = {},
+): Promise<{ episode: Episode; warnings: string[]; notes: string[]; problems: string[]; playbook: string[]; measured: PlaybookReport | null }> {
   const root = resolve(project);
   const catalog = await loadCatalog(root);
   let ep = await loadEpisode(root, n);
@@ -336,6 +329,13 @@ export async function checkEpisode(
   warnings.push(...timelineWarnings(ep, lib, !ep.voiceover));
   warnings.push(...spillWarnings(ep, catalog));
   const { video, format, formatted, problems } = await videoFormat(root, n, opts.formatsDir);
-  if (format) warnings.push(...formatWarnings(ep, catalog, video, format, formatted));
-  return { episode: ep, warnings, notes, problems };
+  let measured: PlaybookReport | null = null;
+  if (format) {
+    const yours = loadFormulas(opts.formulasDir ?? formulasDir(), root);
+    problems.push(...yours.problems.filter((p) => p.startsWith(`✖ formulas/${mineId(format.id)}.md:`)));
+    const pb = playbookFor(format, yours.formulas);
+    measured = await measurePlaybook(root, n, { episode: ep, catalog, video, format, ...pb, series: await seriesOf(root, n) });
+    warnings.push(...formatWarnings(ep, video, format, formatted, measured.results, pb));
+  }
+  return { episode: ep, warnings, notes, problems, playbook: measured ? playbookSection(measured) : [], measured };
 }

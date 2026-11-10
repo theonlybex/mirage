@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { formatsDir, loadFormats } from '../packages/core/src/mirage/formats.js';
+import { formulasDir, loadFormulas } from '../packages/core/src/mirage/formulas.js';
 import { buildPlugin } from './build-plugin.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -96,6 +97,43 @@ describe('plugin formats', () => {
     expect(dir).toBe(join(PLUGIN, 'formats'));
     expect(loadFormats(dir)).toMatchObject({ problems: [] });
     expect(readdirSync(dir).sort()).toEqual(['build-story.md', 'short.md', 'vlog.md']);
+  });
+});
+
+describe('plugin formulas', () => {
+  it('the plugin ships plugin/formulas (written by hand, like formats/), and the bundle finds it next to dist/', () => {
+    const dir = formulasDir(join(PLUGIN, 'dist', 'engine.mjs'));
+    expect(dir).toBe(join(PLUGIN, 'formulas'));
+    expect(loadFormulas(dir)).toMatchObject({ problems: [] });
+    expect(readdirSync(dir).sort()).toEqual(['algorithm.md', 'episode.md', 'instagram.md', 'short.md', 'tiktok.md', 'vlog.md', 'youtube.md']);
+  });
+
+  it('the plugin ships the analyse skill', () => {
+    expect(existsSync(join(PLUGIN, 'skills', 'analyse', 'SKILL.md'))).toBe(true);
+  });
+
+  it('the plugin ships the learn skill', () => {
+    expect(existsSync(join(PLUGIN, 'skills', 'learn', 'SKILL.md'))).toBe(true);
+  });
+
+  it('the built engine lists the formulas and the channel, posted, learn and predict tools', () => {
+    const send = (o: object) => JSON.stringify({ jsonrpc: '2.0', ...o });
+    const input = [
+      send({ id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } }),
+      send({ method: 'notifications/initialized' }),
+      send({ id: 2, method: 'tools/list' }),
+      send({ id: 3, method: 'tools/call', params: { name: 'formulas', arguments: {} } }),
+    ].join('\n');
+    const out = execFileSync(process.execPath, [join(PLUGIN, 'dist/engine.mjs')], { input: `${input}\n`, encoding: 'utf8', cwd: tmpdir(), timeout: 30_000, env: { ...process.env, MIRAGE_PROJECT: tmpdir() } });
+    const replies = out.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const names = replies.find((r) => r.id === 2).result.tools.map((t: { name: string }) => t.name);
+    expect(names).toContain('formulas');
+    expect(names).toContain('channel');
+    expect(names).toContain('posted');
+    expect(names).toContain('learn');
+    expect(names).toContain('predict');
+    const lines = replies.find((r) => r.id === 3).result.content[0].text.split('\n');
+    expect(lines.map((l: string) => l.split(' — ')[0])).toEqual(['algorithm', 'episode', 'instagram', 'short', 'tiktok', 'vlog', 'youtube']);
   });
 });
 

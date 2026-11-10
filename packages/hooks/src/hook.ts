@@ -32,6 +32,8 @@ export interface HookDeps {
   ppid: number;
   /** ${CLAUDE_PROJECT_DIR}, when set: the project root if it holds a mirage.json. */
   projectDir?: string;
+  /** ${CLAUDE_PLUGIN_ROOT}, when set: writes into its formats, formulas and skills folders are refused. */
+  pluginRoot?: string;
   /** The SessionStart notice asking whether Mirage may install what is missing (setupNotice), or null/absent for none. */
   setupNotice?: string | null;
 }
@@ -207,7 +209,7 @@ class Handler {
     await this.soft(() => core.touchSessionState(project, this.sid));
     const toolInput = this.input.tool_input;
     const { label } = stepLabel(tool, toolInput);
-    const file = fileDecision(tool, toolInput, project, await this.footage());
+    const file = fileDecision(tool, toolInput, project, await this.footage(), this.deps.pluginRoot);
     const n = videoOf(tool, toolInput, project, await this.session());
     const deny = async (reason: string) => {
       await this.step(n, this.stepLine(label, 'denied'));

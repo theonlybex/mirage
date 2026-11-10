@@ -191,13 +191,14 @@ function isChanging(tool, input2, project) {
   if (rel === null || rel === "") return false;
   return rel === "catalog.json" || segments(rel)[0] === "episodes";
 }
-function fileDecision(tool, input2, project, footage) {
+function fileDecision(tool, input2, project, footage, pluginRoot) {
   if (!FILE_TOOLS.has(tool)) return null;
   const p = filePathOf(input2);
   if (p === null) return null;
   if (p.split(/[\\/]/).includes("..")) return { deny: DOTDOT_DENY };
   const target = normalisePath(p, project);
   if (footage.some((f) => inside(target, normalisePath(f, project)) !== null)) return { deny: FOOTAGE_DENY };
+  if (pluginRoot && PLUGIN_FOLDERS.some((f) => inside(target, normalisePath(path2.join(pluginRoot, f), project)) !== null)) return { deny: PLUGIN_DENY };
   if (!SAVE_TOOLS.has(tool)) return null;
   const rel = inside(target, normalisePath(project, path2.sep));
   if (rel === null) return null;
@@ -205,19 +206,21 @@ function fileDecision(tool, input2, project, footage) {
   const s = segments(rel);
   return s.length === 3 && s[0] === "episodes" && /^[1-9]\d*$/.test(s[1]) && (s[2] === "episode.json" || s[2] === "summary.md") ? "allow" : null;
 }
-var ENGINE_PREFIX, FOOTAGE_DENY, DOTDOT_DENY, engineTool, SAVE_TOOLS, FILE_TOOLS, READ_ONLY, STAGES, NO_VIDEO, ENGINE_LABELS, record, baseName, segments, isStage;
+var ENGINE_PREFIX, FOOTAGE_DENY, DOTDOT_DENY, PLUGIN_DENY, PLUGIN_FOLDERS, engineTool, SAVE_TOOLS, FILE_TOOLS, READ_ONLY, STAGES, NO_VIDEO, ENGINE_LABELS, record, baseName, segments, isStage;
 var init_policy = __esm({
   "packages/hooks/src/policy.ts"() {
     "use strict";
     ENGINE_PREFIX = "mcp__plugin_mirage_engine__";
     FOOTAGE_DENY = "Footage folders are read-only in Mirage.";
     DOTDOT_DENY = "Use a plain path inside the project (no \u201C..\u201D).";
+    PLUGIN_DENY = "Mirage's own formats, formulas and skills are read-only. Save your own formula in the project's formulas folder, under a new name.";
+    PLUGIN_FOLDERS = ["formats", "formulas", "skills"];
     engineTool = (tool) => tool.startsWith(ENGINE_PREFIX) ? tool.slice(ENGINE_PREFIX.length) : null;
     SAVE_TOOLS = /* @__PURE__ */ new Set(["Write", "Edit", "MultiEdit"]);
     FILE_TOOLS = /* @__PURE__ */ new Set([...SAVE_TOOLS, "NotebookEdit"]);
-    READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log", "formats", "thumbnail"]);
+    READ_ONLY = /* @__PURE__ */ new Set(["versions", "status", "get_notes", "log", "formats", "thumbnail", "formulas", "channel", "posted", "learn", "predict", "series"]);
     STAGES = /* @__PURE__ */ new Set(["ingest", "check", "cut", "slots", "guide", "vo", "speak", "render"]);
-    NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video", "setup_later", "formats"]);
+    NO_VIDEO = /* @__PURE__ */ new Set(["new_project", "new_video", "setup_later", "formats", "formulas", "channel", "learn", "series"]);
     ENGINE_LABELS = {
       new_project: ["Starting the project", "Project started"],
       new_video: ["Setting up the video", "Video set up"],
@@ -239,7 +242,13 @@ var init_policy = __esm({
       overnight: ["Getting ready for overnight", "Ready for overnight"],
       setup_later: ["Noting that for later", "Noted for later"],
       formats: ["Looking up the formats", "Formats looked up"],
-      thumbnail: ["Picking thumbnail frames", "Thumbnail frames ready"]
+      thumbnail: ["Picking thumbnail frames", "Thumbnail frames ready"],
+      formulas: ["Looking up the formulas", "Formulas looked up"],
+      channel: ["Reading the channel", "Channel read"],
+      posted: ["Noting where the video is posted", "Posted video noted"],
+      learn: ["Reading how your videos did", "Results read"],
+      predict: ["Forecasting how the video will do", "Forecast ready"],
+      series: ["Looking up the series", "Series looked up"]
     };
     record = (input2) => input2 !== null && typeof input2 === "object" && !Array.isArray(input2) ? input2 : {};
     baseName = (p) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
@@ -10199,8 +10208,8 @@ var init_regexes = __esm({
     _emoji = `^(?=[\\s\\S]*[\\p{Extended_Pictographic}\\p{Regional_Indicator}\\u20E3])[\\p{Extended_Pictographic}\\p{Emoji_Component}]+$`;
     ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
     ipv6 = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))$/;
-    mac = (delimiter3) => {
-      const escapedDelim = escapeRegex(delimiter3 ?? ":");
+    mac = (delimiter4) => {
+      const escapedDelim = escapeRegex(delimiter4 ?? ":");
       return new RegExp(`^(?:[0-9A-F]{2}${escapedDelim}){5}[0-9A-F]{2}$|^(?:[0-9a-f]{2}${escapedDelim}){5}[0-9a-f]{2}$`);
     };
     cidrv4 = /^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/([0-9]|[1-2][0-9]|3[0-2])$/;
@@ -19083,8 +19092,8 @@ var init_pt = __esm({
           case "not_multiple_of":
             return `N\xFAmero inv\xE1lido: deve ser m\xFAltiplo de ${issue2.divisor}`;
           case "unrecognized_keys": {
-            const plural2 = issue2.keys.length > 1 ? "s" : "";
-            return `Chave${plural2} inv\xE1lida${plural2}: ${joinValues(issue2.keys, ", ")}`;
+            const plural4 = issue2.keys.length > 1 ? "s" : "";
+            return `Chave${plural4} inv\xE1lida${plural4}: ${joinValues(issue2.keys, ", ")}`;
           }
           case "invalid_key":
             return `Entrada inv\xE1lida n${translateOriginWithArticle(issue2.origin, "definite")}`;
@@ -19234,8 +19243,8 @@ var init_pt_BR = __esm({
           case "not_multiple_of":
             return `N\xFAmero inv\xE1lido: deve ser m\xFAltiplo de ${issue2.divisor}`;
           case "unrecognized_keys": {
-            const plural2 = issue2.keys.length > 1 ? "s" : "";
-            return `Chave${plural2} inv\xE1lida${plural2}: ${joinValues(issue2.keys, ", ")}`;
+            const plural4 = issue2.keys.length > 1 ? "s" : "";
+            return `Chave${plural4} inv\xE1lida${plural4}: ${joinValues(issue2.keys, ", ")}`;
           }
           case "invalid_key":
             return `Entrada inv\xE1lida n${translateOriginWithArticle(issue2.origin, "definite")}`;
@@ -24865,12 +24874,12 @@ function rewriteKeyNames(ctx) {
   const rewrites = /* @__PURE__ */ new Map();
   for (const record3 of pendingRecords.get(ctx) ?? []) {
     const seen = ctx.seen.get(record3);
-    const names = (seen?.def ?? seen?.schema)?.propertyNames;
-    if (!names || names === true || rewrites.has(names))
+    const names2 = (seen?.def ?? seen?.schema)?.propertyNames;
+    if (!names2 || names2 === true || rewrites.has(names2))
       continue;
-    const rewritten = stringifyKeyNames(bySchema, names, /* @__PURE__ */ new Set());
-    if (rewritten !== names)
-      rewrites.set(names, rewritten);
+    const rewritten = stringifyKeyNames(bySchema, names2, /* @__PURE__ */ new Set());
+    if (rewritten !== names2)
+      rewrites.set(names2, rewritten);
   }
   if (!rewrites.size)
     return;
@@ -29509,12 +29518,22 @@ var init_session = __esm({
 });
 
 // packages/shared/src/schemas/video.ts
-var VideoSchema;
+var IdeaSchema, ExperimentSchema, SeriesSlugSchema, ALSO_PLATFORMS, AlsoPostedSchema, VideoSchema;
 var init_video = __esm({
   "packages/shared/src/schemas/video.ts"() {
     "use strict";
     init_zod();
     init_strict2();
+    IdeaSchema = strictObject2({
+      gap: external_exports.string().min(1).optional(),
+      question: external_exports.string().min(1).optional(),
+      doubt: external_exports.string().min(1).optional(),
+      stake: external_exports.string().min(1).optional()
+    });
+    ExperimentSchema = strictObject2({ rule: external_exports.string().min(1), change: external_exports.string().min(1), expect: external_exports.string().min(1) });
+    SeriesSlugSchema = external_exports.string().regex(/^[a-z0-9][a-z0-9-]*$/);
+    ALSO_PLATFORMS = ["instagram", "tiktok"];
+    AlsoPostedSchema = strictObject2({ platform: external_exports.enum(ALSO_PLATFORMS), url: external_exports.string().min(1) });
     VideoSchema = strictObject2({
       version: external_exports.literal(1),
       title: external_exports.string().min(1).max(200),
@@ -29531,7 +29550,59 @@ var init_video = __esm({
       /** A vlog's series: its name, which one it is, and the date it covers. */
       vlog: strictObject2({ name: external_exports.string().min(1), number: external_exports.number().int().positive(), date: external_exports.string().min(1) }).optional(),
       /** The length the video aims for, in seconds; overrides the format's. */
-      targetSec: external_exports.number().positive().optional()
+      targetSec: external_exports.number().positive().optional(),
+      /** The question the video is built on, when the person said it (`new_video`'s `idea`). */
+      idea: IdeaSchema.optional(),
+      /** The video's experiment (`new_video`'s `experiment`, or written here later by the mirage:learn skill before the video is posted). */
+      experiment: ExperimentSchema.optional(),
+      /** Where the video is live, once the person said so (`posted`): its YouTube address, its id there, and the day that was recorded (YYYY-MM-DD). */
+      posted: strictObject2({
+        url: external_exports.string().min(1),
+        id: external_exports.string().min(1),
+        at: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        /** Where else the same short went (`posted`'s `also`), so the record is complete. */
+        also: external_exports.array(AlsoPostedSchema).optional()
+      }).optional(),
+      /** The series the video belongs to (`new_video`'s `series`): the slug of its folder, `series/<slug>/`. */
+      series: SeriesSlugSchema.optional(),
+      /** The title the person picked and the options they were offered, written by the mirage:edit skill's packaging step; `check` and `predict` hold the chosen one against the format's title shape. */
+      titles: strictObject2({ chosen: external_exports.string().min(1).max(200).optional(), options: external_exports.array(external_exports.string().min(1).max(200)).max(10).optional() }).optional()
+    });
+  }
+});
+
+// packages/shared/src/schemas/series.ts
+var ThumbLayoutSchema, SeriesSchema;
+var init_series = __esm({
+  "packages/shared/src/schemas/series.ts"() {
+    "use strict";
+    init_zod();
+    init_strict2();
+    init_video();
+    ThumbLayoutSchema = strictObject2({ face: external_exports.enum(["left", "right"]), share: external_exports.number().min(0.2).max(0.5) });
+    SeriesSchema = strictObject2({
+      version: external_exports.literal(1),
+      /** Equal to the folder's name. */
+      slug: SeriesSlugSchema,
+      name: external_exports.string().min(1).max(200),
+      /** The id of the format its episodes are made in. */
+      format: external_exports.string().min(1),
+      /** The big question the whole series asks. */
+      question: external_exports.string().min(1).optional(),
+      /** The question the latest episode's outro left open: the next episode's recap starts from it. */
+      openQuestion: external_exports.string().min(1).optional(),
+      /** The video whose outro left `openQuestion`. */
+      openQuestionFrom: external_exports.number().int().positive().optional(),
+      /** The running counts (cost so far, attempts used), by name: numbers the person or the catalog gave. */
+      counts: external_exports.record(external_exports.string().min(1), strictObject2({ value: external_exports.number(), unit: external_exports.string().min(1).optional() })),
+      /** The line every episode ends on. */
+      signOff: external_exports.string().min(1).optional(),
+      /** How its titles are shaped, in words ("ATTEMPTING TO … IN [N] DAYS"). */
+      titleShape: external_exports.string().min(1).optional(),
+      thumbnail: ThumbLayoutSchema.optional(),
+      /** Its episodes' video numbers, in order. */
+      episodes: external_exports.array(external_exports.number().int().positive()),
+      createdAt: external_exports.string()
     });
   }
 });
@@ -29576,7 +29647,12 @@ var init_project = __esm({
     MirageProjectSchema = strictObject2({
       version: external_exports.literal(1),
       title: external_exports.string(),
-      createdAt: external_exports.string()
+      createdAt: external_exports.string(),
+      /**
+       * The channels that lead the person's niche, per format id: their YouTube addresses, as the person named them. The
+       * mirage:learn skill writes it and learns from them (with mirage:analyse) while the person's own videos are too few.
+       */
+      niche: external_exports.record(external_exports.string().min(1), external_exports.array(external_exports.string().min(1))).optional()
     });
     ViewerInfoSchema = strictObject2({
       url: external_exports.string(),
@@ -29599,6 +29675,7 @@ var init_src = __esm({
     init_version();
     init_session();
     init_video();
+    init_series();
     init_notes();
     init_project();
   }
@@ -29953,8 +30030,8 @@ function wordsFromWhisperJson(latin1Json) {
   for (let i2 = 1; i2 < words.length; i2++) if (CLAUSE_END.test(words[i2 - 1].w)) words[i2].clauseStart = true;
   if (dtw && words.length) {
     const durations = words.map((x) => x.end - x.start).filter((d) => d > 0).sort((a2, b) => a2 - b);
-    const median = Math.min(0.7, durations.length ? durations[Math.floor(durations.length / 2)] : 0.7);
-    const max = Math.max(0.2, median * 2);
+    const median3 = Math.min(0.7, durations.length ? durations[Math.floor(durations.length / 2)] : 0.7);
+    const max = Math.max(0.2, median3 * 2);
     for (const x of words) if (x.clauseStart && x.end - x.start > max) x.start = x.end - max;
   }
   let last = 0;
@@ -30107,6 +30184,56 @@ var init_kokoro = __esm({
   }
 });
 
+// packages/sidecars/src/ytdlp.ts
+import { access as access3, constants as constants7 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { delimiter as delimiter3, join as join6 } from "node:path";
+function ytDlpInstallHint() {
+  return `Install yt-dlp (macOS: brew install yt-dlp; Windows: winget install yt-dlp) or set WORDEDITS_YTDLP_DIR to a folder containing ${exe3()}.`;
+}
+async function exists3(p) {
+  try {
+    await access3(p, constants7.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function knownDirs2() {
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA || join6(homedir2(), "AppData", "Local");
+    return [join6(local, "Microsoft", "WinGet", "Links"), join6(local, "Programs", "yt-dlp")];
+  }
+  return ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", join6(homedir2(), ".local", "bin")];
+}
+async function locateYtDlp() {
+  const override = process.env.WORDEDITS_YTDLP_DIR;
+  if (override) {
+    const p = join6(override, exe3());
+    if (await exists3(p)) return p;
+    throw new SidecarError(YTDLP, "NOT_FOUND", `${YTDLP} not found in WORDEDITS_YTDLP_DIR (${override})`, `Put ${exe3()} in that folder or unset WORDEDITS_YTDLP_DIR.`);
+  }
+  const dirs = [...(process.env.PATH ?? "").split(delimiter3).filter(Boolean), ...knownDirs2()];
+  for (const dir of dirs) {
+    const p = join6(dir, exe3());
+    if (await exists3(p)) return p;
+  }
+  throw new SidecarError(YTDLP, "NOT_FOUND", `${YTDLP} was not found`, ytDlpInstallHint());
+}
+async function runYtDlp(args, opts = {}) {
+  return runPath(YTDLP, await locateYtDlp(), args, { notFoundHint: ytDlpInstallHint(), ...opts });
+}
+var YTDLP, exe3;
+var init_ytdlp = __esm({
+  "packages/sidecars/src/ytdlp.ts"() {
+    "use strict";
+    init_errors();
+    init_run();
+    YTDLP = "yt-dlp";
+    exe3 = () => process.platform === "win32" ? `${YTDLP}.exe` : YTDLP;
+  }
+});
+
 // packages/sidecars/src/index.ts
 var init_src2 = __esm({
   "packages/sidecars/src/index.ts"() {
@@ -30120,6 +30247,7 @@ var init_src2 = __esm({
     init_transcribe();
     init_whisper();
     init_kokoro();
+    init_ytdlp();
   }
 });
 
@@ -30355,8 +30483,8 @@ function issuePath(path8) {
 }
 function describeZodError(e) {
   const issue2 = firstIssue(e);
-  const at2 = issuePath(issue2.path);
-  return `${at2 ? `${at2}: ` : ""}${issue2.message}`;
+  const at4 = issuePath(issue2.path);
+  return `${at4 ? `${at4}: ` : ""}${issue2.message}`;
 }
 function flatIssues(issues) {
   return issues.flatMap((i2) => {
@@ -30422,11 +30550,11 @@ var init_json_file = __esm({
 });
 
 // packages/core/src/mirage/errors.ts
-import { accessSync as accessSync2, constants as constants7, existsSync as existsSync2 } from "node:fs";
+import { accessSync as accessSync2, constants as constants8, existsSync as existsSync2 } from "node:fs";
 import { dirname as dirname3 } from "node:path";
 function unreadableFile(path8) {
   try {
-    accessSync2(path8, constants7.R_OK);
+    accessSync2(path8, constants8.R_OK);
     return false;
   } catch (e) {
     return e.code !== "ENOENT" && existsSync2(path8);
@@ -30525,16 +30653,16 @@ function ease(kind, p) {
 function moveFrames(item, frames, fps, clock) {
   const m = item.move;
   const { z0, z1, x0, x1, y0, y1, a: a2, b } = moveSpan(item, frames, fps, clock);
-  const at2 = (p) => {
+  const at4 = (p) => {
     const e = ease(m?.ease ?? "inOut", p);
     if (e === 0) return { zoom: z0, x: x0, y: y0 };
     if (e === 1) return { zoom: z1, x: x1, y: y1 };
     return { zoom: z0 * (z1 / z0) ** e, x: x0 + (x1 - x0) * e, y: y0 + (y1 - y0) * e };
   };
   return Array.from({ length: Math.max(0, frames) }, (_, i2) => {
-    if (!m || i2 < a2) return at2(0);
-    if (i2 >= b - 1) return at2(1);
-    return at2((i2 - a2) / (b - a2 - 1));
+    if (!m || i2 < a2) return at4(0);
+    if (i2 >= b - 1) return at4(1);
+    return at4((i2 - a2) / (b - a2 - 1));
   });
 }
 function moveSpan(item, frames, fps, clock) {
@@ -30581,13 +30709,13 @@ function moveClocks(laid, fps) {
       src += p.srcFrames;
     }
     const last = parts.length - 1;
-    const at2 = (x) => {
+    const at4 = (x) => {
       const j = parts.findIndex((p, k) => x < srcStarts[k] + p.srcFrames);
       return j < 0 ? offsets[last] + parts[last].srcFrames + (x - src) : offsets[j] + (x - srcStarts[j]);
     };
-    const a2 = at2(Math.round((m.start ?? 0) * fps));
+    const a2 = at4(Math.round((m.start ?? 0) * fps));
     const end = m.end === void 0 ? void 0 : Math.round(m.end * fps);
-    const b = end === void 0 ? frames : end <= 0 ? 0 : at2(end - 1) + 1;
+    const b = end === void 0 ? frames : end <= 0 ? 0 : at4(end - 1) + 1;
     parts.forEach((p, k) => {
       if (sameMove(p.item.move, m)) out[from + k] = { a: a2 - offsets[k], b: b - offsets[k] };
     });
@@ -30597,11 +30725,11 @@ function moveClocks(laid, fps) {
 function moveExprs(item, frames, fps, n2, first = 0, clock) {
   const { z0, z1, x0, x1, y0, y1, a: a2, b } = moveSpan(item, frames, fps, clock);
   const f = ffNum;
-  const at2 = a2 + first;
+  const at4 = a2 + first;
   let e;
-  if (b - a2 <= 1) e = `st(0,gte(${n2},${at2}))`;
+  if (b - a2 <= 1) e = `st(0,gte(${n2},${at4}))`;
   else {
-    const p = `st(0,clip(${at2 === 0 ? n2 : at2 < 0 ? `(${n2}+${-at2})` : `(${n2}-${at2})`}/${b - a2 - 1},0,1))`;
+    const p = `st(0,clip(${at4 === 0 ? n2 : at4 < 0 ? `(${n2}+${-at4})` : `(${n2}-${at4})`}/${b - a2 - 1},0,1))`;
     const curve2 = { linear: "", in: "ld(0)^2", out: "1-(1-ld(0))^2", inOut: "if(lt(ld(0),0.5),2*ld(0)^2,1-2*(1-ld(0))^2)" }[item.move.ease];
     e = curve2 ? `${p};st(0,${curve2})` : p;
   }
@@ -30658,18 +30786,18 @@ function formatTime(sec) {
   const ss = String(s % 60).padStart(2, "0");
   return h2 > 0 ? `${h2}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 }
-function shiftAfter(ep, at2, delta) {
+function shiftAfter(ep, at4, delta) {
   const shifted = {
     ...ep,
-    overlays: ep.overlays.map((o2) => shiftRange(o2, at2, delta)),
+    overlays: ep.overlays.map((o2) => shiftRange(o2, at4, delta)),
     music: ep.music.map((m) => {
-      const cue = shiftRange(m, at2, delta);
-      return m.dips ? { ...cue, dips: m.dips.map((d) => shiftRange(d, at2, delta)) } : cue;
+      const cue = shiftRange(m, at4, delta);
+      return m.dips ? { ...cue, dips: m.dips.map((d) => shiftRange(d, at4, delta)) } : cue;
     }),
-    slots: ep.slots.map((s) => shiftRange(s, at2, delta)),
-    voiceover: ep.voiceover ? { ...ep.voiceover, lines: ep.voiceover.lines.map((l) => l.at >= at2 - EPS ? { ...l, at: l.at + delta } : l) } : null
+    slots: ep.slots.map((s) => shiftRange(s, at4, delta)),
+    voiceover: ep.voiceover ? { ...ep.voiceover, lines: ep.voiceover.lines.map((l) => l.at >= at4 - EPS ? { ...l, at: l.at + delta } : l) } : null
   };
-  if (ep.sfx) shifted.sfx = ep.sfx.map((x) => ({ ...x, at: shiftEdge(x.at, x.at >= at2 - EPS, at2, delta) }));
+  if (ep.sfx) shifted.sfx = ep.sfx.map((x) => ({ ...x, at: shiftEdge(x.at, x.at >= at4 - EPS, at4, delta) }));
   return shifted;
 }
 function dropCollapsed(ep, before) {
@@ -30697,11 +30825,11 @@ var init_timeline = __esm({
     init_src();
     init_move();
     EPS = 1e-9;
-    shiftEdge = (p, after, at2, delta) => after ? p + delta : delta < 0 ? Math.min(p, at2 + delta) : p;
-    shiftRange = (r, at2, delta) => ({
+    shiftEdge = (p, after, at4, delta) => after ? p + delta : delta < 0 ? Math.min(p, at4 + delta) : p;
+    shiftRange = (r, at4, delta) => ({
       ...r,
-      start: shiftEdge(r.start, r.start >= at2 - EPS, at2, delta),
-      end: shiftEdge(r.end, r.end > at2 + EPS, at2, delta)
+      start: shiftEdge(r.start, r.start >= at4 - EPS, at4, delta),
+      end: shiftEdge(r.end, r.end > at4 + EPS, at4, delta)
     });
   }
 });
@@ -30722,7 +30850,7 @@ var init_cancel2 = __esm({
 // packages/core/src/mirage/lock.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { open as open2, readdir, readFile as readFile3, rm as rm2, stat as stat3, writeFile as writeFile2 } from "node:fs/promises";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 function alive(pid) {
   try {
     process.kill(pid, 0);
@@ -30783,7 +30911,7 @@ async function removeAbandoned(path8, what, now) {
   return true;
 }
 async function acquireLock(dir, command, what) {
-  const path8 = join6(dir, LOCK_FILE);
+  const path8 = join7(dir, LOCK_FILE);
   const now = Date.now();
   const mine = { pid: process.pid, command, startedAt: new Date(now).toISOString(), token: randomUUID2() };
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -30807,11 +30935,11 @@ async function acquireLock(dir, command, what) {
   throw new MirageError("BUSY", `${what} is busy: another Mirage command is starting in it`, busyHint(path8));
 }
 async function clearLeftovers(dir, lock, ours) {
-  const names = await readdir(dir).catch(() => []);
+  const names2 = await readdir(dir).catch(() => []);
   const tmp = /\.tmp-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   await Promise.all(
-    names.map(async (f) => {
-      const p = join6(dir, f);
+    names2.map(async (f) => {
+      const p = join7(dir, f);
       if (!ours(f)) {
         if (!tmp.test(f)) return;
         const st = await stat3(p).catch(() => null);
@@ -30850,9 +30978,9 @@ function frameDb(samples, sampleRate) {
 function refineWordTimes(words, samples, sampleRate) {
   const db = frameDb(samples, sampleRate);
   if (db.length < 50 || words.length === 0) return words;
-  const sorted = [...db].sort((a2, b) => a2 - b);
-  const quiet = percentile(sorted, 0.1);
-  const loud = percentile(sorted, 0.95);
+  const sorted2 = [...db].sort((a2, b) => a2 - b);
+  const quiet = percentile(sorted2, 0.1);
+  const loud = percentile(sorted2, 0.95);
   if (loud - quiet < 20) return words;
   const threshold = Math.min(loud - 10, Math.max(quiet + 15, loud - 40));
   const sounds = (f) => db[f] >= threshold;
@@ -30945,7 +31073,7 @@ var init_word_timing = __esm({
     TAIL_FRAMES = 20;
     TAIL_PAUSE_FRAMES = 15;
     MAX_EXTEND_SEC = 1;
-    percentile = (sorted, q) => sorted[Math.floor(q * (sorted.length - 1))];
+    percentile = (sorted2, q) => sorted2[Math.floor(q * (sorted2.length - 1))];
   }
 });
 
@@ -30953,7 +31081,7 @@ var init_word_timing = __esm({
 import { createHash as createHash2 } from "node:crypto";
 import { createReadStream as createReadStream2, existsSync as existsSync3 } from "node:fs";
 import { mkdir, readdir as readdir2, rename as rename2, rm as rm3, stat as stat4 } from "node:fs/promises";
-import { extname, join as join7, resolve as resolve2 } from "node:path";
+import { extname, join as join8, resolve as resolve2 } from "node:path";
 function guessKind(probe2, transcript) {
   const words = transcript?.words.length ?? 0;
   const wordsPerMinute = words / Math.max(probe2.durationSec / 60, 1 / 60);
@@ -30972,14 +31100,14 @@ async function sha256File(path8) {
 }
 async function loadCatalog(project) {
   try {
-    return await readJsonFile(join7(resolve2(project), "catalog.json"), CatalogSchema, "catalog.json");
+    return await readJsonFile(join8(resolve2(project), "catalog.json"), CatalogSchema, "catalog.json");
   } catch (e) {
     if (e.code === "ENOENT") return { version: 1, clips: [] };
     throw e;
   }
 }
 async function saveCatalog(project, catalog) {
-  await writeJsonFile(join7(resolve2(project), "catalog.json"), CatalogSchema, catalog, "catalog.json");
+  await writeJsonFile(join8(resolve2(project), "catalog.json"), CatalogSchema, catalog, "catalog.json");
 }
 function nextClipId(catalog) {
   const max = catalog.clips.reduce((m, c3) => Math.max(m, Number(c3.id.slice(1))), 0);
@@ -31059,10 +31187,10 @@ async function ingestLocked(o2, project) {
   let catalog;
   for (const name of files) {
     o2.signal?.throwIfAborted();
-    const path8 = join7(dir, name);
+    const path8 = join8(dir, name);
     catalog = await loadCatalogOrStop(project);
     let id = nextClipId(catalog);
-    let framesDir = join7(project, "frames", id);
+    let framesDir = join8(project, "frames", id);
     try {
       const sha256 = await sha256File(path8);
       const prev = catalog.clips.find((c3) => c3.sha256 === sha256);
@@ -31074,7 +31202,7 @@ async function ingestLocked(o2, project) {
           o2.onStep?.(`${name}: moved, path updated`);
         }
         if ((moved || prev.path === path8) && prev.probe.hasAudio && prev.transcript === null) {
-          transcript2 = await transcribeClip({ tools: o2.tools, path: path8, name, wav: join7(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, audioStream: prev.probe.audioStream, locale: o2.locale, result: result2, signal: o2.signal, onStep: o2.onStep });
+          transcript2 = await transcribeClip({ tools: o2.tools, path: path8, name, wav: join8(project, `.tmp-${prev.id}.wav`), durationSec: prev.probe.durationSec, audioStream: prev.probe.audioStream, locale: o2.locale, result: result2, signal: o2.signal, onStep: o2.onStep });
           if (transcript2) o2.onStep?.(`${name}: transcribed`);
         }
         if (moved || transcript2) {
@@ -31129,7 +31257,7 @@ async function ingestLocked(o2, project) {
         timeoutMs: Math.max(12e4, probe2.durationSec * 5e3)
       });
       const frameFiles = (await readdir2(framesDir)).filter((f) => f.endsWith(".jpg")).sort();
-      const transcript = probe2.hasAudio ? await transcribeClip({ tools: o2.tools, path: path8, name, wav: join7(project, `.tmp-${id}.wav`), durationSec: probe2.durationSec, audioStream: probe2.audioStream, locale: o2.locale, result: result2, signal: o2.signal, onStep: o2.onStep }) : null;
+      const transcript = probe2.hasAudio ? await transcribeClip({ tools: o2.tools, path: path8, name, wav: join8(project, `.tmp-${id}.wav`), durationSec: probe2.durationSec, audioStream: probe2.audioStream, locale: o2.locale, result: result2, signal: o2.signal, onStep: o2.onStep }) : null;
       o2.signal?.throwIfAborted();
       let clip;
       catalog = await updateCatalog(project, (cat) => {
@@ -31140,7 +31268,7 @@ async function ingestLocked(o2, project) {
         clip = { id, path: path8, sha256, probe: probe2, kind: guessKind(probe2, transcript), transcript, frames, notes: "", moments: [] };
         cat.clips.push(clip);
       });
-      const finalDir = join7(project, "frames", id);
+      const finalDir = join8(project, "frames", id);
       if (finalDir !== framesDir) {
         await rename2(framesDir, finalDir);
         framesDir = finalDir;
@@ -31266,13 +31394,13 @@ function detectTempo(samples, sampleRate) {
   }
   bpm = hopRate * 60 / period;
   const meanOnset = onset.reduce((a2, v) => a2 + v, 0) / onset.length;
-  const confidence = Math.round(Math.max(0, Math.min(1, (combBest / meanOnset - 2) / 6)) * 1e3) / 1e3;
+  const confidence2 = Math.round(Math.max(0, Math.min(1, (combBest / meanOnset - 2) / 6)) * 1e3) / 1e3;
   const beat = 60 / bpm;
   const beatOffset = ((offset * HOP + WIN - DELTA) / sampleRate % beat + beat) % beat;
   return {
     bpm: Math.round(bpm * 10) / 10,
     beatOffset: Math.round(beatOffset * 1e3) / 1e3,
-    confidence
+    confidence: confidence2
   };
 }
 async function decodeMono(file2, tmpOut, tools, o2) {
@@ -31299,10 +31427,10 @@ var init_tempo = __esm({
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { existsSync as existsSync4 } from "node:fs";
 import { readdir as readdir3 } from "node:fs/promises";
-import { extname as extname2, join as join8, resolve as resolve3 } from "node:path";
+import { extname as extname2, join as join9, resolve as resolve3 } from "node:path";
 async function loadLibrary(dir) {
   try {
-    return await readJsonFile(join8(resolve3(dir), "library.json"), MusicLibrarySchema, "music/library.json");
+    return await readJsonFile(join9(resolve3(dir), "library.json"), MusicLibrarySchema, "music/library.json");
   } catch (e) {
     if (e.code === "ENOENT") return { version: 1, tracks: [] };
     throw e;
@@ -31318,7 +31446,7 @@ function cueTrack(c3, i2, lib) {
 }
 function checkCueFiles(cues, lib, musicDir) {
   cues.forEach((c3, i2) => {
-    if (!existsSync4(join8(musicDir, cueTrack(c3, i2, lib).file))) {
+    if (!existsSync4(join9(musicDir, cueTrack(c3, i2, lib).file))) {
       throw new MirageError("NO_MUSIC_TRACK", `music cue ${i2 + 1}: ${c3.track} is missing from music/`, `Put ${c3.track} back in ${musicDir}, or remove the cue.`);
     }
   });
@@ -31350,7 +31478,7 @@ async function analyzeLocked(root, tools) {
     unreadable.add(track);
   };
   for (const track of lib.tracks) {
-    const onDisk = files.find((f) => sameFileName(f, track.file)) ?? (existsSync4(join8(root, track.file)) ? track.file : void 0);
+    const onDisk = files.find((f) => sameFileName(f, track.file)) ?? (existsSync4(join9(root, track.file)) ? track.file : void 0);
     if (!onDisk) {
       report.warnings.push(`${track.file} is in library.json but not in the music folder \u2014 put it back, or remove its entry`);
       continue;
@@ -31359,7 +31487,7 @@ async function analyzeLocked(root, tools) {
       report.tracks.push(track);
       continue;
     }
-    const path8 = join8(root, onDisk);
+    const path8 = join9(root, onDisk);
     let p;
     try {
       p = await tools.probe(path8);
@@ -31378,7 +31506,7 @@ async function analyzeLocked(root, tools) {
     if (track.bpm === null || track.beatOffset === null) {
       let samples;
       try {
-        samples = await decodeMono(path8, join8(root, `.tmp-${randomUUID3()}.f32`), tools, { sampleRate: 11025, maxSec: 90 });
+        samples = await decodeMono(path8, join9(root, `.tmp-${randomUUID3()}.f32`), tools, { sampleRate: 11025, maxSec: 90 });
       } catch (e) {
         skip(track, errorReason(e));
         continue;
@@ -31393,7 +31521,7 @@ async function analyzeLocked(root, tools) {
     report.tracks.push(track);
   }
   lib.tracks = lib.tracks.filter((t) => !(added.has(t) && unreadable.has(t)));
-  await writeJsonFile(join8(root, "library.json"), MusicLibrarySchema, lib, "music/library.json");
+  await writeJsonFile(join9(root, "library.json"), MusicLibrarySchema, lib, "music/library.json");
   return report;
 }
 function snapItem(item, t, oldDur, cue, beat, fps, catalog) {
@@ -31495,12 +31623,12 @@ function keyWords(words, highlight) {
   }
   return keys;
 }
-function wordLines(span, group, parts) {
+function wordLines(span2, group, parts) {
   const starts = [];
-  for (const [k, x] of group.entries()) starts.push(k === 0 ? span.start : Math.min(span.end, Math.max(x.start, starts[k - 1])));
+  for (const [k, x] of group.entries()) starts.push(k === 0 ? span2.start : Math.min(span2.end, Math.max(x.start, starts[k - 1])));
   const lines = [];
   for (const [k, start] of starts.entries()) {
-    const end = r34(k + 1 < starts.length ? starts[k + 1] : span.end);
+    const end = r34(k + 1 < starts.length ? starts[k + 1] : span2.end);
     if (end <= start + EPS2) continue;
     lines.push({ start: r34(start), end, parts: parts(k) });
   }
@@ -31509,12 +31637,12 @@ function wordLines(span, group, parts) {
 function popLines(words, o2) {
   const keys = keyWords(words, o2.highlight);
   const groups = groupWords(words, { maxChars: 16, maxWords: 3, maxGap: 0.6, wordsOnly: true });
-  return groupSpans(groups, { durationSec: o2.durationSec, lead: 0.1, minDur: 0.5 }).flatMap((span) => {
-    const firstKey = span.group.find((x) => keys.has(x.index));
+  return groupSpans(groups, { durationSec: o2.durationSec, lead: 0.1, minDur: 0.5 }).flatMap((span2) => {
+    const firstKey = span2.group.find((x) => keys.has(x.index));
     return wordLines(
-      span,
-      span.group,
-      (k) => span.group.map((x, j) => ({
+      span2,
+      span2.group,
+      (k) => span2.group.map((x, j) => ({
         text: x.text.toUpperCase(),
         ...x === firstKey ? { key: true } : {},
         ...j === k ? { pop: true } : {},
@@ -31526,7 +31654,7 @@ function popLines(words, o2) {
 function karaokeLines(words, o2) {
   const groups = groupWords(words, { maxChars: 38, maxGap: 0.6, wordsOnly: true });
   return groupSpans(groups, { durationSec: o2.durationSec, lead: 0.15, minDur: 0.8 }).flatMap(
-    (span) => wordLines(span, span.group, (k) => span.group.map((x, j) => ({ text: x.text, ...j === k ? { lit: true } : {} })))
+    (span2) => wordLines(span2, span2.group, (k) => span2.group.map((x, j) => ({ text: x.text, ...j === k ? { lit: true } : {} })))
   );
 }
 function captionWarnings(words, captions) {
@@ -31569,13 +31697,13 @@ var init_captions = __esm({
 
 // packages/core/src/mirage/fonts.ts
 import { existsSync as existsSync5 } from "node:fs";
-import { dirname as dirname4, join as join9, resolve as resolve4 } from "node:path";
+import { dirname as dirname4, join as join10, resolve as resolve4 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function bundledFontsDir(from = import.meta.url) {
   const here = dirname4(from.startsWith("file:") ? fileURLToPath3(from) : resolve4(from));
   const dir = SOURCE_LAYOUT.test(here) ? resolve4(here, "..", "..", "..", "..", "plugin", "fonts", "files") : resolve4(here, "..", "fonts", "files");
-  if (!existsSync5(join9(dir, CAPTION_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${dir}`, "Reinstall the Mirage plugin.");
-  if (!existsSync5(join9(dir, MONO_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's card font is missing from ${dir}`, "Reinstall the Mirage plugin.");
+  if (!existsSync5(join10(dir, CAPTION_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's caption font is missing from ${dir}`, "Reinstall the Mirage plugin.");
+  if (!existsSync5(join10(dir, MONO_FONT_FILE))) throw new MirageError("BAD_ITEM", `Mirage's card font is missing from ${dir}`, "Reinstall the Mirage plugin.");
   return dir;
 }
 var CAPTION_FONT, CAPTION_FONT_FILE, MONO_FONT, MONO_FONT_FILE, SOURCE_LAYOUT;
@@ -31639,17 +31767,17 @@ function spills(ep, sources, laid) {
 }
 function fadesFor(laid, spills2) {
   const items = /* @__PURE__ */ new Map();
-  const at2 = (id) => laid.findIndex((l) => l.item.id === id);
+  const at4 = (id) => laid.findIndex((l) => l.item.id === id);
   const tails = /* @__PURE__ */ new Map();
   const leads = /* @__PURE__ */ new Map();
   for (const s of spills2) {
-    const i2 = at2(s.item);
+    const i2 = at4(s.item);
     if (i2 < 0) continue;
     if (s.kind === "tail") tails.set(i2, s);
     else leads.set(i2 - 1, s);
   }
   const fades = spills2.map((s) => {
-    const i2 = at2(s.item);
+    const i2 = at4(s.item);
     const cut = s.kind === "tail" ? i2 : i2 - 1;
     const [tail, lead] = [tails.get(cut), leads.get(cut)];
     if (!tail || !lead) return singleFade(s);
@@ -32047,24 +32175,24 @@ var init_overlays = __esm({
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { existsSync as existsSync6, statSync as statSync3 } from "node:fs";
 import { mkdir as mkdir2, readFile as readFile6, rename as rename3, rm as rm5 } from "node:fs/promises";
-import { homedir as homedir2, tmpdir as tmpdir2 } from "node:os";
-import { basename as basename2, dirname as dirname5, join as join10 } from "node:path";
+import { homedir as homedir3, tmpdir as tmpdir2 } from "node:os";
+import { basename as basename2, dirname as dirname5, join as join11 } from "node:path";
 function sfxDir(env = process.env) {
   if (env.MIRAGE_SFX_DIR) return env.MIRAGE_SFX_DIR;
-  if (env.MIRAGE_PLUGIN_DATA) return join10(env.MIRAGE_PLUGIN_DATA, "sfx");
-  return join10(homedir2(), ".cache", "mirage", "sfx");
+  if (env.MIRAGE_PLUGIN_DATA) return join11(env.MIRAGE_PLUGIN_DATA, "sfx");
+  return join11(homedir3(), ".cache", "mirage", "sfx");
 }
 async function builtinSfx(name, tools, o2 = {}) {
   const recipe = Object.hasOwn(RECIPES, name) ? RECIPES[name] : void 0;
   if (!recipe) throw new MirageError("BAD_INPUT", `"${name}" isn't a built-in sound`, `Built-in sounds: ${BUILTIN_SFX.join(", ")}.`);
   const result2 = { peakSec: recipe.peakSec, durationSec: recipe.durationSec };
-  const folder = join10(o2.dir ?? sfxDir(), `v${SFX_RECIPE_VERSION}`);
-  const file2 = join10(folder, `${name}.wav`);
+  const folder = join11(o2.dir ?? sfxDir(), `v${SFX_RECIPE_VERSION}`);
+  const file2 = join11(folder, `${name}.wav`);
   if (existsSync6(file2)) return { file: file2, ...result2 };
   await mkdir2(folder, { recursive: true });
   const id = randomUUID4();
-  const raw = join10(folder, `${name}.raw-${id}`);
-  const part = join10(folder, `${name}.wav.tmp-${id}`);
+  const raw = join11(folder, `${name}.raw-${id}`);
+  const part = join11(folder, `${name}.wav.tmp-${id}`);
   try {
     const pad2 = Math.round(PAD_SEC * SR);
     const len = Math.round(recipe.durationSec * SR);
@@ -32074,17 +32202,17 @@ async function builtinSfx(name, tools, o2 = {}) {
     const buf = await readFile6(raw);
     const x = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
     let loudest = 0;
-    let at2 = 0;
+    let at4 = 0;
     for (let i2 = 0; i2 < x.length; i2++) {
       const a2 = Math.abs(x[i2]);
-      if (a2 > loudest) [loudest, at2] = [a2, i2];
+      if (a2 > loudest) [loudest, at4] = [a2, i2];
     }
     if (!(loudest > 0)) throw new Error(`the ${name} recipe made silence`);
     const peakAt = Math.round(recipe.peakSec * SR);
     const ms2 = SR / 1e3;
     let onset = 0;
     while (Math.abs(x[onset]) < loudest / PASS.onsetDivisor) onset++;
-    const start = Math.min(Math.max(Math.min(at2 - peakAt, onset - PASS.leadMs * ms2), 0), total - len);
+    const start = Math.min(Math.max(Math.min(at4 - peakAt, onset - PASS.leadMs * ms2), 0), total - len);
     const fadeOut = Math.round(recipe.fadeOutSec * SR);
     const gain = 10 ** (PEAK_DB / 20) / loudest;
     const af = [
@@ -32107,12 +32235,12 @@ async function builtinSfx(name, tools, o2 = {}) {
 }
 function sfxSource(project, sound, label = "sfx") {
   const parts = sound.split(/[\\/]/);
-  const found = (path8) => isFile2(join10(project, ...path8.split("/"))) ? { file: join10(project, ...path8.split("/")), path: path8 } : null;
+  const found = (path8) => isFile2(join11(project, ...path8.split("/"))) ? { file: join11(project, ...path8.split("/")), path: path8 } : null;
   let hit = null;
   if (parts.length === 1) {
-    const names = SFX_EXTENSIONS.map((e) => `${sound}${e}`);
-    if (SFX_EXTENSIONS.some((e) => sound.toLowerCase().endsWith(e))) names.unshift(sound);
-    for (const name of names) hit ??= found(`sfx/${name}`);
+    const names2 = SFX_EXTENSIONS.map((e) => `${sound}${e}`);
+    if (SFX_EXTENSIONS.some((e) => sound.toLowerCase().endsWith(e))) names2.unshift(sound);
+    for (const name of names2) hit ??= found(`sfx/${name}`);
     if (!hit && BUILTIN_SFX.includes(sound)) return { builtin: sound };
   } else if (parts[0] === "sfx" && parts.length > 1 && parts.slice(1).every((p) => p !== "" && p !== "." && p !== "..")) {
     hit = found(parts.join("/"));
@@ -32126,14 +32254,14 @@ async function resolveSfx(project, sound, tools, o2 = {}) {
   if ("builtin" in src) return builtinSfx(src.builtin, tools, { dir: o2.dir, signal: o2.signal });
   let x;
   try {
-    x = await decodeMono(src.file, join10(o2.tmpDir ?? tmpdir2(), `.sfx-${randomUUID4()}.f32`), tools, { sampleRate: SR, maxSec: MAX_PERSON_SFX_SEC, signal: o2.signal });
+    x = await decodeMono(src.file, join11(o2.tmpDir ?? tmpdir2(), `.sfx-${randomUUID4()}.f32`), tools, { sampleRate: SR, maxSec: MAX_PERSON_SFX_SEC, signal: o2.signal });
   } catch (e) {
     o2.signal?.throwIfAborted();
     throw fileUnreadable(e) ? unreadableSfx(label, src.path) : e;
   }
-  let at2 = 0;
-  for (let i2 = 1; i2 < x.length; i2++) if (Math.abs(x[i2]) > Math.abs(x[at2] ?? 0)) at2 = i2;
-  return { file: src.file, peakSec: at2 / SR, durationSec: x.length / SR };
+  let at4 = 0;
+  for (let i2 = 1; i2 < x.length; i2++) if (Math.abs(x[i2]) > Math.abs(x[at4] ?? 0)) at4 = i2;
+  return { file: src.file, peakSec: at4 / SR, durationSec: x.length / SR };
 }
 async function measureSfxLevel(file2, tools, o2) {
   const af = `aresample=${SR},aformat=sample_fmts=fltp:channel_layouts=stereo,apad=pad_dur=0.4,ebur128=metadata=1:peak=sample,ametadata=mode=print:file=${basename2(o2.metaFile)}`;
@@ -32247,13 +32375,13 @@ function jpegOrientation(b) {
         const order = b.toString("latin1", t, t + 2);
         if (order !== "II" && order !== "MM") return 1;
         const le = order === "II";
-        const u16 = (at2) => {
-          if (at2 + 2 > end) throw new RangeError("past the segment");
-          return le ? b.readUInt16LE(at2) : b.readUInt16BE(at2);
+        const u16 = (at4) => {
+          if (at4 + 2 > end) throw new RangeError("past the segment");
+          return le ? b.readUInt16LE(at4) : b.readUInt16BE(at4);
         };
-        const u32 = (at2) => {
-          if (at2 + 4 > end) throw new RangeError("past the segment");
-          return le ? b.readUInt32LE(at2) : b.readUInt32BE(at2);
+        const u32 = (at4) => {
+          if (at4 + 4 > end) throw new RangeError("past the segment");
+          return le ? b.readUInt32LE(at4) : b.readUInt32BE(at4);
         };
         if (u16(t + 2) !== 42) return 1;
         const ifd = t + u32(t + 4);
@@ -32319,10 +32447,10 @@ function imageFormat(file2) {
         if (n2 >= 24 && head.toString("latin1", 12, 16) === "IHDR") size = [head.readUInt32BE(16), head.readUInt32BE(20)];
       } else if (starts(JPEG)) {
         format2 = "jpeg";
-        size = jpegSize((at2, len) => {
-          if (at2 + len <= n2) return head.subarray(at2, at2 + len);
+        size = jpegSize((at4, len) => {
+          if (at4 + len <= n2) return head.subarray(at4, at4 + len);
           const b = Buffer.alloc(len);
-          return b.subarray(0, readSync(fd, b, 0, len, at2));
+          return b.subarray(0, readSync(fd, b, 0, len, at4));
         });
       }
     } finally {
@@ -32395,11 +32523,11 @@ function mergeSlots(prev, next, where = (p) => p) {
   const pairs = [];
   prev.forEach((p, pi) => {
     if (!p.line.trim()) return;
-    const span = where(p);
-    if (!span) return;
+    const span2 = where(p);
+    if (!span2) return;
     next.forEach((slot, ni) => {
-      const overlap = Math.min(span.end, slot.end) - Math.max(span.start, slot.start);
-      const shorter = Math.min(span.end - span.start, slot.end - slot.start);
+      const overlap = Math.min(span2.end, slot.end) - Math.max(span2.start, slot.start);
+      const shorter = Math.min(span2.end - span2.start, slot.end - slot.start);
       if (overlap > 0 && overlap >= MIN_OVERLAP_FRACTION * shorter - 1e-9) pairs.push({ p: pi, n: ni, overlap });
     });
   });
@@ -32420,9 +32548,9 @@ function cutOf(ep) {
   return {
     fingerprint: itemsFingerprint(ep.items),
     items: layoutTimeline(ep).map((l) => {
-      const at2 = { id: l.item.id, start: r36(l.start), end: r36(l.end) };
+      const at4 = { id: l.item.id, start: r36(l.start), end: r36(l.end) };
       const s = shown(l.item);
-      return s.clip === void 0 ? { ...at2, in: s.in, speed: s.speed, out: s.out } : { ...at2, in: s.in, speed: s.speed, clip: s.clip, out: s.out };
+      return s.clip === void 0 ? { ...at4, in: s.in, speed: s.speed, out: s.out } : { ...at4, in: s.in, speed: s.speed, clip: s.clip, out: s.out };
     })
   };
 }
@@ -32437,7 +32565,7 @@ function slotsStaleError(n2) {
     `Run: pnpm mirage slots <project> ${n2}, check the lines it carried over, then run vo again (it reuses the saved transcript).`
   );
 }
-function follow(span, was, ep) {
+function follow(span2, was, ep) {
   const laid = layoutTimeline(ep);
   const pieces = [];
   const place = (l, a2, b) => {
@@ -32447,8 +32575,8 @@ function follow(span, was, ep) {
     if (y2 - x2 > 1e-6) pieces.push([l.start + (x2 - s.in) / s.speed, l.start + (y2 - s.in) / s.speed]);
   };
   for (const o2 of was.items) {
-    const a2 = Math.max(span.start, o2.start);
-    const b = Math.min(span.end, o2.end);
+    const a2 = Math.max(span2.start, o2.start);
+    const b = Math.min(span2.end, o2.end);
     if (b <= a2) continue;
     const srcAt = (t) => Math.min(o2.out ?? Infinity, o2.in + (t - o2.start) * o2.speed);
     const [sa, sb] = [srcAt(a2), srcAt(b)];
@@ -32571,11 +32699,11 @@ function openAt(ep, catalog, t, delta) {
   const atBoundary = Math.abs(l.end - t) < half || t > l.end;
   const splitFrames = Math.max(1, Math.round((t - l.start) * fps));
   if (isCard(item)) {
-    const at3 = atBoundary ? l.end : t;
+    const at5 = atBoundary ? l.end : t;
     const next = checkHold({ ...item, hold: r63(item.hold + delta) });
     items[l.index] = next;
     const grown = itemFrames(next, fps).frames / fps - l.frames / fps;
-    return { episode: { ...shiftAfter(ep, at3, grown), items }, hold: { at: r63(at3), sec: r63(grown), item: item.id, hold: r63(next.hold - item.hold) } };
+    return { episode: { ...shiftAfter(ep, at5, grown), items }, hold: { at: r63(at5), sec: r63(grown), item: item.id, hold: r63(next.hold - item.hold) } };
   }
   if (atBoundary) {
     const clipDur = catalog.clips.find((c3) => c3.id === item.clip)?.probe.durationSec ?? item.src.out;
@@ -32604,8 +32732,8 @@ function openAt(ep, catalog, t, delta) {
   const first = checkHold({ ...head, ...parts, src: { in: item.src.in, out: splitSrc }, hold: r63(delta) });
   const second = { ...rest, ...parts, id: `${item.id}-${suffix}`, src: { in: splitSrc, out: item.src.out } };
   items.splice(l.index, 1, first, second);
-  const at2 = l.start + splitFrames / fps;
-  return { episode: { ...shiftAfter(ep, at2, delta), items }, hold: { at: r63(at2), sec: r63(delta), item: item.id, hold: first.hold, split: second.id } };
+  const at4 = l.start + splitFrames / fps;
+  return { episode: { ...shiftAfter(ep, at4, delta), items }, hold: { at: r63(at4), sec: r63(delta), item: item.id, hold: first.hold, split: second.id } };
 }
 function undoFitEdits(ep) {
   const fps = ep.output.fps;
@@ -32714,9 +32842,9 @@ function lcsLength(a2, b) {
   return dp[b.length];
 }
 function mergeCuts(cuts) {
-  const sorted = [...cuts].sort((a2, b) => a2[0] - b[0]);
+  const sorted2 = [...cuts].sort((a2, b) => a2[0] - b[0]);
   const out = [];
-  for (const c3 of sorted) {
+  for (const c3 of sorted2) {
     const last = out[out.length - 1];
     if (last && c3[0] <= last[1]) last[1] = Math.max(last[1], c3[1]);
     else out.push([c3[0], c3[1]]);
@@ -32875,21 +33003,21 @@ function fitVoiceover(o2) {
     const partial2 = chosen.matched < lcsLength(near, lineTokensOf[k]) - Math.max(1, Math.floor(0.1 * lineTokensOf[k].length));
     if (!reReadLate) prevEnd = chosen.to;
     const first = sentences[chosen.from].from;
-    const span = words.slice(first, sentences[chosen.to].to + 1);
+    const span2 = words.slice(first, sentences[chosen.to].to + 1);
     const dropped = (x) => chosen.drop?.has(first + x) ?? false;
-    const spoken = span.filter((w, x) => !isFiller(w) && !dropped(x));
+    const spoken = span2.filter((w, x) => !isFiller(w) && !dropped(x));
     const srcIn = Math.max(0, spoken[0].start - 0.05);
     const srcOut = spoken[spoken.length - 1].end + 0.1;
     const cuts = [];
-    for (const w of span) if (isFiller(w) && w.start > srcIn && w.end < srcOut) cuts.push([r37(w.start - 0.02), r37(w.end + 0.02)]);
-    for (let x = 0; x < span.length; x++) {
+    for (const w of span2) if (isFiller(w) && w.start > srcIn && w.end < srcOut) cuts.push([r37(w.start - 0.02), r37(w.end + 0.02)]);
+    for (let x = 0; x < span2.length; x++) {
       if (!dropped(x)) continue;
       let y = x;
-      while (y + 1 < span.length && (dropped(y + 1) || isFiller(span[y + 1]))) y++;
-      const before = span.slice(0, x).filter((w, z2) => !isFiller(w) && !dropped(z2)).pop();
-      const after2 = span.slice(y + 1).find((w, z2) => !isFiller(w) && !dropped(y + 1 + z2));
-      const a2 = before ? Math.max(before.end, Math.min(span[x].start, before.end + 0.15)) : span[x].start;
-      const b = after2 ? Math.min(after2.start, Math.max(span[y].end, after2.start - 0.15)) : span[y].end;
+      while (y + 1 < span2.length && (dropped(y + 1) || isFiller(span2[y + 1]))) y++;
+      const before = span2.slice(0, x).filter((w, z2) => !isFiller(w) && !dropped(z2)).pop();
+      const after2 = span2.slice(y + 1).find((w, z2) => !isFiller(w) && !dropped(y + 1 + z2));
+      const a2 = before ? Math.max(before.end, Math.min(span2[x].start, before.end + 0.15)) : span2[x].start;
+      const b = after2 ? Math.min(after2.start, Math.max(span2[y].end, after2.start - 0.15)) : span2[y].end;
       cuts.push([r37(a2), r37(b)]);
       x = y;
     }
@@ -32901,8 +33029,8 @@ function fitVoiceover(o2) {
     const draft = { slot: written[k].id, at: 0, src: { in: r37(srcIn), out: r37(srcOut) }, cuts: mergeCuts(cuts), ...lineRecording, text: written[k].line };
     const duration3 = keptSegments(draft).reduce((s, g) => s + g.out - g.in, 0);
     const slot = ep.slots.find((s) => s.id === written[k].id);
-    const at2 = r37(slot.start + 0.15);
-    let overrun = at2 + duration3 - Math.min(slot.end + 0.2, timelineDuration(ep));
+    const at4 = r37(slot.start + 0.15);
+    let overrun = at4 + duration3 - Math.min(slot.end + 0.2, timelineDuration(ep));
     let opened = null;
     if (overrun > 1e-3) {
       overrun = Math.ceil(overrun * fps - 1e-9) / fps;
@@ -32926,7 +33054,7 @@ function fitVoiceover(o2) {
       ep = withoutOld(ep);
       overrun = 0;
     }
-    ep = { ...ep, voiceover: { ...ep.voiceover, lines: [...ep.voiceover.lines, { ...draft, at: at2 }] } };
+    ep = { ...ep, voiceover: { ...ep.voiceover, lines: [...ep.voiceover.lines, { ...draft, at: at4 }] } };
     report.lines.push({ slot: slot.id, status: partial2 ? "partial" : "placed", takes, overrunSec: r37(overrun) });
   }
   if (!report.lines.some((l) => placedStatus(l.status))) {
@@ -32968,7 +33096,7 @@ var init_voiceover = __esm({
 import { randomUUID as randomUUID5 } from "node:crypto";
 import { existsSync as existsSync7 } from "node:fs";
 import { mkdir as mkdir3, rename as rename4, rm as rm6, writeFile as writeFile3 } from "node:fs/promises";
-import { join as join11, resolve as resolve6 } from "node:path";
+import { join as join12, resolve as resolve6 } from "node:path";
 function sourcesFor(ep, catalog) {
   const map2 = /* @__PURE__ */ new Map();
   for (const item of ep.items) {
@@ -33016,13 +33144,13 @@ function episodeChunks(laid, o2, sources, output2) {
 function cropAt(focus) {
   return Math.abs(focus.x - 0.5) < 1e-6 && Math.abs(focus.y - 0.5) < 1e-6 ? "" : `:(iw-ow)*${ffNum(focus.x)}:(ih-oh)*${ffNum(focus.y)}`;
 }
-function framed(frame, at2, o2, k) {
+function framed(frame, at4, o2, k) {
   const { width: W, height: H } = o2;
-  if (frame === "fill") return `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}${at2}`;
+  if (frame === "fill") return `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}${at4}`;
   if (frame === "blur") {
     const w = Math.max(2, Math.round(W / 8) * 2);
     const h2 = Math.max(2, Math.round(H / 8) * 2);
-    return `split[fg${k}][bg${k}];[bg${k}]scale=${w}:${h2}:force_original_aspect_ratio=increase,crop=${w}:${h2}${at2},gblur=sigma=12,eq=brightness=-0.08,scale=${W}:${H}[bb${k}];[fg${k}]scale=${W}:${H}:force_original_aspect_ratio=decrease[ff${k}];[bb${k}][ff${k}]overlay=(W-w)/2:(H-h)/2`;
+    return `split[fg${k}][bg${k}];[bg${k}]scale=${w}:${h2}:force_original_aspect_ratio=increase,crop=${w}:${h2}${at4},gblur=sigma=12,eq=brightness=-0.08,scale=${W}:${H}[bb${k}];[fg${k}]scale=${W}:${H}:force_original_aspect_ratio=decrease[ff${k}];[bb${k}][ff${k}]overlay=(W-w)/2:(H-h)/2`;
   }
   return `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black`;
 }
@@ -33044,8 +33172,8 @@ function cardPictureInput(pic, fps) {
 }
 function cardPicture(pic, o2, k = 0, focus = { x: 0.5, y: 0.5 }) {
   const flat = pic.format === "png" ? "format=rgba,premultiply=inplace=1," : "";
-  const range3 = pic.format === "jpeg" ? ",scale=out_range=tv:out_color_matrix=bt709,format=yuv420p" : "";
-  return `sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", cropAt(focus), o2, k)}${range3},setsar=1`;
+  const range4 = pic.format === "jpeg" ? ",scale=out_range=tv:out_color_matrix=bt709,format=yuv420p" : "";
+  return `sidedata=mode=delete:type=DISPLAYMATRIX,${UPRIGHT[pic.orientation ?? 1] ?? ""}${flat}${framed("fill", cropAt(focus), o2, k)}${range4},setsar=1`;
 }
 function readFrom(src, sec) {
   if (sec < (src.videoStartSec ?? 0)) return [...sec > 0 ? ["-itsoffset", ffNum(-sec)] : [], "-i", src.path];
@@ -33080,12 +33208,12 @@ function itemChunkArgs(laid, o2, sources, output2) {
     const src = sources.get(item.clip);
     inputs.push("-threads", item.speed <= 1 ? "1" : "4");
     inputs.push(...readFrom(src, item.src.in));
-    const at2 = cropAt(item.focus);
-    const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2${at2},` : "";
+    const at4 = cropAt(item.focus);
+    const zoom = item.zoom > 1 + 1e-6 ? `crop=trunc(iw/${ffNum(item.zoom)}/2)*2:trunc(ih/${ffNum(item.zoom)}/2)*2${at4},` : "";
     const head = `[${k}:v]setpts=(PTS-${frameTolerance(o2.fps)}/TB)/${ffNum(item.speed)},fps=${ffNum(o2.fps)}:start_time=0:round=up,trim=end_frame=${l.srcFrames + 1},`;
     const hold = `tpad=stop=-1:stop_mode=clone,trim=end_frame=${l.frames},`;
     chains.push(
-      item.move ? `${head}${hold}${moveFilters(l, item, k, o2, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]` : `${head}${zoom}${framed(item.frame, at2, o2, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`
+      item.move ? `${head}${hold}${moveFilters(l, item, k, o2, src)},setsar=1,setpts=PTS-STARTPTS[v${k}]` : `${head}${zoom}${framed(item.frame, at4, o2, k)},setsar=1,${hold}setpts=PTS-STARTPTS[v${k}]`
     );
     if (item.audio === "keep" && item.speed === 1 && src.hasAudio) {
       chains.push(`${ownSound(k, src, l.srcFrames / o2.fps)},apad,atrim=end=${dur},asetpts=PTS-STARTPTS${crossfades(o2.fades?.get(item.id))}[a${k}]`);
@@ -33142,7 +33270,7 @@ function musicTrackArgs(cues, lib, musicDir, durationSec, loudnessLufs, output2)
   const inputs = [];
   const chains = [];
   cues.forEach((c3, i2) => {
-    inputs.push("-stream_loop", "-1", "-ss", ffNum(c3.offset), "-i", join11(musicDir, cueTrack(c3, i2, lib).file));
+    inputs.push("-stream_loop", "-1", "-ss", ffNum(c3.offset), "-i", join12(musicDir, cueTrack(c3, i2, lib).file));
     const dur = c3.end - c3.start;
     const measured = Math.max(dur, LOUDNORM_MIN_SEC);
     const fades = [
@@ -33208,8 +33336,8 @@ function spillTrackArgs(list, sources, durationSec, output2, under) {
   return [...inputs, "-filter_complex", chains.join(";"), "-map", "[out]", "-c:a", "pcm_f32le", "-ar", String(SR2), "-ac", "2", output2];
 }
 function spillTrackCommands(list, sources, durationSec, dir) {
-  const out = join11(dir, "spill.wav");
-  const part = (n2) => join11(dir, `spill-${n2}.wav`);
+  const out = join12(dir, "spill.wav");
+  const part = (n2) => join12(dir, `spill-${n2}.wav`);
   const groups = [];
   let group = [];
   for (const s of list) {
@@ -33233,11 +33361,11 @@ function buildVoiceTrack(o2) {
     for (const seg of keptSegments(line)) {
       const from = Math.round(seg.in * sr);
       const to = Math.min(rec.length, Math.round(seg.out * sr));
-      const at2 = Math.round((line.at + seg.offset) * sr);
+      const at4 = Math.round((line.at + seg.offset) * sr);
       const n2 = to - from;
-      for (let i2 = 0; i2 < n2 && at2 + i2 < out.length; i2++) {
+      for (let i2 = 0; i2 < n2 && at4 + i2 < out.length; i2++) {
         const gain = Math.max(0, Math.min(1, i2 / fade, (n2 - 1 - i2) / fade));
-        out[at2 + i2] += rec[from + i2] * (fade <= 1 ? 1 : gain);
+        out[at4 + i2] += rec[from + i2] * (fade <= 1 ? 1 : gain);
       }
     }
   }
@@ -33252,7 +33380,7 @@ async function placeSfx(project, cues, durationSec, loudnessLufs, tools, work, s
     const s = sounds.get(c3.sound);
     if (c3.at - s.peakSec >= durationSec - 1e-6) continue;
     if (!(s.durationSec > 0)) continue;
-    if (!levels.has(s.file)) levels.set(s.file, await measureSfxLevel(s.file, tools, { metaFile: join11(work, `level-${levels.size}.txt`), signal }));
+    if (!levels.has(s.file)) levels.set(s.file, await measureSfxLevel(s.file, tools, { metaFile: join12(work, `level-${levels.size}.txt`), signal }));
     placed.push({ ...s, at: c3.at, volumeDb: sfxVolumeDb(levels.get(s.file), loudnessLufs + c3.gainDb) });
   }
   return placed;
@@ -33304,7 +33432,7 @@ function episodeFinalArgs(o2) {
 async function loadEpisode(project, n2) {
   let ep;
   try {
-    ep = await readJsonFile(join11(episodeDir(project, n2), "episode.json"), EpisodeSchema, `episodes/${n2}/episode.json`);
+    ep = await readJsonFile(join12(episodeDir(project, n2), "episode.json"), EpisodeSchema, `episodes/${n2}/episode.json`);
   } catch (e) {
     if (e.code === "ENOENT") {
       throw noEpisode(n2);
@@ -33318,7 +33446,7 @@ async function saveEpisode(project, ep, n2 = ep.number) {
   if (ep.number !== n2) throw wrongNumber(n2, ep.number);
   const dir = episodeDir(project, n2);
   await mkdir3(dir, { recursive: true });
-  await writeJsonFile(join11(dir, "episode.json"), EpisodeSchema, ep, `episodes/${n2}/episode.json`, { onlyIfChanged: true });
+  await writeJsonFile(join12(dir, "episode.json"), EpisodeSchema, ep, `episodes/${n2}/episode.json`, { onlyIfChanged: true });
 }
 function voiceRecordings(ep) {
   const vo = ep.voiceover;
@@ -33332,7 +33460,7 @@ async function loadVoiceoverTranscripts(project, ep) {
   for (const rec of voiceRecordings(ep)) {
     const file2 = ep.voiceover.transcripts[rec] ?? "voiceover.transcript.json";
     try {
-      out.set(rec, await readJsonFile(join11(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`));
+      out.set(rec, await readJsonFile(join12(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`));
     } catch (e) {
       if (e.code === "ENOENT") {
         throw new MirageError("NO_EPISODE", `episodes/${n2}/${file2} is missing`, `Run: pnpm mirage vo <project> ${n2} ${rec}`);
@@ -33375,7 +33503,7 @@ async function renderLocked(o2) {
   const final = o2.mode === "final";
   const [W, H] = final ? [ep.output.width, ep.output.height] : previewSize(ep.output.width, ep.output.height);
   const dir = episodeDir(project, o2.episode);
-  const musicDir = resolve6(o2.musicDir ?? join11(project, "music"));
+  const musicDir = resolve6(o2.musicDir ?? join12(project, "music"));
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
   const sfxCues = o2.mode === "guide" ? [] : ep.sfx ?? [];
@@ -33398,9 +33526,9 @@ async function renderLocked(o2) {
   if (captions && !captions.ok) {
     throw new MirageError("NO_CAPTIONS", `FFmpeg can't draw captions or text: ${captions.path} was built without libass.`, captions.hint);
   }
-  const outputPath = join11(dir, `${o2.mode}.mp4`);
+  const outputPath = join12(dir, `${o2.mode}.mp4`);
   const id = randomUUID5();
-  const work = join11(dir, `.work-${id}`);
+  const work = join12(dir, `.work-${id}`);
   const partial2 = `${outputPath}.partial-${id}.mp4`;
   await mkdir3(work, { recursive: true });
   const report = (f) => o2.onProgress?.(Math.min(1, Math.max(0, f)));
@@ -33409,12 +33537,12 @@ async function renderLocked(o2) {
     const spilled = spills(ep, sources, laid).spills;
     const crossfaded = spilled.length ? fadesFor(laid, spilled) : void 0;
     const shape = { width: W, height: H, fps, cardImages, ...crossfaded ? { fades: crossfaded.items } : {} };
-    const chunks = episodeChunks(laid, shape, sources, join11(work, `chunk-${pad3(0)}.mov`));
+    const chunks = episodeChunks(laid, shape, sources, join12(work, `chunk-${pad3(0)}.mov`));
     let done = 0;
     for (const [i2, chunk] of chunks.entries()) {
       o2.signal?.throwIfAborted();
       const dur = chunk.reduce((s, l) => s + l.frames / fps, 0);
-      await o2.tools.runFfmpeg(itemChunkArgs(chunk, shape, sources, join11(work, `chunk-${pad3(i2)}.mov`)), {
+      await o2.tools.runFfmpeg(itemChunkArgs(chunk, shape, sources, join12(work, `chunk-${pad3(i2)}.mov`)), {
         expectedDurationSec: dur,
         timeoutMs: chunkTimeoutMs(chunk, fps),
         signal: o2.signal,
@@ -33423,11 +33551,11 @@ async function renderLocked(o2) {
       done += dur;
     }
     o2.signal?.throwIfAborted();
-    await writeFile3(join11(work, "chunks.txt"), chunks.map((_, i2) => `file 'chunk-${pad3(i2)}.mov'`).join("\n") + "\n");
+    await writeFile3(join12(work, "chunks.txt"), chunks.map((_, i2) => `file 'chunk-${pad3(i2)}.mov'`).join("\n") + "\n");
     let musicWav;
     if (ep.music.length) {
       o2.signal?.throwIfAborted();
-      await o2.tools.runFfmpeg(musicTrackArgs(ep.music, lib, musicDir, D, ep.loudnessLufs, join11(work, "music.wav")), {
+      await o2.tools.runFfmpeg(musicTrackArgs(ep.music, lib, musicDir, D, ep.loudnessLufs, join12(work, "music.wav")), {
         expectedDurationSec: D,
         timeoutMs: Math.max(12e4, D * 10 * 1e3),
         signal: o2.signal
@@ -33437,7 +33565,7 @@ async function renderLocked(o2) {
     let sfxWav;
     if (sfx.length) {
       o2.signal?.throwIfAborted();
-      await o2.tools.runFfmpeg(sfxTrackArgs(sfx, D, join11(work, "sfx.wav")), { expectedDurationSec: D, timeoutMs: Math.max(12e4, D * 10 * 1e3), signal: o2.signal });
+      await o2.tools.runFfmpeg(sfxTrackArgs(sfx, D, join12(work, "sfx.wav")), { expectedDurationSec: D, timeoutMs: Math.max(12e4, D * 10 * 1e3), signal: o2.signal });
       sfxWav = "sfx.wav";
     }
     let spillWav;
@@ -33453,9 +33581,9 @@ async function renderLocked(o2) {
     let voiceRaw;
     if (final && ep.voiceover) {
       const pcm = /* @__PURE__ */ new Map();
-      for (const [i2, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve6(project, rec), join11(work, `rec-${i2}.f32`), o2.tools, { sampleRate: 48e3, clipTime: true, signal: o2.signal }));
+      for (const [i2, rec] of recordings.entries()) pcm.set(rec, await decodeMono(resolve6(project, rec), join12(work, `rec-${i2}.f32`), o2.tools, { sampleRate: 48e3, clipTime: true, signal: o2.signal }));
       const track = buildVoiceTrack({ recording: pcm, defaultRecording: ep.voiceover.recording, sampleRate: 48e3, lines: ep.voiceover.lines, durationSec: D });
-      await writeFile3(join11(work, "vo.f32"), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
+      await writeFile3(join12(work, "vo.f32"), Buffer.from(track.buffer, track.byteOffset, track.byteLength));
       voiceRaw = "vo.f32";
     }
     const words = o2.mode === "guide" ? [] : speechWords(ep, catalog, voTranscripts);
@@ -33464,7 +33592,7 @@ async function renderLocked(o2) {
     if (style === "pop") captionLines = { style, lines: popLines(words, { durationSec: D, highlight: ep.captions.highlight }) };
     if (style === "karaoke") captionLines = { style, lines: karaokeLines(words, { durationSec: D }) };
     await writeFile3(
-      join11(work, "overlays.ass"),
+      join12(work, "overlays.ass"),
       buildAss({
         width: W,
         height: H,
@@ -33516,7 +33644,7 @@ async function renderLocked(o2) {
     await rename4(partial2, outputPath);
     let srtPath = null;
     if (final) {
-      srtPath = join11(dir, "final.srt");
+      srtPath = join12(dir, "final.srt");
       await writeFile3(srtPath, toSrt(cues));
     }
     report(1);
@@ -33568,7 +33696,7 @@ var init_render_episode = __esm({
     crossfades = (f) => [f?.fadeIn, f?.fadeOut].map((x) => x ? `,${fadeFilter(x)}` : "").join("");
     DIP_FADE_SEC = 0.08;
     filterValue = (v) => v.replace(/[\\':]/g, "\\$&").replace(/[\\'[\],;]/g, "\\$&");
-    episodeDir = (project, n2) => join11(resolve6(project), "episodes", String(n2));
+    episodeDir = (project, n2) => join12(resolve6(project), "episodes", String(n2));
     noEpisode = (n2) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json does not exist`, "Ask Claude to write the episode timeline first.");
     wrongNumber = (n2, found) => new MirageError("NO_EPISODE", `episodes/${n2}/episode.json says it is episode ${found}`, `Set "number" to ${n2} in episodes/${n2}/episode.json.`);
     COMMAND = { rough: "cut", guide: "guide", final: "render" };
@@ -33579,7 +33707,7 @@ var init_render_episode = __esm({
 import { randomUUID as randomUUID6 } from "node:crypto";
 import { existsSync as existsSync8, statSync as statSync5 } from "node:fs";
 import { mkdir as mkdir4, rm as rm7 } from "node:fs/promises";
-import { isAbsolute, join as join12, relative, resolve as resolve7 } from "node:path";
+import { isAbsolute, join as join13, relative, resolve as resolve7 } from "node:path";
 async function fitRecording(o2) {
   const project = resolve7(o2.project);
   const n2 = o2.episode;
@@ -33622,17 +33750,17 @@ async function fitLocked(o2, project, rec) {
   if (only) await checkKeptRecordings(project, ep, (l) => !only.includes(l.slot), recording, sha);
   const file2 = voTranscriptFile(sha);
   let transcript;
-  const reused = !o2.transcript && existsSync8(join12(dir, file2));
+  const reused = !o2.transcript && existsSync8(join13(dir, file2));
   if (o2.transcript) {
     transcript = o2.transcript;
-    await writeJsonFile(join12(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
+    await writeJsonFile(join13(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
   } else if (reused) {
     o2.onStep?.("Reusing the transcript of this recording");
-    transcript = await readJsonFile(join12(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`);
+    transcript = await readJsonFile(join13(dir, file2), TranscriptSchema, `episodes/${n2}/${file2}`);
   } else {
     o2.onStep?.("Transcribing your voice-over\u2026");
     await mkdir4(dir, { recursive: true });
-    const wav = join12(dir, `.vo-${randomUUID6()}.wav`);
+    const wav = join13(dir, `.vo-${randomUUID6()}.wav`);
     try {
       await o2.tools.extractWav(rec, wav, { signal: o2.signal }).catch(async (e) => {
         o2.signal?.throwIfAborted();
@@ -33645,7 +33773,7 @@ async function fitLocked(o2, project, rec) {
       await rm7(wav, { force: true });
     }
     o2.signal?.throwIfAborted();
-    await writeJsonFile(join12(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
+    await writeJsonFile(join13(dir, file2), TranscriptSchema, transcript, `episodes/${n2}/${file2}`);
   }
   o2.signal?.throwIfAborted();
   const fit = fitVoiceover({ episode: ep, catalog: await loadCatalog(project), recording, transcript, only, keepPauses: o2.keepPauses });
@@ -33706,7 +33834,7 @@ var init_voiceover_files = __esm({
 // packages/core/src/mirage/narration.ts
 import { existsSync as existsSync9 } from "node:fs";
 import { readdir as readdir4, rm as rm8, writeFile as writeFile4 } from "node:fs/promises";
-import { join as join13, resolve as resolve8 } from "node:path";
+import { join as join14, resolve as resolve8 } from "node:path";
 function lineSentences(line) {
   const sentences = line.trim().replace(/\s+/g, " ").split(/(?<=[.!?…]["'”’)\]]*)\s+/).filter((s) => hasWords(s));
   return sentences.flatMap((s) => {
@@ -33775,22 +33903,22 @@ function shotStarts(ep, slot) {
   for (const l of layoutTimeline(ep)) if (l.start > slot.start + 0.05 && l.start < slot.end - 0.5) out.push(r38(l.start - slot.start));
   return out;
 }
-function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
+function assembleNarration(lines, sampleRate, gaps2 = NARRATION_GAPS) {
   const pieces = [];
   const words = [];
   const segments2 = [];
   const spans = [];
-  let at2 = 0;
+  let at4 = 0;
   const silence = (sec) => {
     const n2 = Math.round(sec * sampleRate);
     pieces.push(new Float32Array(n2));
-    at2 += n2;
+    at4 += n2;
   };
   const margin = Math.round(MARGIN_SEC * sampleRate);
-  silence(gaps.lead);
+  silence(gaps2.lead);
   lines.forEach((line, k) => {
-    if (k > 0) silence(gaps.line);
-    const lineStart = at2;
+    if (k > 0) silence(gaps2.line);
+    const lineStart = at4;
     let spoken = 0;
     const lineFrom = words.length;
     let voice0 = 0;
@@ -33799,25 +33927,25 @@ function assembleNarration(lines, sampleRate, gaps = NARRATION_GAPS) {
       if (!v) continue;
       const from = Math.max(0, v.start - margin);
       if (spoken++ > 0) {
-        const want = line.starts?.[k2] === void 0 ? 0 : (voice0 + Math.round(line.starts[k2] * sampleRate) - at2 - (v.start - from)) / sampleRate;
-        silence(Math.max(gaps.sentence, want));
-      } else voice0 = at2 + v.start - from;
+        const want = line.starts?.[k2] === void 0 ? 0 : (voice0 + Math.round(line.starts[k2] * sampleRate) - at4 - (v.start - from)) / sampleRate;
+        silence(Math.max(gaps2.sentence, want));
+      } else voice0 = at4 + v.start - from;
       const to = Math.min(s.samples.length, v.end + margin);
       pieces.push(s.samples.subarray(from, to));
-      const sec = (x) => (at2 + x - from) / sampleRate;
+      const sec = (x) => (at4 + x - from) / sampleRate;
       const sw = sentenceWords(s.text, sec(v.start), sec(v.end), v.quiet.map(([a2, b]) => [sec(a2), sec(b)]));
       words.push(...sw);
       segments2.push({ start: r38(sec(v.start)), end: r38(sec(v.end)), text: s.text });
-      at2 += to - from;
+      at4 += to - from;
     }
     if (!spoken) return;
     for (let i2 = lineFrom; i2 < words.length - 1; i2++) words[i2] = { ...words[i2], w: words[i2].w.replace(/[.?!…]+(?=["'”’)\]]*$)/, "") };
     const last = words[words.length - 1];
     if (!/[.?!]["'”’)\]]*$/.test(last.w)) words[words.length - 1] = { ...last, w: `${last.w}.` };
-    spans.push({ slot: line.slot, start: r38(lineStart / sampleRate), end: r38(at2 / sampleRate) });
+    spans.push({ slot: line.slot, start: r38(lineStart / sampleRate), end: r38(at4 / sampleRate) });
   });
-  silence(gaps.lead);
-  const samples = new Float32Array(at2);
+  silence(gaps2.lead);
+  const samples = new Float32Array(at4);
   let o2 = 0;
   for (const p of pieces) {
     samples.set(p, o2);
@@ -33950,8 +34078,8 @@ async function speakNarration(o2) {
     const joined = assembleNarration(spoken, rate);
     o2.signal?.throwIfAborted();
     const name = await nextNarrationFile(dir);
-    await writeFile4(join13(dir, name), wavBytes(joined.samples, rate), { flag: "wx" });
-    wav = join13(dir, name);
+    await writeFile4(join14(dir, name), wavBytes(joined.samples, rate), { flag: "wx" });
+    wav = join14(dir, name);
     const fit = await fitRecording({ project, episode: n2, recording: wav, tools: o2.tools, add: !!o2.slots?.length, slots: o2.slots, transcript: joined.transcript, keepPauses: true, onStep: o2.onStep, signal: o2.signal });
     o2.onProgress?.(1);
     const audioSec = r38(joined.lines.reduce((t, l) => t + l.end - l.start, 0));
@@ -33985,7 +34113,7 @@ var init_narration = __esm({
 
 // packages/core/src/mirage/formats.ts
 import { readdirSync, readFileSync as readFileSync4 } from "node:fs";
-import { dirname as dirname6, join as join14, resolve as resolve9 } from "node:path";
+import { dirname as dirname6, join as join15, resolve as resolve9 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 function formatsDir(from = import.meta.url) {
   const here = dirname6(from.startsWith("file:") ? fileURLToPath4(from) : resolve9(from));
@@ -34006,19 +34134,19 @@ function splitFile(text) {
   return { front, rules: lines.slice(end + 1).join("\n") };
 }
 function loadFormats(dir = formatsDir()) {
-  let names;
+  let names2;
   try {
-    names = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
+    names2 = readdirSync(dir).filter((f) => f.endsWith(".md")).sort();
   } catch {
     return { formats: [], problems: ["\u2716 plugin/formats: the folder is missing or unreadable"] };
   }
   const formats = [];
   const problems = [];
-  for (const file2 of names) {
+  for (const file2 of names2) {
     const problem = (why) => problems.push(`\u2716 plugin/formats/${file2}: ${why}`);
     let text;
     try {
-      text = readFileSync4(join14(dir, file2), "utf8");
+      text = readFileSync4(join15(dir, file2), "utf8");
     } catch (e) {
       problem(`can't be read (${e.message})`);
       continue;
@@ -34033,9 +34161,9 @@ function loadFormats(dir = formatsDir()) {
       problem(describeZodError(parsed.error));
       continue;
     }
-    const stem = file2.slice(0, -".md".length);
-    if (parsed.data.id !== stem) {
-      problem(`id: the id "${parsed.data.id}" must be the file name, "${stem}"`);
+    const stem2 = file2.slice(0, -".md".length);
+    if (parsed.data.id !== stem2) {
+      problem(`id: the id "${parsed.data.id}" must be the file name, "${stem2}"`);
       continue;
     }
     const raw = split.front.captions;
@@ -34050,7 +34178,10 @@ function formatOf(video, formats) {
   if (!found) throw new MirageError("BAD_INPUT", "Mirage's build-story format is missing or broken", "Run the formats tool to see what is wrong with plugin/formats, or reinstall the Mirage plugin.");
   return found;
 }
-var even2, FormatSchema, SOURCE_LAYOUT2;
+function shortKind(format2, video) {
+  return format2.short ? video?.from !== void 0 ? format2.short.kind : "standalone" : null;
+}
+var even2, share, atLeastOne, range2, PlaybookSchema, FormatSchema, SOURCE_LAYOUT2;
 var init_formats = __esm({
   "packages/core/src/mirage/formats.ts"() {
     "use strict";
@@ -34059,6 +34190,59 @@ var init_formats = __esm({
     init_errors4();
     init_json_file();
     even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
+    share = external_exports.number().min(0).max(1);
+    atLeastOne = (o2) => Object.values(o2).some((v) => v !== void 0);
+    range2 = strictObject2({ min: external_exports.number().min(0).optional(), max: external_exports.number().positive().optional() }).refine(atLeastOne, { message: "needs min or max" });
+    PlaybookSchema = strictObject2({
+      /** The first word is spoken within this many seconds. */
+      firstWordSec: external_exports.number().min(0).optional(),
+      /**
+       * The beat that holds the answer, and where it should start, 0–1 of the length. A teaser short has no answer of its
+       * own to place (it leaves the big video's question open), so this is not measured on one.
+       */
+      answer: strictObject2({ beat: BeatSchema, fromShare: share, toShare: share }).refine((a2) => a2.fromShare <= a2.toShare, { message: "fromShare must not be after toShare" }).optional(),
+      /** The longest stretch, in seconds, in which nothing new may happen: no word (kept sound or narration), no cut and no overlay starting. */
+      emptySec: external_exports.number().positive().optional(),
+      /**
+       * Cuts a minute. `except` names beats whose time and cuts are left out (a vlog's held `headline`). Where the format gives
+       * a pace for particular beats, `beats` holds each one's own range (measured over that beat's shots only), and `after`
+       * the range for what comes after a beat (the shots that start once its last item has ended, `except` its named beats: a
+       * vlog's back half, after the `headline`). The whole-cut number stays.
+       */
+      cutsPerMin: strictObject2({
+        min: external_exports.number().min(0).optional(),
+        max: external_exports.number().positive().optional(),
+        except: external_exports.array(BeatSchema).optional(),
+        beats: external_exports.record(BeatSchema, range2).optional(),
+        after: strictObject2({ beat: BeatSchema, min: external_exports.number().min(0).optional(), max: external_exports.number().positive().optional(), except: external_exports.array(BeatSchema).optional() }).refine((c3) => c3.min !== void 0 || c3.max !== void 0, { message: "needs min or max" }).optional()
+      }).refine((c3) => c3.min !== void 0 || c3.max !== void 0, { message: "needs min or max" }).optional(),
+      /** Spoken words a minute over the whole video. */
+      wordsPerMin: strictObject2({ min: external_exports.number().min(0).optional(), max: external_exports.number().positive().optional() }).refine(atLeastOne, { message: "needs min or max" }).optional(),
+      /** Whether the video's `idea` (video.json: gap, question, doubt, stake) is expected: its gap and its question at least. */
+      ideaNeeded: external_exports.boolean().optional(),
+      /** The beats a video of the format ends on: its last item is one of them. */
+      endsOn: external_exports.array(BeatSchema).min(1).optional(),
+      /**
+       * The measurable parts of the format's title style, held against the title the person chose (video.json's
+       * `titles.chosen`): in capitals, with a number, in the first person, how it ends, how many words. Each is left out when
+       * the format's titles don't share it.
+       */
+      title: strictObject2({
+        allCaps: external_exports.boolean().optional(),
+        hasNumber: external_exports.boolean().optional(),
+        firstPerson: external_exports.boolean().optional(),
+        endsWith: external_exports.enum(["?", "!!"]).optional(),
+        words: range2.optional()
+      }).refine(atLeastOne, { message: "needs at least one of allCaps, hasNumber, firstPerson, endsWith, words" }).optional(),
+      /**
+       * The length a video of the format aims for in this project, in seconds, and the length past which `check` warns
+       * (default 1.5 × targetSec). They replace the format's own `targetSec` and `warnPastSec`, so each format's length is
+       * set per project: first from the channels of the niche, then from the person's own results. A short's limit never
+       * goes past the format's (the longest the platforms take).
+       */
+      targetSec: external_exports.number().positive().optional(),
+      warnPastSec: external_exports.number().positive().optional()
+    });
     FormatSchema = strictObject2({
       /** Equal to the file's name without `.md`. */
       id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
@@ -34080,19 +34264,439 @@ var init_formats = __esm({
        * vertical format should include `"short": {...}` to get the covered-area check. `new_video { from }` without a format
        * makes a video of the format whose id is `short`, whatever other formats have this.
        */
-      short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
+      short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional(),
+      /** The format's numbers, which `check` measures a cut against and `predict` scores (see PlaybookSchema). */
+      playbook: PlaybookSchema.optional()
     });
     SOURCE_LAYOUT2 = /[\\/]packages[\\/]core[\\/](?:src|dist)[\\/]mirage$/;
   }
 });
 
+// packages/core/src/mirage/formulas.ts
+import { readdirSync as readdirSync2, readFileSync as readFileSync5 } from "node:fs";
+import { join as join16 } from "node:path";
+function formulasDir(from = import.meta.url) {
+  return join16(formatsDir(from), "..", "formulas");
+}
+function readFormula(dir, file2, origin) {
+  let text;
+  try {
+    text = readFileSync5(join16(dir, file2), "utf8");
+  } catch (e) {
+    return `can't be read (${e.message})`;
+  }
+  const split = splitFile(text);
+  if (typeof split === "string") return split;
+  const parsed = FormulaSchema.safeParse(split.front);
+  if (!parsed.success) return describeZodError(parsed.error);
+  if (parsed.data.id !== stem(file2)) return `id: the id "${parsed.data.id}" must be the file name, "${stem(file2)}"`;
+  return { ...parsed.data, origin, body: split.rules, file: file2, path: join16(dir, file2) };
+}
+function loadFormulas(dir = formulasDir(), projectDir2) {
+  const formulas = [];
+  const problems = [];
+  let own2 = [];
+  try {
+    own2 = mdFiles(dir);
+  } catch {
+    problems.push("\u2716 plugin/formulas: the folder is missing or unreadable");
+  }
+  for (const file2 of own2) {
+    const f = readFormula(dir, file2, "mirage");
+    if (typeof f === "string") problems.push(`\u2716 plugin/formulas/${file2}: ${f}`);
+    else formulas.push(f);
+  }
+  if (projectDir2 === void 0) return { formulas, problems };
+  const theirs = join16(projectDir2, "formulas");
+  let names2;
+  try {
+    names2 = mdFiles(theirs).filter((f) => f !== CHANGES_FILE);
+  } catch {
+    return { formulas, problems };
+  }
+  for (const file2 of names2) {
+    if (own2.includes(file2)) {
+      problems.push(`\u2716 formulas/${file2}: "${stem(file2)}" is one of Mirage's own formulas, which can't be changed \u2014 save yours under another name`);
+      continue;
+    }
+    const f = readFormula(theirs, file2, "yours");
+    if (typeof f === "string") problems.push(`\u2716 formulas/${file2}: ${f}`);
+    else formulas.push(f);
+  }
+  return { formulas, problems };
+}
+function formulaLine(f) {
+  return `${f.id} \u2014 ${f.name}: ${f.describe} (formats: ${f.formats.join(", ") || "none"}; measured on: ${f.source}) ${f.origin === "yours" ? "(yours)" : "(Mirage's, can't be changed)"}`;
+}
+var oneLine, FormulaSchema, CHANGES_FILE, mdFiles, stem, mineId;
+var init_formulas = __esm({
+  "packages/core/src/mirage/formulas.ts"() {
+    "use strict";
+    init_src();
+    init_zod();
+    init_formats();
+    init_json_file();
+    oneLine = external_exports.string().min(1).refine((s) => !/[\r\n]/.test(s), { message: "must be one line" });
+    FormulaSchema = strictObject2({
+      /** Equal to the file's name without `.md`. */
+      id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+      name: external_exports.string().min(1),
+      describe: oneLine,
+      /** The ids of the formats it applies to (`build-story`, `short`, `vlog` …); may be empty. */
+      formats: external_exports.array(external_exports.string().min(1)),
+      /** What it was measured on, and when. */
+      source: oneLine,
+      /**
+       * Only read from a person's `<format>-mine` formula: the playbook numbers their own results gave (see PlaybookSchema).
+       * Each key replaces the format's for that project; `check` says which. This is how learning adjusts the playbook while
+       * Mirage's own files stay as they are.
+       */
+      playbook: PlaybookSchema.optional()
+    });
+    CHANGES_FILE = "changes.md";
+    mdFiles = (dir) => readdirSync2(dir).filter((f) => f.endsWith(".md")).sort();
+    stem = (file2) => file2.slice(0, -".md".length);
+    mineId = (formatId) => `${formatId}-mine`;
+  }
+});
+
+// packages/core/src/mirage/channel.ts
+import { existsSync as existsSync10 } from "node:fs";
+import { mkdir as mkdir5, readdir as readdir5, readFile as readFile7, writeFile as writeFile5 } from "node:fs/promises";
+import { join as join17 } from "node:path";
+function realChannelDeps(tools) {
+  return {
+    ytDlp: async (args, opts) => (await runYtDlp(args, { signal: opts?.signal })).stdout,
+    fetchImage: async (url2, opts) => {
+      const r = await fetch(url2, { signal: opts?.signal });
+      return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+    },
+    runFfmpeg: (args, opts) => tools.runFfmpeg(args, { signal: opts?.signal })
+  };
+}
+function channelAddress(input2) {
+  const text = input2.trim();
+  let u2;
+  try {
+    u2 = new URL(/^@[^/\s]+$/.test(text) ? `https://www.youtube.com/${text}` : text);
+  } catch {
+    throw new MirageError("BAD_INPUT", `"${input2}" isn't a YouTube channel address`, ADDRESS_HINT);
+  }
+  if (u2.protocol !== "https:" || !YOUTUBE_HOSTS.has(u2.hostname.toLowerCase())) throw new MirageError("BAD_INPUT", `"${input2}" isn't a YouTube channel address`, ADDRESS_HINT);
+  const parts = u2.pathname.split("/").filter(Boolean);
+  const last = parts.at(-1);
+  const tab = TABS.find((t) => t === last) ?? "videos";
+  if (last === tab || last === "featured") parts.pop();
+  const named = parts[0]?.startsWith("@") ? parts.length === 1 : parts.length === 2 && ["channel", "c", "user"].includes(parts[0]);
+  if (!named) throw new MirageError("BAD_INPUT", `"${input2}" isn't a YouTube channel address`, ADDRESS_HINT);
+  let handle = parts.at(-1);
+  try {
+    handle = decodeURIComponent(handle);
+  } catch {
+  }
+  const base = handle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "channel";
+  return { url: `https://www.youtube.com/${parts.join("/")}/${tab}`, slug: tab === "videos" ? base : `${base}-${tab}` };
+}
+async function readChannel(project, name) {
+  const file2 = join17(absDir(project, name), "videos.json");
+  if (!NAME.test(name) || !existsSync10(file2)) {
+    const known = (await readdir5(join17(project, "analysis")).catch(() => [])).filter((d) => existsSync10(join17(project, "analysis", d, "videos.json"))).sort();
+    throw new MirageError("BAD_INPUT", `no channel "${name}" has been gathered in this project`, `${known.length ? `The channels are: ${known.join(", ")}. ` : ""}Run channel with the channel's url first; its report says the name to use.`);
+  }
+  return readJsonFile(file2, ChannelFileSchema, `${relDir(name)}/videos.json`);
+}
+function viewsText(n2) {
+  if (n2 >= 1e9) return `${(n2 / 1e9).toFixed(1)}B`;
+  if (n2 >= 1e6) return `${(n2 / 1e6).toFixed(1)}M`;
+  if (n2 >= 1e4) return `${Math.round(n2 / 1e3)}K`;
+  if (n2 >= 1e3) return `${(n2 / 1e3).toFixed(1)}K`;
+  return String(Math.round(n2));
+}
+function clockText(sec) {
+  const s = Math.max(0, Math.round(sec));
+  const p = (n2) => String(n2).padStart(2, "0");
+  const h2 = Math.floor(s / 3600);
+  return h2 ? `${h2}:${p(Math.floor(s % 3600 / 60))}:${p(s % 60)}` : `${Math.floor(s / 60)}:${p(s % 60)}`;
+}
+function median(xs) {
+  if (!xs.length) return null;
+  const s = sorted(xs);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+function pickVideos(videos, which) {
+  if (which === "newest") return videos.slice(0, LIST);
+  return which === "top" ? byViews(videos, -1).slice(0, LIST) : byViews(videos.slice(0, LATEST), 1).slice(0, LIST);
+}
+function statLines(videos, set2) {
+  const lines = [];
+  const lengths = sorted(videos.flatMap((v) => v.durationSec === null ? [] : [v.durationSec]));
+  if (lengths.length) {
+    lines.push(`Length, ${set2}: ${clockText(lengths[0])} shortest \xB7 ${clockText(at2(lengths, 0.25))} quarter \xB7 ${clockText(at2(lengths, 0.5))} middle \xB7 ${clockText(at2(lengths, 0.75))} three-quarters \xB7 ${clockText(lengths.at(-1))} longest`);
+    const buckets = BUCKETS.flatMap(([label, below], i2) => {
+      const from = i2 === 0 ? 0 : BUCKETS[i2 - 1][1];
+      const inBucket = videos.filter((v) => v.durationSec !== null && v.durationSec >= from && v.durationSec < below);
+      return inBucket.length ? [`${label} ${medianText(inBucket)} (${inBucket.length})`] : [];
+    });
+    lines.push(`Median views by length, ${set2}: ${buckets.join(" \xB7 ")}`);
+  }
+  const words = sorted(videos.map((v) => wordCount(v.title)));
+  const chars = median(videos.map((v) => v.title.length));
+  const caps = videos.filter((v) => isAllCaps(v.title)).length;
+  lines.push(`Titles, ${set2}: ${words[0]}\u2013${words.at(-1)} words, ${at2(words, 0.5)} typical, about ${Math.round(chars)} characters \xB7 ALL CAPS on ${caps} of ${videos.length} (${Math.round(caps / videos.length * 100)}%)`);
+  return lines;
+}
+function parseVideoLines(stdout) {
+  const videos = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = /^([A-Za-z0-9_-]{6,})\|([^|]*)\|([^|]*)\|(.*)$/.exec(line);
+    if (m) videos.push({ id: m[1], durationSec: numberOrNull(m[2]), views: numberOrNull(m[3]), title: m[4].trim() });
+  }
+  return videos;
+}
+async function gatherChannel(project, o2, deps, signal) {
+  const { url: url2, slug } = channelAddress(o2.url);
+  const count2 = o2.videos ?? DEFAULT_VIDEOS;
+  const stdout = await deps.ytDlp(["--flat-playlist", "--playlist-end", String(count2), "--print", "%(id)s|%(duration)s|%(view_count)s|%(title)s", url2], { signal });
+  const videos = parseVideoLines(stdout);
+  if (!videos.length) throw new MirageError("BAD_INPUT", `no videos were found at ${url2}`, "Check the channel's address (open it in a browser: its Videos tab must list videos).");
+  await mkdir5(absDir(project, slug), { recursive: true });
+  await writeJsonFile(join17(absDir(project, slug), "videos.json"), ChannelFileSchema, { version: 1, url: url2, gatheredAt: (deps.now?.() ?? /* @__PURE__ */ new Date()).toISOString(), videos }, `${relDir(slug)}/videos.json`);
+  const all = `all ${videos.length}`;
+  const latest = videos.slice(0, LATEST);
+  const more = videos.length > LATEST;
+  const lines = [
+    `Channel ${slug}: ${videos.length} videos gathered, newest first (${relDir(slug)}/videos.json). Use name "${slug}" in the next channel calls.`,
+    `Median views: ${medianText(videos)} (${all})${more ? ` \xB7 ${medianText(latest)} (latest ${LATEST})` : ""}`,
+    ...statLines(videos, all),
+    ...more ? statLines(latest, `latest ${LATEST}`) : []
+  ];
+  const unknown2 = videos.filter((v) => v.views === null).length;
+  if (unknown2) lines.push(`\u26A0 ${unknown2} of ${videos.length} videos have no view count (members-only, upcoming or live) \u2014 they are left out of the medians and the most and least viewed lists`);
+  lines.push("Most viewed:", ...pickVideos(videos, "top").map(videoLine));
+  lines.push("Newest:", ...pickVideos(videos, "newest").map(videoLine));
+  lines.push(`Least viewed of the latest ${Math.min(LATEST, videos.length)}:`, ...pickVideos(videos, "lowest").map(videoLine));
+  return lines;
+}
+async function channelPatterns(project, name, patterns) {
+  const compiled = patterns.map((p) => {
+    try {
+      return { label: p.label, re: new RegExp(p.regex, "i") };
+    } catch (e) {
+      throw new MirageError("BAD_INPUT", `pattern "${p.label}": its regex can't be read (${e.message})`, "Fix that regex and run it again; nothing was compared.");
+    }
+  });
+  const { videos } = await readChannel(project, name);
+  const counted = videos.filter((v) => v.views !== null);
+  const sets = [[`all ${counted.length}`, counted]];
+  if (videos.length > LATEST) sets.push([`latest ${LATEST}`, videos.slice(0, LATEST).filter((v) => v.views !== null)]);
+  const lines = [`Channel ${name}: ${compiled.length} title ${compiled.length === 1 ? "pattern" : "patterns"}. \xD7 is the median views of the videos whose title matches against the rest: it shows what goes with more views, not what causes them.`];
+  for (const { label, re } of compiled) {
+    lines.push(`${label} (/${re.source}/i)`);
+    for (const [set2, of] of sets) {
+      const yes = of.filter((v) => re.test(v.title));
+      const no = of.filter((v) => !re.test(v.title));
+      const [a2, b] = [medianViews(yes), medianViews(no)];
+      const compared = yes.length < MIN_SIDE || no.length < MIN_SIDE || a2 === null || !b ? "too few to compare" : `${viewsText(a2)} with \xB7 ${viewsText(b)} without \xB7 \xD7${(a2 / b).toFixed(2)}`;
+      lines.push(`  ${set2}: ${yes.length} match \xB7 ${compared}`);
+    }
+  }
+  return lines;
+}
+async function thumbnailFile(dir, id, deps, signal) {
+  const file2 = join17(dir, `${id}.jpg`);
+  if (existsSync10(file2)) return file2;
+  for (const name of THUMB_FILES) {
+    const bytes = await deps.fetchImage(`https://i.ytimg.com/vi/${id}/${name}`, { signal });
+    if (bytes?.length) {
+      await writeFile5(file2, bytes);
+      return file2;
+    }
+  }
+  return null;
+}
+function sheetArgs(files, out) {
+  const { width: w, height: h2, across, down } = TILE;
+  const tiles = files.map((_, i2) => `[${i2}:v]scale=${w}:${h2}:force_original_aspect_ratio=decrease,pad=${w}:${h2}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuvj420p[t${i2}]`);
+  const graph = [...tiles, `${files.map((_, i2) => `[t${i2}]`).join("")}concat=n=${files.length}:v=1:a=0,tile=${across}x${down}[sheet]`].join(";");
+  return [...files.flatMap((f) => ["-i", f]), "-filter_complex", graph, "-map", "[sheet]", "-frames:v", "1", "-q:v", "3", out];
+}
+async function channelThumbnails(project, name, which, deps, signal) {
+  const { videos } = await readChannel(project, name);
+  const dir = join17(absDir(project, name), "thumbs");
+  await mkdir5(dir, { recursive: true });
+  const tiles = [];
+  const warnings = [];
+  for (const v of pickVideos(videos, which)) {
+    signal?.throwIfAborted();
+    const file2 = VIDEO_ID.test(v.id) ? await thumbnailFile(dir, v.id, deps, signal) : null;
+    if (file2) tiles.push({ video: v, file: file2 });
+    else warnings.push(`\u26A0 no thumbnail could be fetched for ${v.id} (${v.title}) \u2014 it is left out of the sheet`);
+  }
+  if (!tiles.length) throw new MirageError("BAD_INPUT", "no thumbnail could be fetched", "Check the internet connection and run it again.");
+  const sheet = `thumbs-${which}.jpg`;
+  await deps.runFfmpeg(sheetArgs(tiles.map((t) => t.file), join17(absDir(project, name), sheet)), { signal });
+  const what = { top: "the most viewed", newest: "the newest", lowest: `the least viewed of the latest ${Math.min(LATEST, videos.length)}` }[which];
+  return [
+    `wrote ${relDir(name)}/${sheet} (${tiles.length} tiles, ${TILE.across} across, in reading order: ${what})`,
+    ...tiles.map((t, i2) => videoLine(t.video, i2)),
+    ...warnings
+  ];
+}
+function wordsFromJson3(text) {
+  const doc = JSON.parse(text);
+  const words = [];
+  const lines = [];
+  for (const ev of doc.events ?? []) {
+    const start = (ev.tStartMs ?? 0) / 1e3;
+    const said = [];
+    for (const seg of ev.segs ?? []) {
+      for (const w of (seg.utf8 ?? "").split(/\s+/).filter(Boolean)) {
+        words.push({ t: start + (seg.tOffsetMs ?? 0) / 1e3, w });
+        said.push(w);
+      }
+    }
+    if (said.length) lines.push({ t: start, text: said.join(" ") });
+  }
+  return { words, lines };
+}
+function captionsReport(id, info, json3, dir) {
+  const title = info.title ? ` \u201C${info.title}\u201D` : "";
+  const { words, lines: said } = json3 === null ? { words: [], lines: [] } : wordsFromJson3(json3);
+  const duration3 = info.duration ?? words.at(-1)?.t ?? 0;
+  const lines = [];
+  if (!words.length) {
+    lines.push(`\u26A0 ${id}${title}: no English captions \u2014 no transcript for this video`);
+  } else {
+    lines.push(`${id}${title}: ${clockText(duration3)}, ${words.length} words (${dir}/${id}.txt)`);
+    const blocks = [];
+    for (let from = 0; from < duration3; from += BLOCK_SEC) {
+      const to = Math.min(duration3, from + BLOCK_SEC);
+      if (to - from < 20) continue;
+      const n2 = words.filter((w) => w.t >= from && w.t < from + BLOCK_SEC).length;
+      blocks.push(`${from / 60}\u2013${Math.round(to / 60 * 10) / 10} min ${Math.round(n2 / ((to - from) / 60))}`);
+    }
+    lines.push(`  Words a minute, per 5-minute block: ${blocks.join(" \xB7 ")}`);
+  }
+  if (info.heatmap?.length && duration3 > 0) {
+    const top = [...info.heatmap].sort((a2, b) => b.value - a2.value).slice(0, REPLAYED);
+    lines.push(`  Most replayed, strongest first: ${top.map((h2) => `${Math.round((h2.start_time + h2.end_time) / 2 / duration3 * 100)}% (${clockText((h2.start_time + h2.end_time) / 2)})`).join(" \xB7 ")}`);
+  } else {
+    lines.push("  Most replayed: YouTube shows none for this video");
+  }
+  lines.push(info.chapters?.length ? `  Chapters: ${info.chapters.map((c3) => `${clockText(c3.start_time)} ${c3.title}`).join(" \xB7 ")}` : "  Chapters: none set");
+  if (words.length) {
+    const text = (ws) => ws.map((w) => w.w).join(" ");
+    lines.push(`  First ${OPENING_SEC} s: ${text(words.filter((w) => w.t < OPENING_SEC))}`);
+    lines.push(`  Last ${ENDING_SEC} s: ${text(words.filter((w) => w.t >= duration3 - ENDING_SEC))}`);
+  }
+  return { lines, transcript: words.length ? `${said.map((l) => `[${clockText(l.t)}] ${l.text}`).join("\n")}
+` : null };
+}
+async function channelCaptions(project, name, ids, deps, signal) {
+  await readChannel(project, name);
+  for (const id of ids) {
+    if (!VIDEO_ID.test(id)) throw new MirageError("BAD_INPUT", `"${id}" isn't a video id`, "Use the ids the channel lists show, e.g. dQw4w9WgXcQ.");
+  }
+  const dir = absDir(project, name);
+  const raw = join17(dir, "raw");
+  await mkdir5(raw, { recursive: true });
+  const lines = [];
+  for (const id of ids) {
+    signal?.throwIfAborted();
+    try {
+      await deps.ytDlp(["--skip-download", "--write-auto-subs", "--sub-langs", "en", "--sub-format", "json3", "--write-info-json", "-P", raw, "-o", "%(id)s.%(ext)s", `https://www.youtube.com/watch?v=${id}`], { signal });
+    } catch (e) {
+      const code = e.code;
+      if (code === "NOT_FOUND" || code === "CANCELLED" || e.name === "AbortError") throw e;
+      lines.push(`\u26A0 ${id}: yt-dlp couldn't read this video (${errorReason(e)}) \u2014 it is left out`);
+      continue;
+    }
+    const infoFile = join17(raw, `${id}.info.json`);
+    if (!existsSync10(infoFile)) {
+      lines.push(`\u26A0 ${id}: yt-dlp wrote no info for this video \u2014 it is left out`);
+      continue;
+    }
+    const info = JSON.parse(await readFile7(infoFile, "utf8"));
+    const subs = (await readdir5(raw)).filter((f) => f.startsWith(`${id}.`) && f.endsWith(".json3")).sort((a2, b) => Number(b === `${id}.en.json3`) - Number(a2 === `${id}.en.json3`))[0];
+    const report = captionsReport(id, info, subs ? await readFile7(join17(raw, subs), "utf8") : null, relDir(name));
+    if (report.transcript !== null) await writeFile5(join17(dir, `${id}.txt`), report.transcript);
+    lines.push(...report.lines);
+  }
+  return lines;
+}
+var LATEST, LIST, DEFAULT_VIDEOS, MAX_VIDEOS, TILE, VideoSchema2, ChannelFileSchema, TABS, YOUTUBE_HOSTS, ADDRESS_HINT, relDir, absDir, NAME, sorted, at2, medianViews, medianText, BUCKETS, isAllCaps, wordCount, videoLine, byViews, numberOrNull, MIN_SIDE, THUMB_FILES, VIDEO_ID, BLOCK_SEC, OPENING_SEC, ENDING_SEC, REPLAYED;
+var init_channel = __esm({
+  "packages/core/src/mirage/channel.ts"() {
+    "use strict";
+    init_src();
+    init_src2();
+    init_zod();
+    init_errors4();
+    init_json_file();
+    LATEST = 60;
+    LIST = 12;
+    DEFAULT_VIDEOS = 200;
+    MAX_VIDEOS = 1e3;
+    TILE = { width: 480, height: 270, across: 4, down: 3 };
+    VideoSchema2 = strictObject2({
+      id: external_exports.string().min(1),
+      title: external_exports.string(),
+      durationSec: external_exports.number().nonnegative().nullable(),
+      views: external_exports.number().nonnegative().nullable()
+    });
+    ChannelFileSchema = strictObject2({
+      version: external_exports.literal(1),
+      /** The page the list was read from. */
+      url: external_exports.string().min(1),
+      gatheredAt: external_exports.string().min(1),
+      videos: external_exports.array(VideoSchema2)
+    });
+    TABS = ["videos", "shorts", "streams"];
+    YOUTUBE_HOSTS = /* @__PURE__ */ new Set(["youtube.com", "www.youtube.com", "m.youtube.com"]);
+    ADDRESS_HINT = "Give the channel's address, e.g. https://www.youtube.com/@handle, or just @handle.";
+    relDir = (slug) => `analysis/${slug}`;
+    absDir = (project, slug) => join17(project, "analysis", slug);
+    NAME = /^[a-z0-9][a-z0-9-]*$/;
+    sorted = (xs) => [...xs].sort((a2, b) => a2 - b);
+    at2 = (s, p) => s[Math.round(p * (s.length - 1))];
+    medianViews = (videos) => median(videos.flatMap((v) => v.views === null ? [] : [v.views]));
+    medianText = (videos) => {
+      const m = medianViews(videos);
+      return m === null ? "no view counts" : viewsText(m);
+    };
+    BUCKETS = [
+      ["under 1 min", 60],
+      ["1\u20134 min", 240],
+      ["4\u20138 min", 480],
+      ["8\u201315 min", 900],
+      ["15\u201330 min", 1800],
+      ["30\u201345 min", 2700],
+      ["45\u201360 min", 3600],
+      ["over 60 min", Infinity]
+    ];
+    isAllCaps = (title) => new RegExp("\\p{L}", "u").test(title) && title === title.toUpperCase();
+    wordCount = (title) => title.trim().split(/\s+/).filter(Boolean).length;
+    videoLine = (v, i2) => `  ${i2 + 1}. ${v.views === null ? "no view count" : viewsText(v.views)} \xB7 ${v.durationSec === null ? "length unknown" : clockText(v.durationSec)} \xB7 ${v.id} \xB7 ${v.title}`;
+    byViews = (videos, dir) => videos.filter((v) => v.views !== null).sort((a2, b) => dir * (a2.views - b.views));
+    numberOrNull = (text) => /^\d+(\.\d+)?$/.test(text.trim()) ? Number(text) : null;
+    MIN_SIDE = 3;
+    THUMB_FILES = ["maxresdefault.jpg", "hq720.jpg", "hqdefault.jpg"];
+    VIDEO_ID = /^[A-Za-z0-9_-]{6,20}$/;
+    BLOCK_SEC = 300;
+    OPENING_SEC = 150;
+    ENDING_SEC = 100;
+    REPLAYED = 8;
+  }
+});
+
 // packages/core/src/mirage/versions.ts
 import { randomBytes, randomUUID as randomUUID7 } from "node:crypto";
-import { access as access3, copyFile, link, mkdir as mkdir5, readdir as readdir5, readFile as readFile7, rename as rename5, rm as rm9, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join15 } from "node:path";
+import { access as access4, copyFile, link, mkdir as mkdir6, readdir as readdir6, readFile as readFile8, rename as rename5, rm as rm9, writeFile as writeFile6 } from "node:fs/promises";
+import { join as join18 } from "node:path";
 async function readBytes(path8) {
   try {
-    return await readFile7(path8);
+    return await readFile8(path8);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -34100,7 +34704,7 @@ async function readBytes(path8) {
 }
 async function writeBytesAtomic(path8, bytes) {
   const tmpPath = `${path8}.tmp-${randomUUID7()}`;
-  await writeFile5(tmpPath, bytes);
+  await writeFile6(tmpPath, bytes);
   await rename5(tmpPath, path8);
 }
 async function linkOrCopy(from, to) {
@@ -34112,10 +34716,10 @@ async function linkOrCopy(from, to) {
     await copyFile(from, to);
   }
 }
-function newId(kind, at2) {
-  const d = `${pad(at2.getUTCFullYear(), 4)}${pad(at2.getUTCMonth() + 1, 2)}${pad(at2.getUTCDate(), 2)}`;
-  const t = `${pad(at2.getUTCHours(), 2)}${pad(at2.getUTCMinutes(), 2)}${pad(at2.getUTCSeconds(), 2)}`;
-  return `${d}-${t}-${pad(at2.getUTCMilliseconds(), 3)}-${kind}-${randomBytes(2).toString("hex")}`;
+function newId(kind, at4) {
+  const d = `${pad(at4.getUTCFullYear(), 4)}${pad(at4.getUTCMonth() + 1, 2)}${pad(at4.getUTCDate(), 2)}`;
+  const t = `${pad(at4.getUTCHours(), 2)}${pad(at4.getUTCMinutes(), 2)}${pad(at4.getUTCSeconds(), 2)}`;
+  return `${d}-${t}-${pad(at4.getUTCMilliseconds(), 3)}-${kind}-${randomBytes(2).toString("hex")}`;
 }
 async function withEpisodeLock(project, n2, waitMs, fn) {
   const deadline = Date.now() + (waitMs ?? DEFAULT_WAIT_MS);
@@ -34135,14 +34739,14 @@ async function withEpisodeLock(project, n2, waitMs, fn) {
 }
 async function listLocked(project, n2) {
   const root = versionsDir(project, n2);
-  const names = await readdir5(root).catch((e) => {
+  const names2 = await readdir6(root).catch((e) => {
     if (e.code === "ENOENT") return [];
     throw e;
   });
   const metas = [];
-  for (const name of names.filter((f) => ID_PATTERN.test(f)).sort()) {
+  for (const name of names2.filter((f) => ID_PATTERN.test(f)).sort()) {
     try {
-      const meta3 = await readJsonFile(join15(root, name, "meta.json"), VersionMetaSchema);
+      const meta3 = await readJsonFile(join18(root, name, "meta.json"), VersionMetaSchema);
       if (meta3.id === name) metas.push(meta3);
     } catch {
     }
@@ -34152,27 +34756,27 @@ async function listLocked(project, n2) {
 async function snapshotLocked(project, n2, o2) {
   const dir = episodeDir(project, n2);
   const root = versionsDir(project, n2);
-  if (o2.render && !await access3(join15(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
+  if (o2.render && !await access4(join18(dir, `${o2.render}.mp4`)).then(() => true, () => false)) {
     throw new MirageError("BAD_INPUT", `episodes/${n2}/${o2.render}.mp4 does not exist`, "Render it first.");
   }
-  await mkdir5(root, { recursive: true });
-  for (const f of await readdir5(root)) if (f.startsWith(".tmp-")) await rm9(join15(root, f), { recursive: true, force: true }).catch(() => {
+  await mkdir6(root, { recursive: true });
+  for (const f of await readdir6(root)) if (f.startsWith(".tmp-")) await rm9(join18(root, f), { recursive: true, force: true }).catch(() => {
   });
   const existing = await listLocked(project, n2);
   const now = /* @__PURE__ */ new Date();
   const id = newId(o2.kind, now);
-  const tmp = join15(root, `.tmp-${randomUUID7()}`);
-  await mkdir5(tmp);
+  const tmp = join18(root, `.tmp-${randomUUID7()}`);
+  await mkdir6(tmp);
   try {
-    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join15(dir, f))));
-    if (episode) await writeFile5(join15(tmp, "episode.json"), episode);
-    if (summary) await writeFile5(join15(tmp, "summary.md"), summary);
+    const [episode, summary] = await Promise.all(STATE_FILES.map((f) => readBytes(join18(dir, f))));
+    if (episode) await writeFile6(join18(tmp, "episode.json"), episode);
+    if (summary) await writeFile6(join18(tmp, "summary.md"), summary);
     let render = null;
     if (o2.render) {
-      await linkOrCopy(join15(dir, `${o2.render}.mp4`), join15(tmp, "video.mp4"));
+      await linkOrCopy(join18(dir, `${o2.render}.mp4`), join18(tmp, "video.mp4"));
       let captions = null;
-      if (o2.render === "final" && await readBytes(join15(dir, "final.srt")) !== null) {
-        await copyFile(join15(dir, "final.srt"), join15(tmp, "captions.srt"));
+      if (o2.render === "final" && await readBytes(join18(dir, "final.srt")) !== null) {
+        await copyFile(join18(dir, "final.srt"), join18(tmp, "captions.srt"));
         captions = "captions.srt";
       }
       render = { mode: o2.render, file: "video.mp4", captions };
@@ -34190,8 +34794,8 @@ async function snapshotLocked(project, n2, o2) {
       hasEpisode: episode !== null,
       hasSummary: summary !== null
     };
-    await writeJsonFile(join15(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
-    await rename5(tmp, join15(root, id));
+    await writeJsonFile(join18(tmp, "meta.json"), VersionMetaSchema, meta3, `episodes/${n2}/versions/${id}/meta.json`);
+    await rename5(tmp, join18(root, id));
     if (o2.kind === "checkpoint") await prune(project, n2, "checkpoint", MAX_CHECKPOINTS);
     if (o2.kind === "backup") await prune(project, n2, "backup", MAX_BACKUPS);
     return meta3;
@@ -34204,7 +34808,7 @@ async function snapshotLocked(project, n2, o2) {
 async function prune(project, n2, kind, keep) {
   const ofKind = (await listLocked(project, n2)).filter((v) => v.kind === kind);
   for (const old of ofKind.slice(0, Math.max(0, ofKind.length - keep))) {
-    await rm9(join15(versionsDir(project, n2), old.id), { recursive: true, force: true });
+    await rm9(join18(versionsDir(project, n2), old.id), { recursive: true, force: true });
   }
 }
 async function snapshotVersion(project, n2, o2) {
@@ -34217,14 +34821,14 @@ async function restoreVersion(project, n2, id, o2 = {}) {
   return withEpisodeLock(project, n2, o2.waitMs, async () => {
     const restored = (await listLocked(project, n2)).find((v) => v.id === id);
     if (!restored) throw new MirageError("BAD_INPUT", `episodes/${n2} has no saved version "${id}"`, "List the versions and pick one of those.");
-    const from = join15(versionsDir(project, n2), id);
-    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join15(from, f))));
+    const from = join18(versionsDir(project, n2), id);
+    const bytes = await Promise.all(STATE_FILES.map((f) => readBytes(join18(from, f))));
     const backup = await snapshotLocked(project, n2, { kind: "backup", label: `Before going back to \u201C${restored.label}\u201D` });
     const dir = episodeDir(project, n2);
     for (const [i2, f] of STATE_FILES.entries()) {
       const b = bytes[i2];
-      if (b) await writeBytesAtomic(join15(dir, f), b);
-      else await rm9(join15(dir, f), { force: true });
+      if (b) await writeBytesAtomic(join18(dir, f), b);
+      else await rm9(join18(dir, f), { force: true });
     }
     return { restored, backup };
   });
@@ -34243,23 +34847,23 @@ var init_versions2 = __esm({
     RETRY_MS = 250;
     STATE_FILES = ["episode.json", "summary.md"];
     ID_PATTERN = /^\d{8}-\d{6}-\d{3}-(before|checkpoint|delivery|backup)-[0-9a-f]{4}$/;
-    versionsDir = (project, n2) => join15(episodeDir(project, n2), "versions");
+    versionsDir = (project, n2) => join18(episodeDir(project, n2), "versions");
     pad = (v, w) => String(v).padStart(w, "0");
   }
 });
 
 // packages/core/src/mirage/video.ts
-import { access as access4, mkdir as mkdir6, readdir as readdir6 } from "node:fs/promises";
-import { join as join16, resolve as resolve10 } from "node:path";
+import { access as access5, mkdir as mkdir7, readdir as readdir7 } from "node:fs/promises";
+import { join as join19, resolve as resolve10 } from "node:path";
 async function newVideo(project, v) {
   const video = VideoSchema.parse({ ...v, version: 1, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
-  const root = join16(resolve10(project), "episodes");
-  await mkdir6(root, { recursive: true });
+  const root = join19(resolve10(project), "episodes");
+  await mkdir7(root, { recursive: true });
   for (; ; ) {
-    const highest = (await readdir6(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
+    const highest = (await readdir7(root)).reduce((m, f) => /^[1-9]\d*$/.test(f) ? Math.max(m, Number(f)) : m, 0);
     const n2 = highest + 1;
     try {
-      await mkdir6(episodeDir(project, n2));
+      await mkdir7(episodeDir(project, n2));
     } catch (e) {
       if (e.code === "EEXIST") continue;
       throw e;
@@ -34269,15 +34873,15 @@ async function newVideo(project, v) {
   }
 }
 async function videoNumbers(project) {
-  const names = await readdir6(join16(resolve10(project), "episodes")).catch(() => []);
-  return names.filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+  const names2 = await readdir7(join19(resolve10(project), "episodes")).catch(() => []);
+  return names2.filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
 }
 async function planVideo(project, req, { formats, problems }) {
   let base = { about: "", mention: "", hide: "", footage: [] };
   if (req.from !== void 0) {
     const src = await readVideo(project, req.from);
     if (!src) {
-      const folder = await access4(episodeDir(project, req.from)).then(() => true, () => false);
+      const folder = await access5(episodeDir(project, req.from)).then(() => true, () => false);
       throw new MirageError("BAD_INPUT", folder ? `video ${req.from} has no video.json to copy from` : `there is no video ${req.from}`, "Run status to see the videos.");
     }
     base = { about: src.about, mention: src.mention, hide: src.hide, footage: src.footage };
@@ -34304,6 +34908,7 @@ async function planVideo(project, req, { formats, problems }) {
     }
     vlog = { name: req.vlog.name, number: number4, date: req.vlog.date };
   }
+  const idea = Object.fromEntries(Object.entries(req.idea ?? {}).flatMap(([k, t]) => typeof t === "string" && t.trim() ? [[k, t.trim()]] : []));
   const video = {
     title: req.title,
     about: add(base.about, req.about),
@@ -34313,7 +34918,10 @@ async function planVideo(project, req, { formats, problems }) {
     ...format2 !== void 0 ? { format: format2 } : {},
     ...req.from !== void 0 ? { from: req.from } : {},
     ...vlog ? { vlog } : {},
-    ...req.targetSec !== void 0 ? { targetSec: req.targetSec } : {}
+    ...req.targetSec !== void 0 ? { targetSec: req.targetSec } : {},
+    ...Object.keys(idea).length ? { idea } : {},
+    ...req.experiment ? { experiment: req.experiment } : {},
+    ...req.series !== void 0 ? { series: req.series } : {}
   };
   let found;
   try {
@@ -34322,6 +34930,9 @@ async function planVideo(project, req, { formats, problems }) {
     found = null;
   }
   return { video, format: found };
+}
+async function writeVideo(project, n2, video) {
+  await writeJsonFile(videoPath(project, n2), VideoSchema, video, `episodes/${n2}/video.json`);
 }
 async function readVideo(project, n2) {
   try {
@@ -34335,7 +34946,7 @@ async function videoStage(project, n2) {
   const dir = episodeDir(project, n2);
   let stage = "new";
   for (const s of ["final", "guide", "rough"]) {
-    if (await access4(join16(dir, `${s}.mp4`)).then(() => true, () => false)) {
+    if (await access5(join19(dir, `${s}.mp4`)).then(() => true, () => false)) {
       stage = s;
       break;
     }
@@ -34353,12 +34964,1728 @@ var init_video2 = __esm({
     init_json_file();
     init_render_episode();
     init_versions2();
-    videoPath = (project, n2) => join16(episodeDir(project, n2), "video.json");
+    videoPath = (project, n2) => join19(episodeDir(project, n2), "video.json");
+  }
+});
+
+// packages/core/src/mirage/series.ts
+import { existsSync as existsSync11 } from "node:fs";
+import { mkdir as mkdir8, readdir as readdir8, writeFile as writeFile7 } from "node:fs/promises";
+import { join as join20 } from "node:path";
+function seriesSlug(name) {
+  const slug = name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!slug) throw new MirageError("BAD_INPUT", `"${name}" can't name a series`, "Give the series a name with letters or digits in it.");
+  return slug;
+}
+async function readSeries(project, slug) {
+  try {
+    return await readJsonFile(seriesFile(project, slug), SeriesSchema, shown2(slug));
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+}
+async function listSeries(project) {
+  const names2 = (await readdir8(join20(project, "series")).catch(() => [])).sort();
+  const series = [];
+  const problems = [];
+  for (const slug of names2) {
+    if (!existsSync11(seriesFile(project, slug))) continue;
+    try {
+      const s = await readSeries(project, slug);
+      if (s && s.slug !== slug) problems.push(`\u2716 ${shown2(slug)}: slug: the slug "${s.slug}" must be the folder's name, "${slug}"`);
+      else if (s) series.push(s);
+    } catch (e) {
+      const m = describeError(e).message;
+      problems.push(`\u2716 ${m.startsWith(shown2(slug)) ? m : `${shown2(slug)}: ${m}`}`);
+    }
+  }
+  return { series, problems };
+}
+async function findSeries(project, ref) {
+  const { series } = await listSeries(project);
+  const slug = seriesSlug(ref);
+  const found = series.find((s) => s.slug === slug) ?? series.find((s) => s.name.toLowerCase() === ref.trim().toLowerCase());
+  if (!found) throw new MirageError("BAD_INPUT", `there is no series "${ref}"`, `The series are: ${series.map((s) => s.slug).join(", ") || "none"}. new_video with series starts one.`);
+  return found;
+}
+async function seriesOf(project, n2) {
+  const video = await readVideo(project, n2).catch(() => null);
+  return video?.series ? await readSeries(project, video.series).catch(() => null) : null;
+}
+async function readme(project, s) {
+  const lines = [
+    `# ${s.name}`,
+    "",
+    "Written by Mirage: do not edit, it is rewritten whenever the series changes or is shown. What the series carries is in `series.json`, beside this file.",
+    "",
+    `- Format: ${s.format}`,
+    ...s.question ? [`- The big question: ${s.question}`] : [],
+    `- Open question for the next episode: ${s.openQuestion ? `${s.openQuestion}${s.openQuestionFrom ? ` (left by video ${s.openQuestionFrom})` : ""}` : "none on record"}`,
+    ...Object.keys(s.counts).length ? [`- Running counts: ${countsText(s)}`] : [],
+    ...s.signOff ? [`- Sign-off: ${s.signOff}`] : [],
+    ...s.titleShape ? [`- Title shape: ${s.titleShape}`] : [],
+    ...s.thumbnail ? [`- Thumbnail layout: ${layoutText(s.thumbnail)}`] : [],
+    "",
+    "## Episodes",
+    ""
+  ];
+  if (!s.episodes.length) lines.push("None yet.");
+  for (const [i2, n2] of s.episodes.entries()) {
+    const dir = join20(project, "episodes", String(n2));
+    const video = await readVideo(project, n2).catch(() => null);
+    const stage = existsSync11(dir) ? (await videoStage(project, n2)).stage : "missing";
+    const files = ["final.mp4", "final.srt", "rough.mp4", "thumbnail.jpg", "summary.md"].filter((f) => existsSync11(join20(dir, f)));
+    const title = video?.titles?.chosen ?? video?.title ?? "no video.json";
+    lines.push(`${i2 + 1}. Video ${n2} \u201C${title}\u201D: ${stage}${video?.posted ? `, posted ${video.posted.at} at ${video.posted.url}` : ""} \xB7 [episodes/${n2}/](../../episodes/${n2}/)${files.map((f) => ` \xB7 [${f}](../../episodes/${n2}/${f})`).join("")}`);
+  }
+  return `${lines.join("\n")}
+`;
+}
+async function writeSeries(project, s) {
+  await mkdir8(seriesDir(project, s.slug), { recursive: true });
+  await writeJsonFile(seriesFile(project, s.slug), SeriesSchema, s, shown2(s.slug));
+  await refreshReadme(project, s);
+}
+async function refreshReadme(project, s) {
+  await writeFile7(join20(seriesDir(project, s.slug), "README.md"), await readme(project, s)).catch(() => {
+  });
+}
+function withFields(s, f) {
+  const out = { ...s, counts: { ...s.counts } };
+  for (const key of ["question", "openQuestion", "signOff", "titleShape"]) {
+    const text = f[key];
+    if (text === void 0) continue;
+    if (text.trim()) out[key] = text.trim();
+    else delete out[key];
+  }
+  if (f.name?.trim()) out.name = f.name.trim();
+  if (f.format) out.format = f.format;
+  if (f.openQuestion !== void 0) {
+    if (f.openQuestion.trim() && f.video !== void 0) out.openQuestionFrom = f.video;
+    else delete out.openQuestionFrom;
+  }
+  for (const [name, c3] of Object.entries(f.counts ?? {})) {
+    if (c3 === null) delete out.counts[name];
+    else out.counts[name] = { value: c3.value, ...c3.unit ? { unit: c3.unit } : {} };
+  }
+  if (f.thumbnail) out.thumbnail = { face: f.thumbnail.face, share: f.thumbnail.share ?? s.thumbnail?.share ?? DEFAULT_FACE_SHARE };
+  return out;
+}
+async function planSeries(project, ref, f, format2, now = /* @__PURE__ */ new Date()) {
+  const { series } = await listSeries(project);
+  const slug = seriesSlug(ref);
+  const found = series.find((s) => s.slug === slug) ?? series.find((s) => s.name.toLowerCase() === ref.trim().toLowerCase());
+  if (found) return { series: found, created: false, ignored: Object.keys(f).filter((k) => k !== "name" && f[k] !== void 0) };
+  if (existsSync11(seriesFile(project, slug))) await readSeries(project, slug);
+  const fresh = { version: 1, slug, name: ref.trim(), format: format2, counts: {}, episodes: [], createdAt: now.toISOString() };
+  return { series: withFields(fresh, { ...f, name: void 0, format: void 0 }), created: true, ignored: [] };
+}
+async function addEpisode(project, s, n2) {
+  const next = { ...s, episodes: s.episodes.includes(n2) ? s.episodes : [...s.episodes, n2] };
+  await writeSeries(project, next);
+  return next;
+}
+async function updateSeries(project, ref, f) {
+  const s = await findSeries(project, ref);
+  if (f.video !== void 0 && !s.episodes.includes(f.video)) {
+    throw new MirageError("BAD_INPUT", `video ${f.video} isn't an episode of the series "${s.name}"`, `Its episodes are: ${s.episodes.map((n2) => `video ${n2}`).join(", ") || "none"}.`);
+  }
+  const next = withFields(s, f);
+  await writeSeries(project, next);
+  return next;
+}
+function seriesLine(s) {
+  const episodes = s.episodes.length ? `${s.episodes.length === 1 ? "video" : "videos"} ${s.episodes.join(", ")}` : "no episodes yet";
+  return `Series \u201C${s.name}\u201D (series/${s.slug}/, ${s.format}): ${episodes} \xB7 ${s.openQuestion ? `open question: \u201C${s.openQuestion}\u201D` : "no open question on record"}`;
+}
+async function seriesReport(project, s) {
+  const lines = [
+    seriesLine(s),
+    `  The big question: ${s.question ?? "none on record"}`,
+    ...s.openQuestion && s.openQuestionFrom ? [`  The open question was left by video ${s.openQuestionFrom}`] : [],
+    `  Running counts: ${countsText(s) || "none on record"}`,
+    `  Sign-off: ${s.signOff ?? "none on record"}`,
+    `  Title shape: ${s.titleShape ?? "none on record"}`,
+    `  Thumbnail layout: ${s.thumbnail ? layoutText(s.thumbnail) : "none on record"}`
+  ];
+  for (const n2 of s.episodes) {
+    const video = await readVideo(project, n2).catch(() => null);
+    const stage = existsSync11(join20(project, "episodes", String(n2))) ? (await videoStage(project, n2)).stage : "missing";
+    lines.push(`  Video ${n2}${video ? ` \u201C${video.titles?.chosen ?? video.title}\u201D` : ""}: ${stage}${video?.posted ? " \xB7 posted" : ""}`);
+  }
+  await refreshReadme(project, s);
+  lines.push(`  The grouped view is series/${s.slug}/README.md`);
+  return lines;
+}
+var DEFAULT_FACE_SHARE, seriesDir, seriesFile, shown2, countText, countsText, layoutText;
+var init_series2 = __esm({
+  "packages/core/src/mirage/series.ts"() {
+    "use strict";
+    init_src();
+    init_errors4();
+    init_json_file();
+    init_video2();
+    DEFAULT_FACE_SHARE = 0.34;
+    seriesDir = (project, slug) => join20(project, "series", slug);
+    seriesFile = (project, slug) => join20(seriesDir(project, slug), "series.json");
+    shown2 = (slug) => `series/${slug}/series.json`;
+    countText = (c3) => `${c3.value}${c3.unit ? ` ${c3.unit}` : ""}`;
+    countsText = (s) => Object.entries(s.counts).map(([name, c3]) => `${name} ${countText(c3)}`).join(" \xB7 ");
+    layoutText = (l) => `the face on the ${l.face}, ${Math.round(l.share * 100)}% of the width`;
+  }
+});
+
+// packages/core/src/mirage/thumbnail.ts
+import { randomUUID as randomUUID8 } from "node:crypto";
+import { existsSync as existsSync12, statSync as statSync6 } from "node:fs";
+import { mkdir as mkdir9, mkdtemp as mkdtemp2, readdir as readdir9, readFile as readFile9, rename as rename6, rm as rm10, writeFile as writeFile8 } from "node:fs/promises";
+import { tmpdir as tmpdir3 } from "node:os";
+import { isAbsolute as isAbsolute2, join as join21 } from "node:path";
+function thumbCandidates(ep, catalog, loudness, max = MAX_CANDIDATES) {
+  const laid = layoutTimeline(ep);
+  const fps = ep.output.fps;
+  const duration3 = laid.length ? laid[laid.length - 1].end : 0;
+  const frames = laid.reduce((n2, l) => n2 + l.frames, 0);
+  const clips = new Map(catalog.clips.map((c3) => [c3.id, c3]));
+  const picks = [];
+  const add = (at4, reason) => {
+    const f = outputFrame(at4, fps);
+    if (picks.length >= max || at4 < -EPS5 || f < 0 || f >= frames) return;
+    const t = frameTime(f, fps);
+    if (picks.some((p) => Math.abs(p.t - t) < MIN_GAP_SEC - EPS5)) return;
+    picks.push({ t, reason });
+  };
+  for (const l of laid) {
+    const item = l.item;
+    if (isCard(item)) continue;
+    const moments = (clips.get(item.clip)?.moments ?? []).filter((m) => m.t >= item.src.in && m.t < item.src.out).sort((a2, b) => a2.t - b.t);
+    for (const m of moments) add(l.start + (m.t - item.src.in) / item.speed, `moment: ${m.label}`);
+  }
+  for (const l of laid) {
+    const item = l.item;
+    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
+    const shown3 = l.start + l.srcFrames / ep.output.fps;
+    let best = null;
+    for (const s of loudness) {
+      if (s.t < l.start - EPS5 || s.t >= shown3 - EPS5 || !(s.lufs > SILENT_LUFS2)) continue;
+      if (!best || s.lufs > best.lufs) best = s;
+    }
+    if (best) add(best.t, `loudest moment of item ${item.id}`);
+  }
+  for (const l of laid) {
+    if (THUMB_BEATS.includes(l.item.beat)) add((l.start + l.end) / 2, `${l.item.beat} beat (item ${l.item.id})`);
+  }
+  for (const n2 of [max, max * 2, max * 4, max * 8]) {
+    for (let i2 = 0; i2 < n2; i2++) add(duration3 * (i2 + 0.5) / n2, "even spacing");
+    if (picks.length >= max) break;
+  }
+  return picks;
+}
+async function cutLoudness(file2, tools, o2 = {}) {
+  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
+  try {
+    const af = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,ebur128=metadata=1,ametadata=mode=print:file=loudness.txt";
+    await tools.runFfmpeg(["-i", file2, "-vn", "-af", af, "-f", "null", "-"], { cwd: work, signal: o2.signal });
+    const text = await readFile9(join21(work, "loudness.txt"), "utf8");
+    const out = [];
+    let at4 = null;
+    for (const line of text.split(/\r?\n/)) {
+      const frame = /pts_time:(\S+)/.exec(line);
+      if (frame) at4 = Number(frame[1]);
+      const m = /^lavfi\.r128\.M=(\S+)$/.exec(line);
+      if (m && at4 !== null && Number.isFinite(at4)) {
+        const lufs2 = Number(m[1]);
+        const end = at4 + STEP_SEC;
+        if (Number.isFinite(lufs2)) out.push({ t: ms((Math.max(0, end - WINDOW_SEC) + end) / 2), lufs: lufs2 });
+      }
+    }
+    return out;
+  } finally {
+    await rm10(work, { recursive: true, force: true });
+  }
+}
+async function openElsewhere(op, shown3) {
+  try {
+    return await op;
+  } catch (e) {
+    const code = e.code;
+    if (code === "EBUSY" || code === "EPERM") throw new MirageError("BUSY", `${shown3} is open in another app`, "Close it there, then run thumbnail again.");
+    throw e;
+  }
+}
+async function sweep(dir, pattern) {
+  const names2 = await readdir9(dir).catch(() => []);
+  for (const f of names2) if (pattern.test(f)) await rm10(join21(dir, f), { recursive: true, force: true }).catch(() => {
+  });
+}
+function latestCut(dir, n2) {
+  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync12(join21(dir, f)) ? [{ f, at: statSync6(join21(dir, f)).mtimeMs }] : []);
+  if (!made.length) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
+  return made.reduce((a2, b) => b.at > a2.at ? b : a2).f;
+}
+async function writeCandidates(project, n2, tools, o2 = {}) {
+  const dir = episodeDir(project, n2);
+  const source = latestCut(dir, n2);
+  const cut = join21(dir, source);
+  const ep = await loadEpisode(project, n2);
+  const catalog = await loadCatalog(project);
+  const probe2 = await tools.probe(cut);
+  const ownSound2 = ep.items.some((i2) => !isCard(i2) && i2.audio === "keep" && i2.speed === 1);
+  const loudness = ownSound2 && probe2.hasAudio ? await cutLoudness(cut, tools, o2) : [];
+  const laid = layoutTimeline(ep);
+  const cutSec = probe2.videoDurationSec ?? probe2.durationSec;
+  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > Math.max(0.1, 1 / ep.output.fps) + EPS5;
+  const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
+  await sweep(dir, LEFT_CANDIDATES);
+  const work = await mkdtemp2(join21(dir, ".thumbs-"));
+  try {
+    const frames = [];
+    for (const [i2, p] of picks.entries()) {
+      const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
+      const seek = Math.max(0, p.t - 1 / ep.output.fps);
+      await tools.runFfmpeg(["-accurate_seek", "-ss", ffNum(seek), "-i", cut, "-vf", JPEG_COLOUR, "-frames:v", "1", "-q:v", "2", join21(work, file2)], { signal: o2.signal });
+      if (!existsSync12(join21(work, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
+      frames.push({ ...p, file: file2 });
+    }
+    o2.signal?.throwIfAborted();
+    const thumbs = join21(dir, "thumbs");
+    await mkdir9(thumbs, { recursive: true });
+    for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await openElsewhere(rm10(join21(thumbs, f), { force: true }), `episodes/${n2}/thumbs/${f}`);
+    for (const f of frames) await openElsewhere(rename6(join21(work, f.file), join21(thumbs, f.file)), `episodes/${n2}/thumbs/${f.file}`);
+    return { source, timelineChanged, frames };
+  } finally {
+    await rm10(work, { recursive: true, force: true });
+  }
+}
+function formatThumbTime(t) {
+  const tenths = Math.round(t * 10);
+  return `${Math.floor(tenths / 600)}:${(tenths % 600 / 10).toFixed(1).padStart(4, "0")}`;
+}
+function candidatesReport(n2, r) {
+  return [
+    `wrote ${r.frames.length} candidate frames to episodes/${n2}/thumbs/ (from ${r.source})`,
+    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  at ${secs(f.t)}  ${f.reason}`),
+    ...r.timelineChanged ? [`\u26A0 the timeline changed after ${r.source} was made \u2014 run cut again for frames that match`] : []
+  ];
+}
+function thumbSize(output2) {
+  return output2.width > output2.height ? { width: 1280, height: 720 } : { width: 1080, height: 1920 };
+}
+function thumbSource(ep, at4) {
+  const fps = ep.output.fps;
+  const laid = layoutTimeline(ep);
+  const total = laid.reduce((f, l) => f + l.frames, 0);
+  const outside = () => new MirageError("BAD_INPUT", `${at4} s is outside the video (0\u2013${secs(total / fps)} s)`, "");
+  if (!Number.isFinite(at4) || at4 < 0) throw outside();
+  const frame = outputFrame(at4, fps);
+  let first = 0;
+  for (const l of laid) {
+    if (frame < first + l.frames) {
+      if (isCard(l.item)) return { laid: l, card: true };
+      const { src, speed } = l.item;
+      return { laid: l, src: src.in + Math.min(frame - first, l.srcFrames) * speed / fps, frame: frame - first };
+    }
+    first += l.frames;
+  }
+  throw outside();
+}
+function thumbFraming(l, frame, fps) {
+  const item = l.item;
+  const at4 = moveFrames(item, l.frames, fps, l.clock)[Math.min(Math.max(0, frame), l.frames - 1)] ?? { zoom: item.zoom, x: item.focus.x, y: item.focus.y };
+  return { zoom: at4.zoom, focus: { x: at4.x, y: at4.y } };
+}
+function thumbCrop(o2) {
+  const { width: W, height: H } = o2.thumb;
+  const z2 = ffNum(o2.zoom);
+  const [vw, vh] = o2.frame === "fill" ? [`min(iw,ih*${o2.output.width}/${o2.output.height})/${z2}`, `min(ih,iw*${o2.output.height}/${o2.output.width})/${z2}`] : [`iw/${z2}`, `ih/${z2}`];
+  return `crop=w='min(${vw},${vh}*${W}/${H})':h='min(${vh},${vw}*${H}/${W})':x='(iw-ow)*${ffNum(o2.focus.x)}':y='(ih-oh)*${ffNum(o2.focus.y)}'`;
+}
+function thumbWordCount(text) {
+  return tidy(text).split(/\s+/).filter((w) => HAS_WORD2.test(w)).length;
+}
+function thumbnailAss(width, height, text) {
+  const px = scaler(width, height);
+  const side = Math.round(width * 0.05);
+  return [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    "WrapStyle: 0",
+    "ScaledBorderAndShadow: yes",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    // The bundled face is heavy already: no faux bold.
+    `Style: Thumb,${CAPTION_FONT},${px(150)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${px(10)},0,5,${side},${side},0,1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(width > height ? height * 5 / 6 : height * 0.6)})}${assDraw(text.toUpperCase())}`,
+    ""
+  ].join("\n");
+}
+function clipPicture(ep, catalog, shown3, focus, size) {
+  const fps = ep.output.fps;
+  const item = shown3.laid.item;
+  const src = sourcesFor({ ...ep, items: [item] }, catalog).get(item.clip);
+  const videoEnd = (() => {
+    const p = catalog.clips.find((c3) => c3.id === item.clip).probe;
+    return p.videoDurationSec ?? p.durationSec;
+  })();
+  const from0 = Math.max(0, Math.min(shown3.src - item.speed / fps, videoEnd - 1));
+  const back = shown3.src - from0;
+  const k = Math.max(0, Math.ceil(back * fps / item.speed - 1e-6));
+  const framing = thumbFraming(shown3.laid, shown3.frame, fps);
+  const crop = thumbCrop({ frame: item.frame, zoom: framing.zoom, focus: focus ?? framing.focus, output: ep.output, thumb: size });
+  return {
+    input: readFrom(src, from0),
+    picture: `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',${crop},scale=${size.width}:${size.height}:flags=lanczos,setsar=1,${LOOK2}`
+  };
+}
+function partPicture(project, ep, catalog, which, part, size, k) {
+  if (part.at === void 0 === (part.image === void 0)) {
+    throw new MirageError("BAD_INPUT", `the ${which} needs at (a second of the video) or image (a picture inside the project), one of the two`, "");
+  }
+  if (badFocus(part.focus)) throw new MirageError("BAD_INPUT", "focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)", "");
+  if (part.image !== void 0) {
+    const image = part.image;
+    if (isAbsolute2(image) || /^[A-Za-z]:/.test(image) || image.split(/[\\/]/).includes("..")) throw new MirageError("BAD_INPUT", `the ${which}'s picture ${image} must be a plain path inside the project`, PHOTO_HINT);
+    let pic;
+    try {
+      pic = cardImagesFor(project, { ...ep, items: [{ id: which, beat: "photo", card: { text: "", style: "image", sec: 1, image }, hold: 0, quiet: true }] }).get(which);
+    } catch (e) {
+      throw new MirageError("BAD_INPUT", `the ${which}'s picture ${image} ${e.message.endsWith("is missing") ? "is missing" : "isn't a PNG or JPEG"}`, PHOTO_HINT);
+    }
+    return { input: cardPictureInput(pic, ep.output.fps), picture: `${cardPicture(pic, size, k, part.focus ?? { x: 0.5, y: 0.5 })},trim=end_frame=1,${LOOK2}`, what: image };
+  }
+  const shown3 = thumbSource(ep, part.at);
+  if ("card" in shown3) throw new MirageError("BAD_INPUT", `the ${which}: the video shows a card at ${secs(part.at)} s`, "Pick a second that shows a clip, or give a picture with image.");
+  return { ...clipPicture(ep, catalog, shown3, part.focus, size), what: `${shown3.laid.item.clip} at ${secs(Math.round(shown3.src * 100) / 100)} s` };
+}
+async function writeThumbnail(project, n2, o2, tools, run2 = {}) {
+  const words = o2.text === void 0 ? 0 : thumbWordCount(o2.text);
+  if (words > MAX_THUMB_WORDS) throw new MirageError("BAD_INPUT", `thumbnail text is ${words} words \u2014 keep it to ${MAX_THUMB_WORDS} or fewer`, "");
+  if (badFocus(o2.focus)) throw new MirageError("BAD_INPUT", "focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)", "");
+  if (o2.at === void 0 === (o2.two === void 0)) throw new MirageError("BAD_INPUT", "a thumbnail is written from at (one second of the video) or from face and subject (two sources), one of the two", "");
+  const dir = episodeDir(project, n2);
+  const ep = await loadEpisode(project, n2);
+  const fps = ep.output.fps;
+  const { width: W, height: H } = thumbSize(ep.output);
+  const look = LOOK2;
+  const fontsDir = filterValue(bundledFontsDir());
+  const scripts = [];
+  let input2;
+  let picture;
+  let from;
+  let where;
+  let graph = null;
+  let record3;
+  const warnings = [];
+  const shown3 = o2.two ? null : thumbSource(ep, o2.at);
+  if (o2.two) {
+    if (W < H) throw new MirageError("BAD_INPUT", "a thumbnail from two sources is for a landscape video", "A vertical video's cover is one frame: call thumbnail with at.");
+    const kept = await seriesOf(project, n2);
+    const layout = { face: o2.two.side ?? kept?.thumbnail?.face ?? "left", share: o2.two.share ?? kept?.thumbnail?.share ?? DEFAULT_FACE_SHARE };
+    if (!(layout.share >= 0.2 && layout.share <= 0.5)) throw new MirageError("BAD_INPUT", "the face's share of the width goes from 0.2 to 0.5", "About a third (0.34) is the usual.");
+    if (kept?.thumbnail && (kept.thumbnail.face !== layout.face || Math.abs(kept.thumbnail.share - layout.share) > 5e-3)) {
+      warnings.push(`this thumbnail has the face on the ${layout.face} at ${Math.round(layout.share * 100)}% of the width, and the series \u201C${kept.name}\u201D keeps it on the ${kept.thumbnail.face} at ${Math.round(kept.thumbnail.share * 100)}% \u2014 leave side and share out so every episode matches, or change the series' layout with the series tool`);
+    }
+    const faceW = Math.round(W * layout.share / 2) * 2;
+    const catalog = await loadCatalog(project);
+    const face = partPicture(project, ep, catalog, "face", o2.two.face, { width: faceW, height: H }, 0);
+    const subject = partPicture(project, ep, catalog, "subject", o2.two.subject, { width: W - faceW - JOIN_PX, height: H }, 1);
+    const one = "setpts=PTS-STARTPTS,format=yuv420p";
+    const [l, r] = layout.face === "left" ? ["f", "s"] : ["s", "f"];
+    input2 = [...face.input, ...subject.input];
+    graph = `[0:v]${face.picture},${one}[f];[1:v]${subject.picture},${one}[s];[${l}]pad=iw+${JOIN_PX}:ih:0:0:color=white[l];[l][${r}]hstack=inputs=2,setsar=1[two]`;
+    picture = "";
+    from = { face: face.what, subject: subject.what, layout };
+    where = { name: `${face.what} and ${subject.what}`, hint: "Check both sources, or pick other ones." };
+    record3 = { made: "two-sources", face: o2.two.face, subject: o2.two.subject, layout };
+  } else if ("card" in shown3) {
+    const item = shown3.laid.item;
+    const focus = o2.focus ?? { x: 0.5, y: 0.5 };
+    if (item.card.style === "image") {
+      const pic = cardImagesFor(project, { ...ep, items: [item] }).get(item.id);
+      input2 = cardPictureInput(pic, fps);
+      picture = `${cardPicture(pic, { width: W, height: H }, 0, focus)},${look}`;
+    } else {
+      input2 = ["-f", "lavfi", "-i", `color=c=black:s=${W}x${H}:r=${ffNum(fps)}:d=1`];
+      picture = "setsar=1";
+    }
+    if (item.card.text.trim()) {
+      scripts.push(["card.ass", buildAss({ width: W, height: H, captions: [], overlays: [], prompts: [], cards: [{ start: 0, end: CARD_SEC, card: item.card }] })]);
+    }
+    from = "card";
+    where = { name: `card ${item.id}`, hint: `Check card ${item.id} (run check), then write the thumbnail again.` };
+  } else {
+    const item = shown3.laid.item;
+    const made = clipPicture(ep, await loadCatalog(project), shown3, o2.focus, { width: W, height: H });
+    input2 = made.input;
+    picture = made.picture;
+    from = { clip: item.clip, src: ms(shown3.src) };
+    where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
+  }
+  const text = o2.text !== void 0 && tidy(o2.text) !== "" ? o2.text : null;
+  record3 = o2.two ? { ...record3, text } : { made: "one-frame", at: o2.at, text };
+  if (o2.text !== void 0 && tidy(o2.text) !== "") scripts.push(["thumbnail.ass", thumbnailAss(W, H, o2.text)]);
+  const vf = [...graph ? [] : [picture], ...scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : [], ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`), JPEG_COLOUR].join(",");
+  const file2 = join21(dir, "thumbnail.jpg");
+  await sweep(dir, LEFT_THUMBNAIL);
+  const part = join21(dir, `.thumbnail-${randomUUID8().slice(0, 8)}.jpg`);
+  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
+  try {
+    for (const [name, text2] of scripts) await writeFile8(join21(work, name), text2);
+    const filters = graph ? ["-filter_complex", `${graph};[two]${vf}[out]`, "-map", "[out]"] : ["-vf", vf];
+    await tools.runFfmpeg([...input2, ...filters, "-frames:v", "1", "-q:v", "2", part], { cwd: work, signal: run2.signal });
+    if (!existsSync12(part)) throw new MirageError("BAD_INPUT", `${!shown3 || "card" in shown3 ? where.name : `${where.name} at ${secs(shown3.src)} s`} gave no picture`, where.hint);
+    run2.signal?.throwIfAborted();
+    await openElsewhere(rename6(part, file2), `episodes/${n2}/thumbnail.jpg`);
+    await writeFile8(join21(dir, THUMBNAIL_RECORD), `${JSON.stringify(record3, null, 2)}
+`).catch(() => {
+    });
+  } finally {
+    await rm10(part, { force: true });
+    await rm10(work, { recursive: true, force: true });
+  }
+  return { file: file2, width: W, height: H, from, ...warnings.length ? { warnings } : {} };
+}
+function thumbnailReport(n2, r) {
+  const from = r.from === "card" ? "the card" : "layout" in r.from ? `two sources: the face (${r.from.face}) on the ${r.from.layout.face}, ${Math.round(r.from.layout.share * 100)}% of the width, and the subject (${r.from.subject}) filling the rest` : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
+  return `wrote episodes/${n2}/thumbnail.jpg (${r.width}\xD7${r.height}, from ${from})`;
+}
+var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, secs, outputFrame, frameTime, CAND_FILE, JPEG_COLOUR, LEFT_CANDIDATES, LEFT_THUMBNAIL, CARD_SEC, MAX_THUMB_WORDS, HAS_WORD2, THUMBNAIL_RECORD, JOIN_PX, LOOK2, PHOTO_HINT, badFocus;
+var init_thumbnail = __esm({
+  "packages/core/src/mirage/thumbnail.ts"() {
+    "use strict";
+    init_src();
+    init_encode();
+    init_errors4();
+    init_fonts();
+    init_ingest();
+    init_cards();
+    init_overlays();
+    init_render_episode();
+    init_move();
+    init_series2();
+    init_timeline();
+    MAX_CANDIDATES = 12;
+    MIN_GAP_SEC = 1;
+    THUMB_BEATS = ["truth", "headline", "payoff", "twist", "reveal"];
+    SILENT_LUFS2 = -70;
+    WINDOW_SEC = 0.4;
+    STEP_SEC = 0.1;
+    EPS5 = 1e-9;
+    ms = (t) => Math.round(t * 1e3) / 1e3;
+    secs = (n2) => String(ms(n2));
+    outputFrame = (t, fps) => Math.floor(t * fps + 1e-6);
+    frameTime = (f, fps) => (f + 0.5) / fps;
+    CAND_FILE = /^cand-\d+\.jpg$/;
+    JPEG_COLOUR = "scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p";
+    LEFT_CANDIDATES = /^\.thumbs-/;
+    LEFT_THUMBNAIL = /^\.thumbnail-[^/\\]*\.jpg$/;
+    CARD_SEC = 10;
+    MAX_THUMB_WORDS = 4;
+    HAS_WORD2 = /[\p{L}\p{N}]/u;
+    THUMBNAIL_RECORD = "thumbnail.json";
+    JOIN_PX = 8;
+    LOOK2 = "unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08";
+    PHOTO_HINT = "Put the picture (a PNG or JPEG) in the project folder and give its path from there, e.g. photos/me.jpg.";
+    badFocus = (f) => f !== void 0 && ![f.x, f.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1);
+  }
+});
+
+// packages/core/src/mirage/prediction.ts
+import { join as join22 } from "node:path";
+async function readPrediction(project, n2) {
+  try {
+    return await readJsonFile(predictionFile(project, n2), PredictionSchema, `episodes/${n2}/prediction.json`);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+}
+function scoresText(p) {
+  return p.steps.map((s) => `${s.step} ${s.score === null ? "not scored" : `${s.score}/10`}`).join(" \xB7 ");
+}
+function forecastText(p) {
+  const scores = `${scoresText(p)}${p.weakest ? `; weakest: ${p.weakest}` : ""}`;
+  return p.band ? `predicted ${p.band} your usual for ${p.format} (${scores})` : `predicted against the playbook only (${scores})`;
+}
+var STEPS, STEP_TEXT, BANDS, day, PredictionSchema, predictionFile;
+var init_prediction = __esm({
+  "packages/core/src/mirage/prediction.ts"() {
+    "use strict";
+    init_src();
+    init_zod();
+    init_json_file();
+    init_render_episode();
+    STEPS = ["chosen", "stayed", "satisfied"];
+    STEP_TEXT = {
+      chosen: ["Chosen", "will they choose to watch"],
+      stayed: ["Stayed", "will they keep watching"],
+      satisfied: ["Satisfied", "will they be glad they watched"]
+    };
+    BANDS = ["below", "around", "above"];
+    day = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    PredictionSchema = strictObject2({
+      version: external_exports.literal(1),
+      video: external_exports.number().int().positive(),
+      /** The day the forecast was made (YYYY-MM-DD). */
+      at: day,
+      format: external_exports.string().min(1),
+      /** What was there to read: the final render, only a rough cut, or a timeline nothing was rendered from yet. The numbers are the timeline's either way. */
+      cut: external_exports.enum(["final", "rough", "timeline"]),
+      lengthSec: external_exports.number().positive(),
+      steps: external_exports.array(strictObject2({
+        step: external_exports.enum(STEPS),
+        /** Out of 10; null when no rule of the step could be measured. */
+        score: external_exports.number().int().min(0).max(10).nullable(),
+        /** Every rule of the step, with the weight it has in the score; one that was not measured is left out of the score. */
+        rules: external_exports.array(strictObject2({ rule: external_exports.string().min(1), status: external_exports.enum(["met", "missed", "unmeasured"]), weight: external_exports.number().positive() }))
+      })),
+      /** The step with the lowest score; null when every measured step has 10, or none could be measured. */
+      weakest: external_exports.enum(STEPS).nullable(),
+      /** Up to five moments behind the scores, the weakest step's first: where, and the one change to make. */
+      moments: external_exports.array(strictObject2({ step: external_exports.enum(STEPS), rule: external_exports.string().min(1), where: external_exports.string().min(1), change: external_exports.string().min(1) })).max(5),
+      /** Against the format's posted videos; null when too few are posted to compare (the forecast is against the playbook only). */
+      band: external_exports.enum(BANDS).nullable(),
+      /** How many posted videos of the format had results when the forecast was made. */
+      postedVideos: external_exports.number().int().min(0),
+      /** Each of the cut's numbers held against the middle of the better and of the weaker half of the posted videos. */
+      features: external_exports.array(strictObject2({ feature: external_exports.string().min(1), value: external_exports.number(), better: external_exports.number(), weaker: external_exports.number(), sits: external_exports.enum(["better", "between", "weaker"]) })),
+      /**
+       * Only for a short: the cut held against the rules each platform itself states (its formula file), as far as a cut
+       * shows them. No platform publishes weights, so there is no score per platform: each rule is met, missed or not measured.
+       */
+      platforms: external_exports.array(strictObject2({
+        platform: external_exports.enum(["youtube", "instagram", "tiktok"]),
+        rules: external_exports.array(strictObject2({ rule: external_exports.string().min(1), status: external_exports.enum(["met", "missed", "unmeasured"]), text: external_exports.string().min(1) }))
+      })).optional()
+    });
+    predictionFile = (project, n2) => join22(episodeDir(project, n2), "prediction.json");
+  }
+});
+
+// packages/core/src/mirage/learn.ts
+import { existsSync as existsSync13 } from "node:fs";
+import { mkdir as mkdir10, readFile as readFile10 } from "node:fs/promises";
+import { join as join23 } from "node:path";
+function readAt(ageDays) {
+  return [...READ_ORDER].reverse().find((r) => ageDays >= READS[r]) ?? null;
+}
+function readDue(ageDays, snapshotAges) {
+  const at4 = readAt(ageDays);
+  return at4 !== null && !snapshotAges.some((a2) => a2 >= READS[at4]) ? at4 : null;
+}
+function median2(xs) {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a2, b) => a2 - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+function videoAddress(input2) {
+  const bad = () => new MirageError("BAD_INPUT", `"${input2}" isn't a YouTube video address`, VIDEO_HINT);
+  let u2;
+  try {
+    u2 = new URL(input2.trim());
+  } catch {
+    throw bad();
+  }
+  if (u2.protocol !== "https:") throw bad();
+  const host = u2.hostname.toLowerCase();
+  const parts = u2.pathname.split("/").filter(Boolean);
+  let id;
+  let short = false;
+  if (host === "youtu.be") id = parts.length === 1 ? parts[0] : null;
+  else if (!YOUTUBE_HOSTS2.has(host)) throw bad();
+  else if (parts.length === 1 && parts[0] === "watch") id = u2.searchParams.get("v");
+  else if (parts.length === 2 && parts[0] === "shorts") {
+    id = parts[1];
+    short = true;
+  }
+  if (!id || !VIDEO_ID2.test(id)) throw bad();
+  return { id, url: short ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}` };
+}
+function answerBeat(format2, kind) {
+  if (format2.id === "build-story") return "truth";
+  if (format2.id === "vlog") return "headline";
+  return kind === "standalone" ? "payoff" : null;
+}
+async function thumbnailKnown(project, n2) {
+  const dir = episodeDir(project, n2);
+  if (!existsSync13(join23(dir, "thumbnail.jpg"))) return { exists: false, text: null };
+  try {
+    const record3 = JSON.parse(await readFile10(join23(dir, THUMBNAIL_RECORD), "utf8"));
+    const made = record3.made === "one-frame" || record3.made === "two-sources" ? record3.made : void 0;
+    const layout = ThumbLayoutSchema.safeParse(record3.layout);
+    return { exists: true, text: typeof record3.text === "string" ? true : record3.text === null ? false : null, ...made ? { made } : {}, ...made === "two-sources" && layout.success ? { layout: layout.data } : {} };
+  } catch {
+    return { exists: true, text: null };
+  }
+}
+async function cutParts(project, ep, catalog) {
+  const laid = layoutTimeline(ep);
+  const lengthSec = laid.at(-1).end;
+  const joined = new Map(splitShots(ep.items).map((s) => [s.from, s.to]));
+  const shots = [];
+  for (let i2 = 0; i2 < laid.length; i2++) {
+    const to = joined.get(i2) ?? i2;
+    shots.push({ start: laid[i2].start, end: laid[to].end, from: i2, to });
+    i2 = to;
+  }
+  let unheard = null;
+  for (const item of ep.items) {
+    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
+    const clip = catalog.clips.find((c3) => c3.id === item.clip);
+    if (clip?.probe.hasAudio && clip.transcript === null) {
+      unheard = { item: item.id, clip: clip.id };
+      break;
+    }
+  }
+  const said = unheard ? null : speechWords(ep, catalog, ep.voiceover ? await loadVoiceoverTranscripts(project, ep) : null).filter((w) => w.start < lengthSec);
+  return { laid, lengthSec, shots, unheard, said };
+}
+async function cutFeatures(project, n2, video, format2, at4) {
+  const ep = await loadEpisode(project, n2);
+  const { laid, lengthSec: length, shots: cut, said } = await cutParts(project, ep, await loadCatalog(project));
+  const minutes = length / 60;
+  const shots = cut.map((s) => s.end - s.start);
+  let words = { firstWordSec: null, wordsPerMin: null, longestSilenceSec: null };
+  if (said) {
+    let silence = 0;
+    let heardUntil = 0;
+    for (const w of said) {
+      silence = Math.max(silence, w.start - heardUntil);
+      heardUntil = Math.max(heardUntil, Math.min(w.end, length));
+    }
+    words = { firstWordSec: said.length ? round(said[0].start, 2) : null, wordsPerMin: round(said.length / minutes, 1), longestSilenceSec: round(Math.max(silence, length - heardUntil), 2) };
+  }
+  let under = 0;
+  let playedUntil = 0;
+  for (const c3 of [...ep.music].sort((a2, b) => a2.start - b.start)) {
+    const [from, to] = [Math.max(c3.start, playedUntil), Math.min(c3.end, length)];
+    if (to > from) {
+      under += to - from;
+      playedUntil = to;
+    }
+  }
+  const kind = shortKind(format2, video);
+  const beat = answerBeat(format2, kind);
+  const answer = beat === null ? void 0 : laid.find((l) => l.item.beat === beat);
+  return {
+    version: 1,
+    video: n2,
+    at: at4,
+    format: format2.id,
+    width: ep.output.width,
+    height: ep.output.height,
+    lengthSec: round(length, 2),
+    ...words,
+    answerShare: answer ? round(answer.start / length, 3) : null,
+    cutsPerMin: round((shots.length - 1) / minutes, 2),
+    medianShotSec: round(median2(shots), 2),
+    musicShare: round(Math.min(1, under / length), 3),
+    overlays: ep.overlays.filter((o2) => o2.start < length).length,
+    captions: ep.captions?.style ?? "phrase",
+    ...kind ? { short: { kind, endsOnPointer: ep.items.at(-1).beat === "pointer" } } : {},
+    ...video?.idea ? { idea: video.idea } : {},
+    ...video?.experiment ? { experiment: video.experiment } : {},
+    thumbnail: await thumbnailKnown(project, n2),
+    items: laid.map((l) => ({ id: l.item.id, beat: l.item.beat, start: round(l.start, 3), end: round(l.end, 3) }))
+  };
+}
+function featuresText(f) {
+  return [
+    f.format,
+    `${f.width}\xD7${f.height}`,
+    clockText(f.lengthSec),
+    f.wordsPerMin === null ? "words not known (a kept clip has no transcript)" : f.firstWordSec === null ? "no words" : `first word at ${secs2(f.firstWordSec)}`,
+    ...f.answerShare === null ? [] : [`answer at ${pct(f.answerShare)}`],
+    `${f.cutsPerMin.toFixed(1)} cuts a minute`,
+    `typical shot ${secs2(f.medianShotSec)}`,
+    ...f.wordsPerMin === null ? [] : [`${Math.round(f.wordsPerMin)} words a minute`, `longest stretch without words ${secs2(f.longestSilenceSec)}`],
+    `music under ${pct(f.musicShare)}`,
+    plural2(f.overlays, "overlay"),
+    `captions ${f.captions}`,
+    ...f.short ? [`${f.short.kind}, ${f.short.endsOnPointer ? "ends on a pointer" : "no pointer at the end"}`] : [],
+    !f.thumbnail.exists ? "no thumbnail" : `${f.thumbnail.made === "two-sources" ? `a thumbnail from two sources${f.thumbnail.layout ? ` (face on the ${f.thumbnail.layout.face})` : ""}` : "a thumbnail"}${f.thumbnail.text === null ? "" : ` ${f.thumbnail.text ? "with" : "without"} text`}`,
+    ...f.experiment ? [`experiment on \u201C${f.experiment.rule}\u201D`] : []
+  ].join(" \xB7 ");
+}
+function alsoAddresses(also) {
+  return also.map(({ platform: platform2, url: url2 }) => {
+    let u2 = null;
+    try {
+      u2 = new URL(url2.trim());
+    } catch {
+    }
+    const host = u2?.hostname.toLowerCase() ?? "";
+    if (!u2 || u2.protocol !== "https:" || !(host === `${platform2}.com` || host.endsWith(`.${platform2}.com`))) {
+      throw new MirageError("BAD_INPUT", `also: "${url2}" isn't an address on ${PLATFORM_NAMES[platform2]}`, "Give the video's own https address on that platform, or leave it out.");
+    }
+    return { platform: platform2, url: `${u2.origin}${u2.pathname}` };
+  });
+}
+async function markPosted(project, n2, url2, o2) {
+  const address = videoAddress(url2);
+  const also = alsoAddresses(o2.also ?? []);
+  const video = await readVideo(project, n2);
+  if (!video) throw new MirageError("BAD_INPUT", existsSync13(episodeDir(project, n2)) ? `video ${n2} has no video.json to record it in` : `there is no video ${n2}`, "Run status to see the videos.");
+  const final = join23(episodeDir(project, n2), "final.mp4");
+  if (!existsSync13(final)) throw new MirageError("NO_EPISODE", `video ${n2} has no final render yet`, "Run render first: a video is posted from its final.mp4.");
+  const at4 = dayOf(o2.now?.() ?? /* @__PURE__ */ new Date());
+  const { formats } = loadFormats(o2.formatsDir);
+  const unknown2 = video.format !== void 0 && !formats.some((f) => f.id === video.format);
+  const features = await cutFeatures(project, n2, video, formatOf(video, formats), at4);
+  const probe2 = await o2.tools.probe(final);
+  const rendered = probe2.videoDurationSec ?? probe2.durationSec;
+  const changed = Math.abs(rendered - features.lengthSec) > 0.1 + 5e-3;
+  await writeJsonFile(featuresFile(project, n2), FeaturesSchema, features, `episodes/${n2}/features.json`);
+  await writeVideo(project, n2, { ...video, posted: { ...address, at: at4, ...also.length ? { also } : {} } });
+  const before = video.posted && video.posted.id !== address.id ? ` (it was ${video.posted.url})` : "";
+  return [
+    `video ${n2} \u201C${video.title}\u201D is posted at ${address.url}${before}`,
+    ...also.length ? [`also posted on ${also.map((a2) => `${PLATFORM_NAMES[a2.platform]} (${a2.url})`).join(" and ")} \u2014 Mirage reads no numbers there: give learn the ones you see in the app, as studio with platform`] : [],
+    `wrote episodes/${n2}/features.json: ${featuresText(features)}`,
+    ...unknown2 ? [`\u26A0 video.json names the format "${video.format}", which isn't one of Mirage's (${formats.map((f) => f.id).join(", ")}) \u2014 features.json describes the cut as a build story: fix format in episodes/${n2}/video.json, then call posted again`] : [],
+    ...changed ? [`\u26A0 the timeline is ${secs2(features.lengthSec)} long and final.mp4 is ${secs2(rendered)} \u2014 the timeline changed after the final render, so features.json may not describe the video that was posted`] : [],
+    "Run learn to read its numbers."
+  ];
+}
+function titleFeatures(title) {
+  const tag = /[([][^)\]]+[)\]]\s*$/;
+  return {
+    words: title.trim().split(/\s+/).filter(Boolean).length,
+    allCaps: new RegExp("\\p{L}", "u").test(title) && title === title.toUpperCase(),
+    hasNumber: /\d/.test(title),
+    firstPerson: /(^|[^\p{L}])(I|I'M|I’M|I'VE|I’VE|I'LL|I’LL|MY|ME|WE|OUR|US)(?![\p{L}])/iu.test(title),
+    endsEmphatic: /(\?|!!)\s*$/.test(title.replace(tag, "")),
+    bracketTag: tag.test(title)
+  };
+}
+function confidence(videos) {
+  return videos < 5 ? "weak" : videos < 10 ? "fair" : "strong";
+}
+async function readResults(project, n2) {
+  try {
+    return await readJsonFile(resultsFile(project, n2), ResultsSchema, `results/${n2}.json`);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+}
+async function postedVideos(project) {
+  const out = [];
+  for (const n2 of await videoNumbers(project)) {
+    const video = await readVideo(project, n2);
+    if (video?.posted) out.push({ n: n2, video: { ...video, posted: video.posted } });
+  }
+  return out;
+}
+function latestStudio(entries) {
+  if (!entries.length) return null;
+  return entries.reduce((all, e) => ({ ...all, ...e }));
+}
+function replayPeaks(heatmap, count2 = PEAKS) {
+  const out = [];
+  for (const h2 of [...heatmap].sort((a2, b) => b.value - a2.value)) {
+    if (out.length === count2) break;
+    if (!out.some((p) => h2.start <= p.end + 1e-6 && h2.end >= p.start - 1e-6)) out.push(h2);
+  }
+  return out;
+}
+function viewsAtAge(snapshots, age) {
+  const on6 = snapshots.find((s) => s.ageDays === age);
+  if (on6) return on6.views;
+  const before = snapshots.filter((s) => s.ageDays < age).at(-1);
+  const after = snapshots.find((s) => s.ageDays > age);
+  if (!before || !after) return null;
+  return before.views + (after.views - before.views) * (age - before.ageDays) / (after.ageDays - before.ageDays);
+}
+function studioText(s) {
+  return [
+    ...s.clickRate !== void 0 ? [`click rate ${percent(s.clickRate)}`] : [],
+    ...s.percentViewed !== void 0 ? [`${percent(s.percentViewed)} viewed`] : [],
+    ...s.avgViewSec !== void 0 ? [`average view ${clockText(s.avgViewSec)}`] : [],
+    ...s.viewedVsSwiped !== void 0 ? [`${percent(s.viewedVsSwiped)} viewed vs swiped`] : []
+  ].join(" \xB7 ");
+}
+function elsewhereText(s) {
+  const count2 = (n2, what) => n2 === void 0 ? [] : [`${viewsText(n2)} ${what}`];
+  return [...count2(s.views, "views"), ...count2(s.likes, "likes"), ...count2(s.comments, "comments"), ...count2(s.shares, "shares"), ...count2(s.saves, "saves"), ...studioText(s) ? [studioText(s)] : []].join(" \xB7 ") || "no numbers";
+}
+async function learnResults(project, o2, deps, h2 = {}) {
+  const today = dayOf(deps.now?.() ?? /* @__PURE__ */ new Date());
+  const posted = await postedVideos(project);
+  const POSTED_HINT = "When a video is live, call posted with its number and its YouTube address, then learn.";
+  if (o2.studio) {
+    const given = STUDIO_KEYS.filter((k) => o2.studio[k] !== void 0);
+    if (!given.length) throw new MirageError("BAD_INPUT", "studio needs at least one number", "Give clickRate, percentViewed, avgViewSec, viewedVsSwiped, drops or spikes (for Instagram or TikTok also views, likes, comments, shares or saves) with the video's number, or leave studio out.");
+    if (!posted.some((p) => p.n === o2.studio.video)) throw new MirageError("BAD_INPUT", `video ${o2.studio.video} isn't posted yet, so it has no Studio numbers to keep`, POSTED_HINT);
+  }
+  if (!posted.length) throw new MirageError("BAD_INPUT", "no video is posted yet", POSTED_HINT);
+  await mkdir10(resultsDir(project), { recursive: true });
+  const warnings = [];
+  const leftOut = [];
+  const read = [];
+  for (const [i2, { n: n2, video }] of posted.entries()) {
+    h2.signal?.throwIfAborted();
+    h2.onProgress?.(i2 / posted.length);
+    const { id, url: url2 } = video.posted;
+    let kept = await readResults(project, n2);
+    if (kept && kept.id !== id) {
+      warnings.push(`\u26A0 video ${n2}: its address changed since its numbers were last read \u2014 the earlier numbers were of ${kept.url} and are dropped`);
+      kept = null;
+    }
+    let results = kept ?? { version: 1, video: n2, id, url: url2, title: null, uploadDate: null, durationSec: null, snapshots: [], heatmap: null, studio: [] };
+    if (o2.studio?.video === n2) {
+      const numbers = Object.fromEntries(STUDIO_KEYS.flatMap((k) => o2.studio[k] === void 0 ? [] : [[k, o2.studio[k]]]));
+      const platform2 = platformOf(o2.studio);
+      const sameDay = (s) => s.at === today && platformOf(s) === platform2;
+      results = { ...results, studio: [...results.studio.filter((s) => !sameDay(s)), { ...results.studio.find(sameDay), ...numbers, at: today, ...platform2 === "youtube" ? {} : { platform: platform2 } }] };
+      await writeResults(project, results);
+    }
+    const skip = (why) => {
+      warnings.push(`\u26A0 video ${n2} (${id}): yt-dlp couldn't read it (${why}) \u2014 it is left out`);
+      leftOut.push({ video: n2, why });
+    };
+    let stdout;
+    try {
+      stdout = await deps.ytDlp(["--dump-single-json", "--skip-download", "--no-playlist", "--no-warnings", url2], { signal: h2.signal });
+    } catch (e) {
+      const code = e.code;
+      if (code === "NOT_FOUND" || code === "CANCELLED" || e.name === "AbortError") throw e;
+      skip(errorReason(e));
+      continue;
+    }
+    let info;
+    try {
+      info = InfoSchema.parse(JSON.parse(stdout));
+    } catch {
+      skip("its answer was not the video's info");
+      continue;
+    }
+    if (typeof info.view_count !== "number") {
+      skip("it has no view count: private, upcoming or live");
+      continue;
+    }
+    const uploaded = /^(\d{4})(\d{2})(\d{2})$/.exec(info.upload_date ?? "");
+    results = {
+      ...results,
+      title: info.title ?? results.title,
+      uploadDate: uploaded ? `${uploaded[1]}-${uploaded[2]}-${uploaded[3]}` : results.uploadDate,
+      durationSec: info.duration && info.duration > 0 ? info.duration : results.durationSec,
+      snapshots: [...results.snapshots.filter((s) => s.at !== today), { at: today, views: info.view_count, likes: info.like_count ?? null, comments: info.comment_count ?? null }].sort((a2, b) => a2.at.localeCompare(b.at)),
+      heatmap: info.heatmap?.length ? info.heatmap.map((p) => ({ start: p.start_time, end: p.end_time, value: p.value })) : null
+    };
+    await writeResults(project, results);
+    const features = await readJsonFile(featuresFile(project, n2), FeaturesSchema, `episodes/${n2}/features.json`).catch((e) => {
+      if (e.code === "ENOENT") return null;
+      throw e;
+    });
+    const series = video.series ? (await readSeries(project, video.series).catch(() => null))?.name ?? video.series : null;
+    read.push({ n: n2, video, results, features, prediction: await readPrediction(project, n2), series });
+  }
+  const lines = [];
+  const formats = [];
+  const formatOfVideo = (v) => v.features?.format ?? v.video.format ?? "build-story";
+  for (const format2 of [...new Set(read.map(formatOfVideo))].sort()) {
+    const of = read.filter((v) => formatOfVideo(v) === format2);
+    lines.push(`Format ${format2}: ${plural2(of.length, "posted video")}, read ${today}`);
+    const born = (v) => v.results.uploadDate ?? v.video.posted.at;
+    const videos = of.map((v) => {
+      const last = v.results.snapshots.at(-1);
+      const ageDays = Math.max(0, daysBetween(born(v), today));
+      const length = v.results.durationSec ?? v.features?.lengthSec ?? null;
+      const tied = v.features !== null && v.results.durationSec !== null && Math.abs(v.results.durationSec - v.features.lengthSec) <= 1.5;
+      const studio = latestStudio(v.results.studio.filter((s) => platformOf(s) === "youtube"));
+      const others = [.../* @__PURE__ */ new Set([...(v.video.posted.also ?? []).map((a2) => a2.platform), ...v.results.studio.flatMap((s) => platformOf(s) === "youtube" ? [] : [platformOf(s)])])];
+      const elsewhere = others.map((platform2) => ({
+        platform: platform2,
+        url: v.video.posted.also?.find((a2) => a2.platform === platform2)?.url ?? null,
+        numbers: latestStudio(v.results.studio.filter((s) => platformOf(s) === platform2))
+      }));
+      const chosen = v.video.titles?.chosen;
+      if ((v.results.heatmap || studio?.drops?.length || studio?.spikes?.length) && v.features && !tied) {
+        warnings.push(`\u26A0 video ${v.n}: on YouTube it is ${clockText(v.results.durationSec ?? 0)} long and its cut was ${clockText(v.features.lengthSec)} \u2014 the moments viewers replayed or left can't be tied to the cut's items`);
+      }
+      const playing = (sec) => {
+        const item = tied ? v.features.items.find((it) => sec >= it.start && sec < it.end) : void 0;
+        return { sec: round(sec, 1), item: item?.id ?? null, beat: item?.beat ?? null };
+      };
+      const title = v.results.title ?? v.video.title;
+      const mostReplayed = !v.results.heatmap || !length ? null : replayPeaks(v.results.heatmap).map((p) => {
+        const sec = (p.start + p.end) / 2;
+        const at4 = playing(sec);
+        return { sec: at4.sec, share: round(Math.min(1, sec / length), 4), item: at4.item, beat: at4.beat };
+      });
+      return {
+        video: v.n,
+        id: v.results.id,
+        title,
+        ...chosen && chosen.trim() !== title.trim() ? { recordedTitle: chosen } : {},
+        ...v.series ? { series: v.series } : {},
+        ...elsewhere.length ? { elsewhere } : {},
+        titleFeatures: titleFeatures(title),
+        ageDays,
+        read: readAt(ageDays),
+        views: last.views,
+        viewsPerDay: round(last.views / Math.max(1, ageDays), 1),
+        likesPer1000: per1000(last.likes, last.views),
+        commentsPer1000: per1000(last.comments, last.views),
+        studio,
+        mostReplayed,
+        left: studio?.drops?.length ? studio.drops.map((d) => ({ ...playing(d.at), note: d.note ?? null })) : null,
+        rewatched: studio?.spikes?.length ? studio.spikes.map((x) => playing(x.at)) : null,
+        features: v.features
+      };
+    });
+    for (const v of videos) {
+      const studio = v.studio ? studioText(v.studio) : "";
+      lines.push([
+        `  Video ${v.video} \u201C${v.title}\u201D${v.series ? ` (series \u201C${v.series}\u201D)` : ""}: ${plural2(v.ageDays, "day")} old, ${readText(v.read)}`,
+        `${viewsText(v.views)} views`,
+        `${viewsText(v.viewsPerDay)} a day`,
+        v.likesPer1000 === null ? "no like count" : `${v.likesPer1000.toFixed(1)} likes per 1,000 views`,
+        v.commentsPer1000 === null ? "no comment count" : `${v.commentsPer1000.toFixed(1)} comments per 1,000 views`,
+        ...studio ? [`Studio (${v.studio.at}): ${studio}`] : []
+      ].join(" \xB7 "));
+    }
+    for (const v of videos) {
+      if (v.recordedTitle) lines.push(`  Title, video ${v.video}: live on YouTube it is \u201C${v.title}\u201D, and Mirage recorded \u201C${v.recordedTitle}\u201D as the one chosen \u2014 they differ, and the title numbers here are the live title's`);
+      if (v.elsewhere) {
+        lines.push(`  Elsewhere, video ${v.video}: ${v.elsewhere.map((e) => `${PLATFORM_NAMES[e.platform]}${e.url ? ` ${e.url}` : ""} \u2014 ${e.numbers ? `${elsewhereText(e.numbers)} (typed by the person, ${e.numbers.at})` : "no numbers given yet"}`).join(" \xB7 ")}`);
+      }
+    }
+    for (const v of videos) {
+      if (!v.mostReplayed) continue;
+      lines.push(`  Most replayed, video ${v.video}: ${v.mostReplayed.map((p) => `${clockText(p.sec)} (${pct(p.share)})${p.item ? ` item ${p.item}, ${p.beat}` : ""}`).join(" \xB7 ")}`);
+    }
+    const none = videos.filter((v) => !v.mostReplayed).map((v) => v.video);
+    if (none.length) lines.push(`  Most replayed: YouTube shows none for ${names(none)}`);
+    const during = (m) => `${clockText(m.sec)}${m.item ? ` during item ${m.item} (beat ${m.beat})` : ""}`;
+    for (const v of videos) {
+      if (v.left) lines.push(`  Viewers left (Studio), video ${v.video}: ${v.left.map((m) => `${during(m)}${m.note ? ` \u2014 \u201C${m.note}\u201D` : ""}`).join(" \xB7 ")}`);
+      if (v.rewatched) lines.push(`  Viewers rewatched (Studio), video ${v.video}: ${v.rewatched.map(during).join(" \xB7 ")}`);
+    }
+    const early = videos.filter((v) => v.read !== "main" && v.read !== "late").map((v) => v.video);
+    if (early.length) lines.push(`  Early: ${names(early)} ${early.length === 1 ? "is" : "are"} before the main read (${READS.main} days) \u2014 what ${early.length === 1 ? "it shows" : "they show"} so far is early and may still change`);
+    const ages = of.map((v) => v.results.snapshots.map((s) => ({ ageDays: daysBetween(born(v), s.at), views: s.views })));
+    const age = Math.min(...ages.map((a2) => a2.at(-1).ageDays));
+    const atAge = ages.map((a2) => viewsAtAge(a2, age));
+    const sameAge = of.length >= 2 && age >= 1 && atAge.every((x) => x !== null);
+    const ranking = videos.map((v, i2) => ({ video: v.video, value: sameAge ? round(atAge[i2], 1) : v.viewsPerDay })).sort((a2, b) => b.value - a2.value || a2.video - b.video);
+    if (of.length >= 2) {
+      const how = sameAge ? `views at ${plural2(age, "day")} old, the newest video's age (worked out between two reads where there was none on that day): no age is favoured, but only each video's first ${plural2(age, "day")} count` : "views a day, because the reads so far don't let the videos be compared at the same age: this favours newer videos, which get most of their views in their first days";
+      lines.push(`  Ranked by ${how}`, `  Best first: ${ranking.map((r) => `video ${r.video} (${viewsText(r.value)})`).join(" \xB7 ")}`);
+    }
+    let halves = null;
+    if (of.length >= MIN_TO_COMPARE) {
+      const half = Math.floor(of.length / 2);
+      const better = ranking.slice(0, half).map((r) => r.video);
+      const weaker = ranking.slice(-half).map((r) => r.video);
+      const mid = (side, key) => median2(videos.flatMap((v) => side.includes(v.video) && typeof v.features?.[key] === "number" ? [v.features[key]] : []));
+      const titled = (side, key) => {
+        const of2 = videos.filter((v) => side.includes(v.video)).map((v) => v.titleFeatures[key]);
+        return key === "words" ? median2(of2) : of2.filter(Boolean).length;
+      };
+      halves = {
+        better,
+        weaker,
+        features: FEATURE_KEYS.map((feature) => ({ feature, better: mid(better, feature), weaker: mid(weaker, feature) })),
+        titles: TITLE_KEYS.map((feature) => ({ feature, better: titled(better, feature), weaker: titled(weaker, feature) }))
+      };
+      lines.push(`  Better half (${names(better)}) against weaker half (${names(weaker)}), the middle value of each:`);
+      for (const f of halves.features) {
+        const [label, text] = COMPARED[f.feature];
+        const show = (x) => x === null ? "not known" : text(x);
+        lines.push(`    ${label}: better half ${show(f.better)} \xB7 weaker half ${show(f.weaker)}`);
+      }
+      for (const t of halves.titles) {
+        const show = (x) => t.feature === "words" ? String(round(x, 1)) : `${x} of ${half}`;
+        lines.push(`    ${TITLE_LABELS[t.feature]}: better half ${show(t.better)} \xB7 weaker half ${show(t.weaker)}`);
+      }
+      const twoSources = (side) => videos.filter((v) => side.includes(v.video) && v.features?.thumbnail.made === "two-sources").length;
+      if (videos.some((v) => v.features?.thumbnail.made)) lines.push(`    Thumbnail from two sources: better half ${twoSources(better)} of ${half} \xB7 weaker half ${twoSources(weaker)} of ${half}`);
+    } else {
+      lines.push(`  too few to compare: ${plural2(of.length, "video")} \u2014 ${MIN_TO_COMPARE - of.length} more needed`);
+    }
+    const ranked = { label: sameAge ? `views at ${plural2(age, "day")} old` : "views a day", text: viewsText };
+    const experiments = [];
+    for (const v of videos) {
+      const x = v.features?.experiment;
+      if (!x) continue;
+      const number4 = (of2, key) => (key === "likesPer1000" || key === "commentsPer1000" ? of2[key] : of2.studio?.[key]) ?? null;
+      const others = videos.filter((o3) => o3.video !== v.video);
+      const named = MEASURES.find((m) => m.words.test(x.expect) && number4(v, m.key) !== null && others.some((o3) => number4(o3, m.key) !== null));
+      const value = named ? number4(v, named.key) : ranking.find((r) => r.video === v.video).value;
+      const rest = named ? others.flatMap((o3) => number4(o3, named.key) ?? []) : others.map((o3) => ranking.find((r) => r.video === o3.video).value);
+      const middle = median2(rest);
+      const { label, text } = named ?? ranked;
+      experiments.push({ video: v.video, rule: x.rule, change: x.change, expect: x.expect, measure: label, value, others: middle, otherVideos: rest.length });
+      if (experiments.length === 1) lines.push("  Experiments:");
+      const against = middle === null ? "there is no other video of this format to hold it against yet" : `on ${label} it has ${text(value)} against a middle of ${text(middle)} for the other ${plural2(rest.length, "video")}: ${value > middle ? "higher" : value < middle ? "lower" : "the same"}`;
+      lines.push(`    Video ${v.video} changed \u201C${x.rule}\u201D: ${x.change}. Expected: ${x.expect}. So far ${against}${v.read === "main" || v.read === "late" ? "" : " (early: before its main read)"}`);
+    }
+    const forecasts = [];
+    for (const v of videos) {
+      const p = of.find((x) => x.n === v.video).prediction;
+      if (!p) continue;
+      const rank = ranking.findIndex((r) => r.video === v.video) + 1;
+      const landed = !halves ? null : halves.better.includes(v.video) ? "above" : halves.weaker.includes(v.video) ? "below" : "around";
+      const right = p.band !== null && landed !== null ? p.band === landed : null;
+      forecasts.push({ video: v.video, band: p.band, weakest: p.weakest, scores: p.steps.map((s) => ({ step: s.step, score: s.score })), rank, of: of.length, landed, right });
+      const where = of.length < 2 ? "it is the format's only posted video, so there is no ranking to hold it against yet" : `it landed ${rank} of ${of.length} in the ranking${landed === null ? "" : landed === "around" ? ", in the middle" : `, in the ${landed === "above" ? "better" : "weaker"} half`}`;
+      const verdict = right === null ? p.band !== null && of.length >= 2 ? " \u2014 too few videos to say whether the band was right" : "" : right ? " \u2014 the band was right" : ` \u2014 the band was wrong (it landed ${landed})`;
+      lines.push(`  Forecast against result, video ${v.video}: ${forecastText(p)} \xB7 ${where}${verdict}${v.read === "main" || v.read === "late" ? "" : " (early: before its main read)"}`);
+    }
+    const trust = confidence(of.length);
+    lines.push(`  Confidence, ${format2}: ${plural2(of.length, "posted video")} \u2014 a ${trust} signal`);
+    formats.push({ format: format2, videos, rankedBy: sameAge ? "views-at-the-same-age" : "views-per-day", rankedAtAgeDays: sameAge ? age : null, ranking, halves, experiments, forecasts, confidence: trust });
+  }
+  const forecast = formats.flatMap((f) => f.forecasts);
+  const judged = forecast.filter((f) => f.right !== null);
+  if (judged.length) lines.push(`Forecasts so far: the band was right for ${judged.filter((f) => f.right).length} of ${plural2(judged.length, "posted video")}`);
+  else if (forecast.length) lines.push(`Forecasts so far: none can be judged yet \u2014 a forecast is judged once it gave a band and its format has ${MIN_TO_COMPARE} posted videos`);
+  await writeJsonFile(join23(resultsDir(project), "evidence.json"), EvidenceSchema, { version: 1, at: today, formats, leftOut }, "results/evidence.json");
+  h2.onProgress?.(1);
+  if (!read.length) return [...warnings, "No posted video could be read, so there is nothing to compare yet."];
+  const typed = formats.some((f) => f.videos.some((v) => v.elsewhere));
+  return [
+    ...lines,
+    ...warnings,
+    ...typed ? ["Instagram and TikTok numbers are the ones the person typed: Mirage reads numbers only from YouTube, and every comparison above is of the YouTube numbers."] : [],
+    "The better and weaker halves show what goes with more views, never what causes them. The same evidence is in results/evidence.json."
+  ];
+}
+async function resultsLine(project, now = /* @__PURE__ */ new Date()) {
+  const today = dayOf(now);
+  const due = [];
+  const lastRead = [];
+  let posted = 0;
+  for (const n2 of await videoNumbers(project)) {
+    const video = await readVideo(project, n2).catch(() => null);
+    if (!video?.posted) continue;
+    posted++;
+    const results = await readResults(project, n2).catch(() => null);
+    const kept = results?.id === video.posted.id ? results : null;
+    const born = kept?.uploadDate ?? video.posted.at;
+    const last = kept?.snapshots.at(-1)?.at;
+    if (last) lastRead.push(last);
+    const read = readDue(daysBetween(born, today), (kept?.snapshots ?? []).map((s) => daysBetween(born, s.at)));
+    if (read) due.push(`video ${n2} (${read} read)`);
+  }
+  if (!posted) return "Results: no video posted yet";
+  return `Results: ${plural2(posted, "video")} posted \xB7 ${lastRead.length ? `last read ${lastRead.sort().at(-1)}` : "not read yet"}${due.length ? ` \xB7 learn is due: ${due.join(", ")}` : ""}`;
+}
+var READS, READ_ORDER, readText, MIN_TO_COMPARE, PEAKS, day2, dayOf, daysBetween, round, plural2, YOUTUBE_HOSTS2, VIDEO_ID2, VIDEO_HINT, FeaturesSchema, pct, secs2, featuresFile, PLATFORM_NAMES, StudioSchema, STUDIO_KEYS, platformOf, ResultsSchema, FEATURE_KEYS, COMPARED, TitleSchema, TITLE_KEYS, TITLE_LABELS, MEASURES, numberOrNull2, moment, EvidenceSchema, resultsDir, resultsFile, writeResults, InfoSchema, percent, per1000, names;
+var init_learn = __esm({
+  "packages/core/src/mirage/learn.ts"() {
+    "use strict";
+    init_src();
+    init_zod();
+    init_channel();
+    init_errors4();
+    init_formats();
+    init_ingest();
+    init_json_file();
+    init_move();
+    init_overlays();
+    init_render_episode();
+    init_series2();
+    init_thumbnail();
+    init_prediction();
+    init_timeline();
+    init_video2();
+    READS = { early: 3, main: 7, late: 28 };
+    READ_ORDER = ["early", "main", "late"];
+    readText = (r) => r === null ? "before the early read" : `${r} read`;
+    MIN_TO_COMPARE = 4;
+    PEAKS = 3;
+    day2 = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+    dayOf = (d) => d.toISOString().slice(0, 10);
+    daysBetween = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5);
+    round = (n2, places) => Math.round(n2 * 10 ** places) / 10 ** places;
+    plural2 = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`;
+    YOUTUBE_HOSTS2 = /* @__PURE__ */ new Set(["youtube.com", "www.youtube.com", "m.youtube.com"]);
+    VIDEO_ID2 = /^[A-Za-z0-9_-]{6,20}$/;
+    VIDEO_HINT = "Give the video's own address, e.g. https://www.youtube.com/watch?v=\u2026, https://youtu.be/\u2026 or https://www.youtube.com/shorts/\u2026.";
+    FeaturesSchema = strictObject2({
+      version: external_exports.literal(1),
+      video: external_exports.number().int().positive(),
+      /** The day the snapshot was taken (YYYY-MM-DD). */
+      at: day2,
+      format: external_exports.string().min(1),
+      width: external_exports.number().int().positive(),
+      height: external_exports.number().int().positive(),
+      lengthSec: external_exports.number().positive(),
+      /** Seconds before the first spoken word; null without words, or when the words can't be seen. */
+      firstWordSec: external_exports.number().min(0).nullable(),
+      /** Where the answer beat starts, 0–1 of the length (`truth`, a vlog's `headline`, a standalone short's `payoff`). */
+      answerShare: external_exports.number().min(0).max(1).nullable(),
+      cutsPerMin: external_exports.number().min(0),
+      medianShotSec: external_exports.number().positive(),
+      wordsPerMin: external_exports.number().min(0).nullable(),
+      /** The longest stretch with no words, in seconds. */
+      longestSilenceSec: external_exports.number().min(0).nullable(),
+      /** The share of the length a music cue plays under, 0–1 (a cue's dips are not taken off). */
+      musicShare: external_exports.number().min(0).max(1),
+      overlays: external_exports.number().int().min(0),
+      captions: CaptionsSchema.shape.style,
+      /** Only on a short: its kind, and whether its last item is a `pointer`. */
+      short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]), endsOnPointer: external_exports.boolean() }).optional(),
+      /** The question the video was built on, as video.json holds it. */
+      idea: IdeaSchema.optional(),
+      /** The video's one deliberate change against its format's formula, as video.json holds it. */
+      experiment: ExperimentSchema.optional(),
+      /**
+       * What Mirage knows of the thumbnail: whether episodes/<n>/thumbnail.jpg is there, and whether it was written with
+       * text (null when that isn't on record: no thumbnail, or one not written by the thumbnail tool). What it shows (a face,
+       * the subject) is not known to Mirage: the mirage:learn skill looks at the picture.
+       */
+      thumbnail: strictObject2({
+        exists: external_exports.boolean(),
+        text: external_exports.boolean().nullable(),
+        /** How the thumbnail tool made it (its thumbnail.json): from one frame of the video, or from two sources side by side, and then in which layout. Left out when that isn't on record. */
+        made: external_exports.enum(["one-frame", "two-sources"]).optional(),
+        layout: ThumbLayoutSchema.optional()
+      }),
+      /** Each item's place in the output, so a moment viewers replay can be tied to what the cut shows there. */
+      items: external_exports.array(strictObject2({ id: external_exports.string().min(1), beat: external_exports.string().min(1), start: external_exports.number().min(0), end: external_exports.number().positive() }))
+    });
+    pct = (share2) => `${Math.round(share2 * 100)}%`;
+    secs2 = (n2) => `${n2.toFixed(1)} s`;
+    featuresFile = (project, n2) => join23(episodeDir(project, n2), "features.json");
+    PLATFORM_NAMES = { youtube: "YouTube", instagram: "Instagram", tiktok: "TikTok" };
+    StudioSchema = strictObject2({
+      at: day2,
+      /** Where the numbers are from; left out, YouTube Studio. Instagram's and TikTok's are typed by the person from the app's own insights: Mirage reads nothing there. */
+      platform: external_exports.enum(["youtube", ...ALSO_PLATFORMS]).optional(),
+      /** The counts the app shows its owner, for a platform Mirage can't read (on YouTube they are read, not typed). */
+      views: external_exports.number().min(0).optional(),
+      likes: external_exports.number().min(0).optional(),
+      comments: external_exports.number().min(0).optional(),
+      /** Shares, or Instagram's sends. */
+      shares: external_exports.number().min(0).optional(),
+      saves: external_exports.number().min(0).optional(),
+      /** The click rate on impressions, 0–100. */
+      clickRate: external_exports.number().min(0).max(100).optional(),
+      /** The average percentage viewed, 0–100. */
+      percentViewed: external_exports.number().min(0).max(100).optional(),
+      /** The average view duration, in seconds. */
+      avgViewSec: external_exports.number().min(0).optional(),
+      /** For a short: the share that viewed rather than swiped away, 0–100. */
+      viewedVsSwiped: external_exports.number().min(0).max(100).optional(),
+      /** Seconds into the video where the person's retention graph falls or viewers skip, each with what they noted. */
+      drops: external_exports.array(strictObject2({ at: external_exports.number().min(0), note: external_exports.string().min(1).optional() })).optional(),
+      /** Seconds into the video where the retention graph rises: viewers rewatch. */
+      spikes: external_exports.array(strictObject2({ at: external_exports.number().min(0) })).optional()
+    });
+    STUDIO_KEYS = ["clickRate", "percentViewed", "avgViewSec", "viewedVsSwiped", "drops", "spikes", "views", "likes", "comments", "shares", "saves"];
+    platformOf = (s) => s.platform ?? "youtube";
+    ResultsSchema = strictObject2({
+      version: external_exports.literal(1),
+      video: external_exports.number().int().positive(),
+      /** The YouTube id the numbers are of: a video posted again under another address starts afresh. */
+      id: external_exports.string().min(1),
+      url: external_exports.string().min(1),
+      title: external_exports.string().nullable(),
+      uploadDate: day2.nullable(),
+      durationSec: external_exports.number().positive().nullable(),
+      /** Oldest first, at most one per day (the latest read of a day wins). */
+      snapshots: external_exports.array(strictObject2({ at: day2, views: external_exports.number().min(0), likes: external_exports.number().min(0).nullable(), comments: external_exports.number().min(0).nullable() })),
+      /** YouTube's "most replayed" graph as last read; null when it shows none. */
+      heatmap: external_exports.array(strictObject2({ start: external_exports.number().min(0), end: external_exports.number().min(0), value: external_exports.number().min(0) })).nullable(),
+      /** One entry per day the person gave numbers; a later entry's number replaces an earlier one's. */
+      studio: external_exports.array(StudioSchema)
+    });
+    FEATURE_KEYS = ["lengthSec", "firstWordSec", "answerShare", "cutsPerMin", "medianShotSec", "wordsPerMin", "longestSilenceSec", "musicShare", "overlays"];
+    COMPARED = {
+      lengthSec: ["Length", clockText],
+      firstWordSec: ["Seconds before the first word", secs2],
+      answerShare: ["Where the answer starts", pct],
+      cutsPerMin: ["Cuts a minute", (n2) => n2.toFixed(1)],
+      medianShotSec: ["Typical shot", secs2],
+      wordsPerMin: ["Words a minute", (n2) => String(Math.round(n2))],
+      longestSilenceSec: ["Longest stretch without words", secs2],
+      musicShare: ["Share of the length under music", pct],
+      overlays: ["Overlays", (n2) => String(round(n2, 1))]
+    };
+    TitleSchema = strictObject2({
+      words: external_exports.number().int().min(0),
+      allCaps: external_exports.boolean(),
+      hasNumber: external_exports.boolean(),
+      /** I, my, me, we, our … */
+      firstPerson: external_exports.boolean(),
+      /** Ends with ? or !! (a bracket tag after it aside). */
+      endsEmphatic: external_exports.boolean(),
+      /** Ends with a tag in brackets: "(GONE WRONG)". */
+      bracketTag: external_exports.boolean()
+    });
+    TITLE_KEYS = ["words", "allCaps", "hasNumber", "firstPerson", "endsEmphatic", "bracketTag"];
+    TITLE_LABELS = {
+      words: "Title words",
+      allCaps: "Title in ALL CAPS",
+      hasNumber: "Title has a number",
+      firstPerson: "Title in the first person",
+      endsEmphatic: "Title ends with ? or !!",
+      bracketTag: "Title ends with a bracket tag"
+    };
+    MEASURES = [
+      { key: "viewedVsSwiped", words: /swipe/i, label: "viewed vs swiped", text: (n2) => `${round(n2, 1)}%` },
+      { key: "clickRate", words: /click/i, label: "the click rate", text: (n2) => `${round(n2, 1)}%` },
+      { key: "percentViewed", words: /percentage viewed|% viewed|percent viewed|retention/i, label: "the percentage viewed", text: (n2) => `${round(n2, 1)}%` },
+      { key: "avgViewSec", words: /average view|view duration|watch time/i, label: "the average view", text: clockText },
+      { key: "likesPer1000", words: /\blikes?\b/i, label: "likes per 1,000 views", text: (n2) => n2.toFixed(1) },
+      { key: "commentsPer1000", words: /\bcomments?\b/i, label: "comments per 1,000 views", text: (n2) => n2.toFixed(1) }
+    ];
+    numberOrNull2 = external_exports.number().nullable();
+    moment = { sec: external_exports.number().min(0), item: external_exports.string().nullable(), beat: external_exports.string().nullable() };
+    EvidenceSchema = strictObject2({
+      version: external_exports.literal(1),
+      at: day2,
+      formats: external_exports.array(strictObject2({
+        format: external_exports.string().min(1),
+        videos: external_exports.array(strictObject2({
+          video: external_exports.number().int().positive(),
+          id: external_exports.string().min(1),
+          title: external_exports.string(),
+          /** The title Mirage has on record as chosen (video.json's `titles.chosen`), when it isn't the live one. */
+          recordedTitle: external_exports.string().optional(),
+          /** The name of the series the video belongs to. */
+          series: external_exports.string().optional(),
+          /** Where else the short went, with the newest numbers the person typed for that platform (null when none). Never read by Mirage. */
+          elsewhere: external_exports.array(strictObject2({ platform: external_exports.enum(ALSO_PLATFORMS), url: external_exports.string().nullable(), numbers: StudioSchema.nullable() })).optional(),
+          titleFeatures: TitleSchema,
+          ageDays: external_exports.number().int().min(0),
+          /** The read the video is at by its age; null before the early read. Before the main read, what it shows is early. */
+          read: external_exports.enum(["early", "main", "late"]).nullable(),
+          views: external_exports.number().min(0),
+          viewsPerDay: external_exports.number().min(0),
+          likesPer1000: numberOrNull2,
+          commentsPer1000: numberOrNull2,
+          /** The newest of each Studio number given, and the day of the newest entry. */
+          studio: StudioSchema.nullable(),
+          /** The strongest most replayed points, strongest first; `item` and `beat` are null when the cut can't be tied to them. */
+          mostReplayed: external_exports.array(strictObject2({ sec: external_exports.number().min(0), share: external_exports.number().min(0).max(1), item: external_exports.string().nullable(), beat: external_exports.string().nullable() })).nullable(),
+          /** Where the person's Studio retention graph falls or viewers skip, and where it rises, each with the item of the cut playing there. */
+          left: external_exports.array(strictObject2({ ...moment, note: external_exports.string().nullable() })).nullable(),
+          rewatched: external_exports.array(strictObject2(moment)).nullable(),
+          features: FeaturesSchema.nullable()
+        })),
+        /** How the videos are ranked, and the number each was ranked on, best first. */
+        rankedBy: external_exports.enum(["views-at-the-same-age", "views-per-day"]),
+        rankedAtAgeDays: external_exports.number().int().positive().nullable(),
+        ranking: external_exports.array(strictObject2({ video: external_exports.number().int().positive(), value: external_exports.number().min(0) })),
+        /** The better half against the weaker half, the median of each numeric feature; null with fewer than 4 videos. */
+        halves: strictObject2({
+          better: external_exports.array(external_exports.number().int().positive()),
+          weaker: external_exports.array(external_exports.number().int().positive()),
+          features: external_exports.array(strictObject2({ feature: external_exports.enum(FEATURE_KEYS), better: numberOrNull2, weaker: numberOrNull2 })),
+          /** The titles: the middle word count of each half, and for the rest how many of the half's titles have it. */
+          titles: external_exports.array(strictObject2({ feature: external_exports.enum(TITLE_KEYS), better: external_exports.number(), weaker: external_exports.number() }))
+        }).nullable(),
+        /**
+         * Each video that carries an experiment, held against the format's other posted videos on the number its `expect`
+         * names (found by its words: click, swipe, percentage viewed, average view, likes, comments), else on the ranking's.
+         */
+        experiments: external_exports.array(strictObject2({
+          video: external_exports.number().int().positive(),
+          rule: external_exports.string(),
+          change: external_exports.string(),
+          expect: external_exports.string(),
+          measure: external_exports.string(),
+          value: external_exports.number(),
+          /** The middle value of the other videos that have the number, and how many they are; null with none. */
+          others: numberOrNull2,
+          otherVideos: external_exports.number().int().min(0)
+        })),
+        /**
+         * Each video that had a forecast (`predict`, before it was posted) against where it landed: its place in the ranking,
+         * the band that place is (the better half is above, the weaker half below, the middle video around; null with fewer
+         * than 4 videos), and whether the forecast's band was right (null when it gave none, or none can be said yet).
+         */
+        forecasts: external_exports.array(strictObject2({
+          video: external_exports.number().int().positive(),
+          band: external_exports.enum(BANDS).nullable(),
+          weakest: external_exports.enum(STEPS).nullable(),
+          scores: external_exports.array(strictObject2({ step: external_exports.enum(STEPS), score: external_exports.number().nullable() })),
+          rank: external_exports.number().int().positive(),
+          of: external_exports.number().int().positive(),
+          landed: external_exports.enum(BANDS).nullable(),
+          right: external_exports.boolean().nullable()
+        })).default([]),
+        confidence: external_exports.enum(["weak", "fair", "strong"])
+      })),
+      /** Posted videos left out this time, each with why. */
+      leftOut: external_exports.array(strictObject2({ video: external_exports.number().int().positive(), why: external_exports.string() }))
+    });
+    resultsDir = (project) => join23(project, "results");
+    resultsFile = (project, n2) => join23(resultsDir(project), `${n2}.json`);
+    writeResults = (project, r) => writeJsonFile(resultsFile(project, r.video), ResultsSchema, r, `results/${r.video}.json`);
+    InfoSchema = external_exports.object({
+      title: external_exports.string().nullish(),
+      /** YYYYMMDD. */
+      upload_date: external_exports.string().nullish(),
+      duration: external_exports.number().nullish(),
+      view_count: external_exports.number().nullish(),
+      like_count: external_exports.number().nullish(),
+      comment_count: external_exports.number().nullish(),
+      heatmap: external_exports.array(external_exports.object({ start_time: external_exports.number(), end_time: external_exports.number(), value: external_exports.number() })).nullish()
+    });
+    percent = (n2) => `${round(n2, 1)}%`;
+    per1000 = (n2, views) => n2 === null || views <= 0 ? null : round(n2 / views * 1e3, 1);
+    names = (videos) => `${videos.length === 1 ? "video" : "videos"} ${videos.join(", ")}`;
+  }
+});
+
+// packages/core/src/mirage/playbook.ts
+function playbookFor(format2, formulas) {
+  const mine = formulas.find((f) => f.origin === "yours" && f.id === mineId(format2.id))?.playbook;
+  return { playbook: { ...format2.playbook, ...mine }, overrides: mine ? Object.keys(mine) : [] };
+}
+function lengthLimit(format2, video, playbook = {}, mine = false) {
+  const target = playbook.targetSec ?? format2.targetSec;
+  const warn = playbook.warnPastSec ?? (playbook.targetSec !== void 0 ? playbook.targetSec * 1.5 : format2.warnPastSec);
+  if (warn === void 0) return null;
+  const own2 = video?.targetSec !== void 0 && target !== void 0;
+  let limit = own2 ? warn * video.targetSec / target : warn;
+  const stated = playbook.targetSec !== void 0 || playbook.warnPastSec !== void 0;
+  let whose = own2 ? `this video's ${formatTime(limit)} limit` : stated && mine ? `your ${mineId(format2.id)} formula's ${formatTime(limit)}` : `the ${format2.name} format's ${formatTime(limit)}`;
+  if (format2.short && format2.warnPastSec !== void 0 && limit >= format2.warnPastSec) {
+    limit = format2.warnPastSec;
+    whose = `the ${format2.name} format's ${formatTime(limit)}`;
+  }
+  return { limit, whose, aim: own2 ? video.targetSec : target ?? null };
+}
+function lengthWarning(lengthSec, format2, video, playbook = {}, mine = false) {
+  const l = lengthLimit(format2, video, playbook, mine);
+  if (!l || lengthSec <= l.limit + EPS6) return null;
+  return `the video is ${formatTime(lengthSec)}, longer than ${l.whose} \u2014 ${format2.short ? "cut whole moments" : "cut whole bits rather than thinning laughs"}`;
+}
+function saidIn(ep, parts) {
+  if (!parts.said) return null;
+  const said = parts.said.map((w) => ({ start: w.start, end: Math.min(w.end, parts.lengthSec) }));
+  let written = false;
+  if (!ep.voiceover) {
+    for (const slot of ep.slots) {
+      if (!hasWords(slot.line) || slot.start >= parts.lengthSec) continue;
+      const count2 = slot.line.split(/\s+/).filter(Boolean).length;
+      const each = (slot.end - slot.start) / Math.max(count2, slot.maxWords);
+      for (let i2 = 0; i2 < count2; i2++) said.push({ start: slot.start + i2 * each, end: slot.start + (i2 + 1) * each });
+      written = true;
+    }
+  }
+  return { said: said.sort((a2, b) => a2.start - b.start), written };
+}
+function gaps(covered, length) {
+  const out = [];
+  let until = 0;
+  for (const c3 of [...covered].sort((a2, b) => a2.start - b.start)) {
+    if (c3.start > until + EPS6) out.push({ from: until, to: c3.start });
+    until = Math.max(until, c3.end);
+  }
+  if (length > until + EPS6) out.push({ from: until, to: length });
+  return out.sort((a2, b) => b.to - b.from - (a2.to - a2.from));
+}
+async function measurePlaybook(project, n2, o2) {
+  const { episode: ep, catalog, video, format: format2, playbook } = o2;
+  const results = [];
+  const report = { format: format2.id, overrides: o2.overrides ?? [], results };
+  if (!ep.items.length) return report;
+  let unknownWords = null;
+  let parts;
+  try {
+    parts = await cutParts(project, ep, catalog);
+  } catch (e) {
+    unknownWords = describeError(e).message;
+    parts = { ...await cutParts(project, { ...ep, voiceover: null }, catalog), said: null };
+  }
+  if (parts.unheard) unknownWords = `item ${parts.unheard.item} keeps the sound of ${parts.unheard.clip}, which has no transcript`;
+  const { laid, lengthSec: length, shots } = parts;
+  const words = saidIn(ep, parts);
+  const playing = (sec) => (laid.find((l) => sec >= l.start - EPS6 && sec < l.end) ?? laid.at(-1)).item.id;
+  const kind = shortKind(format2, video);
+  const first = laid[0];
+  const last = laid.at(-1);
+  const notMeasured = (rule, label, why) => results.push({ rule, status: "unmeasured", text: `${label}: not measured \u2014 ${why}` });
+  if (kind && (first.item.beat === "title" || first.item.beat === "cold-open")) {
+    const text = `a short opens on its hook, not a ${first.item.beat}: item ${first.item.id}`;
+    results.push({ rule: "opening", status: "missed", text, warnings: [text], moments: [{ where: `${at3(0)} (item ${first.item.id})`, change: `open on the hook: rename item ${first.item.id}'s beat to hook if it is the hook, else drop it or move it later` }] });
+  } else if (isCard(first.item)) {
+    results.push({
+      rule: "opening",
+      status: "missed",
+      text: `opens on a full-screen card (item ${first.item.id}) \u2014 the playbook opens on the picture`,
+      moments: [{ where: `${span(first.start, first.end)} (item ${first.item.id})`, change: `open on the picture: move item ${first.item.id} after the opening, or drop it` }]
+    });
+  } else {
+    results.push({ rule: "opening", status: "met", text: `opens on the picture (item ${first.item.id})` });
+  }
+  if (playbook.firstWordSec !== void 0) {
+    const target = `the playbook asks for one within ${playbook.firstWordSec} s`;
+    if (!words) notMeasured("firstWord", "first word", unknownWords);
+    else if (!words.said.length) {
+      results.push({ rule: "firstWord", status: "missed", text: `no word is spoken \u2014 ${target}`, moments: [{ where: `${at3(0)} (item ${first.item.id})`, change: "open on a line said out loud; a hook that is seen rather than heard is the person's call" }] });
+    } else {
+      const t = words.said[0].start;
+      const met = t <= playbook.firstWordSec + EPS6;
+      results.push({
+        rule: "firstWord",
+        status: met ? "met" : "missed",
+        text: `first word at ${t.toFixed(1)} s${met ? "" : ` (the cut opens on item ${first.item.id})`} \u2014 ${target}`,
+        ...met ? {} : { moments: [{ where: `${span(0, t)} (item ${first.item.id})`, change: `start item ${first.item.id} later in its clip, so the first word comes straight away` }] }
+      });
+    }
+  }
+  if (playbook.ideaNeeded) {
+    if (!video) notMeasured("idea", "the idea", "the video has no video.json");
+    else {
+      const big = kind === "teaser" && video.from !== void 0 ? await readVideo(project, video.from).catch(() => null) : null;
+      const idea = { ...big?.idea, ...video.idea };
+      const keys = ["gap", "question", "doubt", "stake"];
+      const have = keys.filter((k) => idea[k] !== void 0);
+      const lack = keys.filter((k) => idea[k] === void 0);
+      const from = big?.idea && keys.some((k) => video.idea?.[k] === void 0 && big.idea[k] !== void 0) ? `, the big video's (video ${video.from}) where the short has none` : "";
+      if (idea.gap !== void 0 && idea.question !== void 0) {
+        results.push({ rule: "idea", status: "met", text: `the idea is on record: ${have.join(", ")}${lack.length ? ` (no ${lack.join(", no ")})` : ""}${from}` });
+      } else {
+        const missing = ["gap", "question"].filter((k) => idea[k] === void 0);
+        results.push({
+          rule: "idea",
+          status: "missed",
+          text: `the idea has no ${missing.join(" and no ")} on record \u2014 the playbook asks for the gap and the question before cutting`,
+          moments: [{ where: `episodes/${n2}/video.json`, change: `ask the person for the ${missing.join(" and the ")} and write ${missing.length === 1 ? "it" : "them"} into the video's idea \u2014 never invent one` }]
+        });
+      }
+    }
+  }
+  if (playbook.title) {
+    const chosen = video?.titles?.chosen;
+    if (!video) notMeasured("title", "the title", "the video has no video.json");
+    else if (!chosen) notMeasured("title", "the title", `no title is chosen yet (titles.chosen in episodes/${n2}/video.json)`);
+    else {
+      const t = playbook.title;
+      const f = titleFeatures(chosen);
+      const fits = [];
+      const misses = [];
+      const wanted = [];
+      const hold = (want, has, yes, no) => {
+        if (want === void 0) return;
+        (want === has ? fits : misses).push(has ? yes : no);
+        wanted.push(want ? yes : no);
+      };
+      hold(t.allCaps, f.allCaps, "in capitals", "not in capitals");
+      hold(t.hasNumber, f.hasNumber, "has a number", "no number");
+      hold(t.firstPerson, f.firstPerson, "in the first person", "not in the first person");
+      if (t.endsWith) hold(true, chosen.replace(/[([][^)\]]+[)\]]\s*$/, "").trimEnd().endsWith(t.endsWith), `ends with ${t.endsWith}`, `doesn't end with ${t.endsWith}`);
+      if (t.words) {
+        const ok = (t.words.min === void 0 || f.words >= t.words.min) && (t.words.max === void 0 || f.words <= t.words.max);
+        (ok ? fits : misses).push(ok ? `${f.words} words` : `${f.words} words, not ${rangeText(t.words)}`);
+        wanted.push(`${rangeText(t.words)} words`);
+      }
+      results.push(misses.length ? {
+        rule: "title",
+        status: "missed",
+        text: `the chosen title \u201C${chosen}\u201D misses the format's title shape: ${misses.join("; ")}${fits.length ? ` (it is ${fits.join(", ")})` : ""} \u2014 the title shape is ${wanted.join(", ")}`,
+        moments: [{ where: `episodes/${n2}/video.json (titles.chosen)`, change: `offer the person a title that is ${wanted.join(", ")}, and never a claim the video does not deliver; when they keep this one on purpose, it is the video's experiment` }]
+      } : { rule: "title", status: "met", text: `the chosen title \u201C${chosen}\u201D fits the format's title shape: ${fits.join(", ")}` });
+    }
+  }
+  if (playbook.emptySec !== void 0) {
+    if (!words) notMeasured("empty", "longest stretch with nothing new", unknownWords);
+    else {
+      const cuts = shots.map((s) => ({ start: s.start, end: s.start }));
+      const overlays = ep.overlays.filter((v) => v.start < length).map((v) => ({ start: v.start, end: v.start }));
+      const empty = gaps([...words.said, ...cuts, ...overlays], length);
+      const longest = empty[0] ?? { from: 0, to: 0 };
+      const over = empty.filter((g) => g.to - g.from > playbook.emptySec + EPS6);
+      const sec = (longest.to - longest.from).toFixed(1);
+      results.push(over.length ? {
+        rule: "empty",
+        status: "missed",
+        text: `longest stretch with nothing new ${sec} s, ${span(longest.from, longest.to)} (item ${playing(longest.from)})${over.length > 1 ? `, and ${over.length - 1} more` : ""} \u2014 the playbook allows ${playbook.emptySec} s`,
+        moments: over.slice(0, 3).map((g) => ({ where: `${span(g.from, g.to)} (item ${playing(g.from)})`, change: `nothing new for ${(g.to - g.from).toFixed(1)} s: cut into it, or put a line, a cut or an overlay there` }))
+      } : { rule: "empty", status: "met", text: `longest stretch with nothing new ${sec} s \u2014 the playbook allows ${playbook.emptySec} s` });
+    }
+  }
+  if (playbook.cutsPerMin) {
+    const except = playbook.cutsPerMin.except ?? [];
+    const counted = shots.filter((s) => !except.includes(laid[s.from].item.beat));
+    const minutes = counted.reduce((sum, s) => sum + s.end - s.start, 0) / 60;
+    const outside = except.length ? ` outside ${except.join(", ")}` : "";
+    if (!counted.length) notMeasured("pace", "cuts a minute", `every shot is in ${except.join(", ")}, which the playbook leaves out`);
+    else {
+      const rate = counted.filter((s) => s.start > EPS6).length / minutes;
+      const target = `the playbook asks for ${rangeText(playbook.cutsPerMin)}`;
+      const slow = playbook.cutsPerMin.min !== void 0 && rate < playbook.cutsPerMin.min - EPS6;
+      const fast = playbook.cutsPerMin.max !== void 0 && rate > playbook.cutsPerMin.max + EPS6;
+      const longest = [...counted].sort((a2, b) => b.end - b.start - (a2.end - a2.start));
+      const shot = (s) => `item ${laid[s.from].item.id}, ${(s.end - s.start).toFixed(1)} s (${span(s.start, s.end)})`;
+      const groups = Object.entries(playbook.cutsPerMin.beats ?? {}).map(([b, range4]) => ({ label: `in ${b}`, of: shots.filter((s) => laid[s.from].item.beat === b), range: range4 }));
+      const after = playbook.cutsPerMin.after;
+      const from = after ? Math.max(-1, ...laid.flatMap((l) => l.item.beat === after.beat ? [l.end] : [])) : -1;
+      if (after && from >= 0) groups.push({ label: `after the ${after.beat}`, of: shots.filter((s) => s.start >= from - EPS6 && !(after.except ?? []).includes(laid[s.from].item.beat)), range: after });
+      const parts2 = [];
+      const moments = [];
+      if (slow) moments.push(...longest.slice(0, 2).map((s) => ({ where: `${span(s.start, s.end)} (item ${laid[s.from].item.id})`, change: `a ${(s.end - s.start).toFixed(1)} s shot: cut inside it, or trim it` })));
+      if (fast) moments.push({ where: "the whole cut", change: "let the strongest shots run longer" });
+      let off = false;
+      for (const g of groups) {
+        if (!g.of.length) continue;
+        const r = g.of.filter((s) => s.start > EPS6).length / (g.of.reduce((sum, s) => sum + s.end - s.start, 0) / 60);
+        const under = g.range.min !== void 0 && r < g.range.min - EPS6;
+        const over = g.range.max !== void 0 && r > g.range.max + EPS6;
+        parts2.push(`${g.label} ${r.toFixed(1)}${under || over ? `, ${under ? "under" : "over"} its ${rangeText(g.range)}` : ` (${rangeText(g.range)})`}`);
+        off ||= under || over;
+        const long = [...g.of].sort((a2, b) => b.end - b.start - (a2.end - a2.start))[0];
+        if (under) moments.push({ where: `${span(long.start, long.end)} (item ${laid[long.from].item.id})`, change: `${g.label}, the longest shot is ${(long.end - long.start).toFixed(1)} s: cut inside it, or trim it` });
+        if (over) moments.push({ where: g.label, change: "let the strongest shots there run longer" });
+      }
+      results.push({
+        rule: "pace",
+        status: slow || fast || off ? "missed" : "met",
+        text: `${rate.toFixed(1)} cuts a minute${outside} \u2014 ${target}${slow ? `; the longest shot is ${shot(longest[0])}` : ""}${parts2.length ? `; ${parts2.join("; ")}` : ""}`,
+        ...moments.length ? { moments } : {}
+      });
+    }
+  }
+  if (playbook.wordsPerMin) {
+    if (!words) notMeasured("words", "words a minute", unknownWords);
+    else {
+      const rate = words.said.length / (length / 60);
+      const low = playbook.wordsPerMin.min !== void 0 && rate < playbook.wordsPerMin.min - EPS6;
+      const high = playbook.wordsPerMin.max !== void 0 && rate > playbook.wordsPerMin.max + EPS6;
+      const quiet = gaps(words.said, length);
+      const counting = words.written ? " (counting the written narration lines, not recorded yet)" : "";
+      results.push({
+        rule: "words",
+        status: low || high ? "missed" : "met",
+        text: `${Math.round(rate)} words a minute${counting} \u2014 the playbook asks for ${rangeText(playbook.wordsPerMin)}${low && quiet[0] ? `; the longest stretch without words is ${span(quiet[0].from, quiet[0].to)} (item ${playing(quiet[0].from)})` : ""}`,
+        ...low ? { moments: quiet.slice(0, 2).map((g) => ({ where: `${span(g.from, g.to)} (item ${playing(g.from)})`, change: `no words for ${(g.to - g.from).toFixed(1)} s: write narration over it, or cut it shorter` })) } : {},
+        ...high ? { moments: [{ where: "the whole cut", change: "thin the narration where the picture already tells it" }] } : {}
+      });
+    }
+  }
+  const beat = playbook.answer?.beat ?? (kind ? "payoff" : null);
+  if (beat) {
+    const found = laid.find((l) => l.item.beat === beat);
+    if (found && playbook.answer && kind !== "teaser") {
+      const share2 = found.start / length;
+      const { fromShare, toShare } = playbook.answer;
+      const early = share2 < fromShare - EPS6;
+      const late = share2 > toShare + EPS6;
+      const where = `the answer (${beat}, item ${found.item.id}) starts ${pct2(share2)} of the way through`;
+      const target = `the playbook asks for ${Math.round(fromShare * 100)}\u2013${pct2(toShare)}`;
+      results.push(early || late ? {
+        rule: "answerPlace",
+        status: "missed",
+        text: `${where}, at ${at3(found.start)} \u2014 ${target}`,
+        moments: [{
+          where: `${at3(found.start)} (item ${found.item.id})`,
+          change: early ? `the answer comes early: hold it back by moving what follows item ${found.item.id} before it, or cut what follows` : `the answer comes late: bring item ${found.item.id} earlier, or trim what comes before it`
+        }]
+      } : { rule: "answerPlace", status: "met", text: `${where} \u2014 ${target}` });
+    }
+    if (found) {
+      results.push({ rule: "answer", status: "met", text: kind === "teaser" ? `pays off one small question: a ${beat} beat (item ${found.item.id})` : `has its answer: a ${beat} beat (item ${found.item.id})` });
+    } else {
+      const warning = kind === "teaser" ? `a teaser short answers one small question and leaves the big one open: add a ${beat} beat` : kind === "standalone" ? `a standalone short pays off its hook: add a ${beat} beat` : null;
+      results.push({
+        rule: "answer",
+        status: "missed",
+        text: warning ?? `no ${beat} beat in the cut \u2014 the playbook asks for the answer on screen`,
+        ...warning ? { warnings: [warning] } : {},
+        moments: [{ where: "the whole cut", change: kind === "teaser" ? `add a ${beat} beat that answers one small question the short raised; the big video's answer stays in the big video` : `add the ${beat} beat: the moment that answers the question` }]
+      });
+    }
+  }
+  if (kind) {
+    const warnings = ep.items.filter((i2) => i2.beat === "outro").map((i2) => `a short has no outro: item ${i2.id}`);
+    if (isCard(last.item)) warnings.push(`a short never ends on a full-screen card: item ${last.item.id} \u2014 end on the last shot, with at most an overlay over it`);
+    results.push(warnings.length ? {
+      rule: "ending",
+      status: "missed",
+      text: warnings.join("; "),
+      warnings,
+      moments: [{ where: `${span(last.start, last.end)} (item ${last.item.id})`, change: "end on the last shot of the story: remove the outro or the end card (the platform's own link points to the full video)" }]
+    } : { rule: "ending", status: "met", text: `ends on the picture, with no outro (item ${last.item.id})` });
+  } else if (playbook.endsOn) {
+    const met = playbook.endsOn.includes(last.item.beat);
+    results.push(met ? { rule: "ending", status: "met", text: `ends on its ${last.item.beat} (item ${last.item.id})` } : {
+      rule: "ending",
+      status: "missed",
+      text: `ends on ${last.item.beat} (item ${last.item.id}), not on ${playbook.endsOn.join(" or ")}`,
+      moments: [{ where: `${span(last.start, last.end)} (item ${last.item.id})`, change: `end on ${playbook.endsOn[0]}: add it after item ${last.item.id}, or move item ${last.item.id} before it` }]
+    });
+  }
+  if (kind === "standalone") {
+    const cue = [...ep.music].sort((a2, b) => b.end - a2.end)[0];
+    const toEnd = cue !== void 0 && cue.end >= length - 0.5 / ep.output.fps;
+    if (toEnd && cue.fadeOut > 0) {
+      const warning = "a standalone short loops: the last music cue fades out at the end \u2014 set its fadeOut to 0";
+      results.push({ rule: "loop", status: "missed", text: warning, warnings: [warning], moments: [{ where: `${span(Math.max(cue.start, length - cue.fadeOut), length)} (the last music cue)`, change: "set the cue's fadeOut to 0, so the music runs straight into the restart" }] });
+    }
+    results.push(last.item.beat === "loop" ? { rule: "loop", status: "met", text: `ends on its loop beat (item ${last.item.id})${toEnd && cue.fadeOut === 0 ? ", the music running to the end without fading" : ""} \u2014 whether its last line leads back into the first shot is not measured: Mirage can't hear that` } : {
+      rule: "loop",
+      status: "missed",
+      text: `ends on ${last.item.beat} (item ${last.item.id}), not on a loop beat \u2014 a standalone short ends where the restart flows into the hook`,
+      moments: [{ where: `${span(last.start, last.end)} (item ${last.item.id})`, change: `end on a loop: a last line or motion that leads back into the first shot (rename item ${last.item.id}'s beat to loop when it already does)` }]
+    });
+  }
+  const mine = (o2.overrides ?? []).some((k) => k === "targetSec" || k === "warnPastSec");
+  const limit = lengthLimit(format2, video, playbook, mine);
+  if (limit && limit.aim !== null) {
+    const warning = lengthWarning(length, format2, video, playbook, mine);
+    results.push(warning ? { rule: "length", status: "missed", text: warning, warnings: [warning], moments: [{ where: "the whole cut", change: format2.short ? "cut whole moments" : "drop the weakest whole bit rather than thinning every laugh" }] } : { rule: "length", status: "met", text: `${formatTime(length)} long \u2014 it aims for ${formatTime(limit.aim)} and warns past ${formatTime(limit.limit)}` });
+  }
+  if (o2.series) {
+    const { name, slug, openQuestion, openQuestionFrom: left } = o2.series;
+    results.push(openQuestion ? { rule: "series", status: "met", text: `the series \u201C${name}\u201D has an open question on record${left === n2 ? ", left by this episode for the next one" : left ? `, left by video ${left}` : ""}: \u201C${openQuestion}\u201D` } : {
+      rule: "series",
+      status: "missed",
+      text: `the series \u201C${name}\u201D has no open question on record for the next episode \u2014 every episode's outro leaves one`,
+      moments: [{ where: `series/${slug}/series.json`, change: "after the final render, ask the person which question this episode leaves open and record it with the series tool \u2014 never invent one" }]
+    });
+  }
+  return report;
+}
+function playbookSection(report) {
+  const lines = report.results.filter((r) => !r.warnings?.length).map((r) => `  ${playbookLine(r)}`);
+  if (!lines.length) return [];
+  const yours = report.overrides.length ? `, with your ${mineId(report.format)} formula's ${report.overrides.join(", ")}` : "";
+  return [`Playbook (${report.format}${yours}):`, ...lines];
+}
+var EPS6, at3, span, pct2, rangeText, playbookLine;
+var init_playbook = __esm({
+  "packages/core/src/mirage/playbook.ts"() {
+    "use strict";
+    init_src();
+    init_errors4();
+    init_formats();
+    init_formulas();
+    init_learn();
+    init_timeline();
+    init_video2();
+    init_voiceover();
+    EPS6 = 1e-6;
+    at3 = (sec) => {
+      const t = Math.round(sec * 10) / 10;
+      const m = Math.floor(t / 60);
+      return `${m}:${(t - m * 60).toFixed(1).padStart(4, "0")}`;
+    };
+    span = (from, to) => `${at3(from)}\u2013${at3(to)}`;
+    pct2 = (share2) => `${Math.round(share2 * 100)}%`;
+    rangeText = (r) => r.min !== void 0 && r.max !== void 0 ? `${r.min}\u2013${r.max}` : r.min !== void 0 ? `${r.min} or more` : `${r.max} or fewer`;
+    playbookLine = (r) => `${r.status === "met" ? "\u2713" : r.status === "missed" ? "\u2717" : "\u2013"} ${r.text}`;
   }
 });
 
 // packages/core/src/mirage/check.ts
-import { join as join17, resolve as resolve11 } from "node:path";
+import { join as join24, resolve as resolve11 } from "node:path";
 function timelineWarnings(ep, lib, snapped) {
   const out = [];
   const D = timelineDuration(ep);
@@ -34486,13 +36813,15 @@ function coveredBy(s, width, height) {
   if (col === 2 && width - s.margin + s.outline > width * (1 - COVERED.right)) out.push(`right ${COVERED.right * 100}%`);
   return out;
 }
-function formatWarnings(ep, catalog, video, format2, formatted) {
+function formatWarnings(ep, video, format2, formatted, measured, pb) {
   const out = [];
   const known = formatted ? format2.beats : BUILD_STORY_BEATS;
   for (const item of ep.items) {
     if (!known.includes(item.beat)) out.push(`item ${item.id}'s beat "${item.beat}" isn't one of the ${format2.name} format's beats (${format2.beats.join(", ")})`);
   }
-  if (!formatted) return out;
+  const mine = pb.overrides.some((k) => k === "targetSec" || k === "warnPastSec");
+  const tooLong = lengthWarning(timelineDuration(ep), format2, video, pb.playbook, mine);
+  if (!formatted) return tooLong ? [...out, tooLong] : out;
   const { width: w, height: h2 } = ep.output;
   if (format2.output && (w !== format2.output.width || h2 !== format2.output.height)) {
     out.push(`the video is ${w}\xD7${h2}, not the ${format2.name} format's ${format2.output.width}\xD7${format2.output.height}`);
@@ -34505,35 +36834,16 @@ function formatWarnings(ep, catalog, video, format2, formatted) {
       out.push(`captions are ${keys.map((k) => own2[k]).join("/")}, not the ${format2.name} format's ${keys.map((k) => stated[k]).join("/")}`);
     }
   }
-  const D = timelineDuration(ep);
-  if (format2.warnPastSec !== void 0) {
-    const own2 = video?.targetSec !== void 0 && format2.targetSec !== void 0;
-    const limit = own2 ? format2.warnPastSec * video.targetSec / format2.targetSec : format2.warnPastSec;
-    const whose = own2 ? `this video's ${formatTime(limit)} limit` : `the ${format2.name} format's ${formatTime(limit)}`;
-    const cut = format2.short ? "cut whole moments" : "cut whole bits rather than thinning laughs";
-    if (D > limit + 1e-6) out.push(`the video is ${formatTime(D)}, longer than ${whose} \u2014 ${cut}`);
-  }
+  if (tooLong) out.push(tooLong);
   if (format2.short) {
-    const laid = layoutTimeline(ep);
-    const first = laid[0];
-    const opening = first?.item;
-    if (opening && !isCard(opening) && opening.audio === "keep" && opening.speed === 1) {
-      const clip = catalog.clips.find((c3) => c3.id === opening.clip);
-      if (clip?.probe.hasAudio && clip.transcript) {
-        const word = speechWords(ep, catalog, null).find((w2) => w2.start >= first.start - 1e-6 && w2.start < first.end);
-        const silence = (word?.start ?? first.end) - first.start;
-        if (silence > MAX_OPENING_SILENCE_SEC + 1e-6) out.push(`a short opens on its hook: item ${opening.id} starts with ${s12(silence)} s of silence`);
-      }
-    }
-    if (first && (first.item.beat === "title" || first.item.beat === "cold-open")) out.push(`a short opens on its hook, not a ${first.item.beat}: item ${first.item.id}`);
-    for (const item of ep.items) if (item.beat === "outro") out.push(`a short has no outro: item ${item.id}`);
-    const kind = video?.from !== void 0 ? format2.short.kind : "standalone";
-    if (kind === "standalone") {
-      const last = [...ep.music].sort((a2, b) => b.end - a2.end)[0];
-      if (last && last.end >= D - 0.5 / ep.output.fps && last.fadeOut > 0) out.push("a standalone short loops: the last music cue fades out at the end \u2014 set its fadeOut to 0");
-    } else if (!ep.items.some((i2) => i2.beat === "pointer")) {
-      out.push("a teaser short ends pointing to the full video: add a pointer beat at the end");
-    }
+    for (const rule of ["opening", "ending", "answer", "loop"]) out.push(...measured.filter((r) => r.rule === rule).flatMap((r) => r.warnings ?? []));
+    out.push(...coveredWarnings(ep));
+  }
+  return out;
+}
+function coveredWarnings(ep) {
+  const out = [];
+  {
     const { width, height } = ep.output;
     if (height > width) {
       const covered = (what, s, todo) => {
@@ -34577,7 +36887,7 @@ async function checkEpisode(project, n2, tools, opts = {}) {
   checkCardImages(root, ep);
   const warnings = [];
   const notes = [];
-  const musicDir = join17(root, "music");
+  const musicDir = join24(root, "music");
   const lib = ep.music.length ? await loadLibrary(musicDir) : null;
   if (lib) checkCueFiles(ep.music, lib, musicDir);
   for (const [k, x] of (ep.sfx ?? []).entries()) {
@@ -34614,10 +36924,17 @@ async function checkEpisode(project, n2, tools, opts = {}) {
   warnings.push(...timelineWarnings(ep, lib, !ep.voiceover));
   warnings.push(...spillWarnings(ep, catalog));
   const { video, format: format2, formatted, problems } = await videoFormat(root, n2, opts.formatsDir);
-  if (format2) warnings.push(...formatWarnings(ep, catalog, video, format2, formatted));
-  return { episode: ep, warnings, notes, problems };
+  let measured = null;
+  if (format2) {
+    const yours = loadFormulas(opts.formulasDir ?? formulasDir(), root);
+    problems.push(...yours.problems.filter((p) => p.startsWith(`\u2716 formulas/${mineId(format2.id)}.md:`)));
+    const pb = playbookFor(format2, yours.formulas);
+    measured = await measurePlaybook(root, n2, { episode: ep, catalog, video, format: format2, ...pb, series: await seriesOf(root, n2) });
+    warnings.push(...formatWarnings(ep, video, format2, formatted, measured.results, pb));
+  }
+  return { episode: ep, warnings, notes, problems, playbook: measured ? playbookSection(measured) : [], measured };
 }
-var OLD_DEFAULT_GAIN_DB, s12, s22, MAX_SFX_PER_MINUTE, SFX_WINDOW_SEC, MAX_OPENING_SILENCE_SEC, COVERED;
+var OLD_DEFAULT_GAIN_DB, s12, s22, MAX_SFX_PER_MINUTE, SFX_WINDOW_SEC, COVERED;
 var init_check = __esm({
   "packages/core/src/mirage/check.ts"() {
     "use strict";
@@ -34625,11 +36942,14 @@ var init_check = __esm({
     init_cards();
     init_errors4();
     init_formats();
+    init_formulas();
     init_ingest();
     init_music();
     init_move();
     init_overlays();
+    init_playbook();
     init_render_episode();
+    init_series2();
     init_sfx();
     init_slots();
     init_spill();
@@ -34641,36 +36961,35 @@ var init_check = __esm({
     s22 = (n2) => n2.toFixed(2);
     MAX_SFX_PER_MINUTE = 6;
     SFX_WINDOW_SEC = 60;
-    MAX_OPENING_SILENCE_SEC = 0.5;
     COVERED = { top: 0.1, bottom: 0.2, right: 0.15 };
   }
 });
 
 // packages/core/src/mirage/project.ts
-import { existsSync as existsSync10 } from "node:fs";
-import { mkdir as mkdir7, writeFile as writeFile6 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { join as join18, resolve as resolve12 } from "node:path";
-function resolveUserPath(p, base = process.env.INIT_CWD ?? process.cwd(), home = homedir3()) {
+import { existsSync as existsSync14 } from "node:fs";
+import { mkdir as mkdir11, writeFile as writeFile9 } from "node:fs/promises";
+import { homedir as homedir4 } from "node:os";
+import { join as join25, resolve as resolve12 } from "node:path";
+function resolveUserPath(p, base = process.env.INIT_CWD ?? process.cwd(), home = homedir4()) {
   if (p === "~") return home;
-  if (p.startsWith("~/")) return join18(home, p.slice(2));
+  if (p.startsWith("~/")) return join25(home, p.slice(2));
   return resolve12(base, p);
 }
 async function initProject(project, title) {
-  const file2 = join18(project, "mirage.json");
-  if (existsSync10(file2)) throw new MirageError("BAD_INPUT", `${project} is already a Mirage project`, "Nothing was changed; edit mirage.json to change its title.");
-  await mkdir7(join18(project, "episodes"), { recursive: true });
-  await mkdir7(join18(project, "music"), { recursive: true });
-  await writeFile6(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
+  const file2 = join25(project, "mirage.json");
+  if (existsSync14(file2)) throw new MirageError("BAD_INPUT", `${project} is already a Mirage project`, "Nothing was changed; edit mirage.json to change its title.");
+  await mkdir11(join25(project, "episodes"), { recursive: true });
+  await mkdir11(join25(project, "music"), { recursive: true });
+  await writeFile9(file2, JSON.stringify({ version: 1, title, createdAt: (/* @__PURE__ */ new Date()).toISOString() }, null, 2) + "\n", { flag: "wx" });
 }
 function requireProject(project) {
-  if (!existsSync10(join18(project, "mirage.json"))) {
+  if (!existsSync14(join25(project, "mirage.json"))) {
     throw new MirageError("NO_PROJECT", `no Mirage project at ${project}`, `Check the path, or create one with: pnpm mirage init ${project} --title "<title>"`);
   }
 }
 async function readProject(project) {
   try {
-    return await readJsonFile(join18(project, "mirage.json"), MirageProjectSchema, "mirage.json");
+    return await readJsonFile(join25(project, "mirage.json"), MirageProjectSchema, "mirage.json");
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -34699,10 +37018,10 @@ var init_labels = __esm({
 });
 
 // packages/core/src/mirage/session-files.ts
-import { randomUUID as randomUUID8 } from "node:crypto";
-import { readFileSync as readFileSync5 } from "node:fs";
-import { appendFile, link as link2, mkdir as mkdir8, readdir as readdir7, readFile as readFile8, rename as rename6, rm as rm10, stat as stat5, utimes, writeFile as writeFile7 } from "node:fs/promises";
-import { dirname as dirname7, join as join19, resolve as resolve13 } from "node:path";
+import { randomUUID as randomUUID9 } from "node:crypto";
+import { readFileSync as readFileSync6 } from "node:fs";
+import { appendFile, link as link2, mkdir as mkdir12, readdir as readdir10, readFile as readFile11, rename as rename7, rm as rm11, stat as stat5, utimes, writeFile as writeFile10 } from "node:fs/promises";
+import { dirname as dirname7, join as join26, resolve as resolve13 } from "node:path";
 function checkSessionId(id) {
   if (!SESSION_ID.test(id) || id.includes("..")) throw new MirageError("BAD_INPUT", `"${id}" is not a session id`, "A session id is letters, digits, dots, dashes and underscores.");
   return id;
@@ -34710,7 +37029,7 @@ function checkSessionId(id) {
 async function readLines(path8, schema) {
   let text;
   try {
-    text = await readFile8(path8, "utf8");
+    text = await readFile11(path8, "utf8");
   } catch (e) {
     if (e.code === "ENOENT") return [];
     throw e;
@@ -34731,11 +37050,11 @@ async function readLines(path8, schema) {
 }
 async function appendLine(path8, schema, value) {
   const parsed = schema.parse(value);
-  await mkdir8(dirname7(path8), { recursive: true });
+  await mkdir12(dirname7(path8), { recursive: true });
   await appendFile(path8, JSON.stringify(parsed) + "\n", "utf8");
 }
 async function writeProgress(dir, p) {
-  await mkdir8(dir, { recursive: true });
+  await mkdir12(dir, { recursive: true });
   await writeJsonFile(progressPath(dir), ProgressSchema, p, "progress.json");
 }
 async function readProgress(dir) {
@@ -34754,29 +37073,29 @@ async function readControlFile(path8) {
 }
 async function writeControlIfNone(path8, control) {
   try {
-    await writeFile7(path8, JSON.stringify(ControlSchema.parse(control), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+    await writeFile10(path8, JSON.stringify(ControlSchema.parse(control), null, 2) + "\n", { encoding: "utf8", flag: "wx" });
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
 }
 async function claimedControl(project, n2, written) {
   const dir = episodeDir(project, n2);
-  const names = (await readdir7(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
+  const names2 = (await readdir10(dir).catch(() => [])).filter((f) => f.startsWith(CLAIM));
   let best = null;
   const stale = [];
-  for (const name of names) {
-    const info = await stat5(join19(dir, name)).catch(() => null);
+  for (const name of names2) {
+    const info = await stat5(join26(dir, name)).catch(() => null);
     if (!info) continue;
     if (Date.now() - claimedAt(name, info.mtimeMs) > CLAIM_STALE_MS) stale.push(name);
     if (written) continue;
-    const control = await readControlFile(join19(dir, name));
+    const control = await readControlFile(join26(dir, name));
     if (control && (!best || info.mtimeMs > best.mtime)) best = { control, mtime: info.mtimeMs };
   }
   const claimed = best ? { ...best.control, correction: null } : null;
   if (stale.length) {
     try {
-      if (claimed && stale.length === names.length) await writeControlIfNone(controlPath(project, n2), claimed);
-      for (const name of stale) await rm10(join19(dir, name), { force: true });
+      if (claimed && stale.length === names2.length) await writeControlIfNone(controlPath(project, n2), claimed);
+      for (const name of stale) await rm11(join26(dir, name), { force: true });
     } catch {
     }
   }
@@ -34792,7 +37111,7 @@ async function readControl(project, n2) {
 }
 async function writeControl(project, n2, patch) {
   const next = ControlSchema.parse({ ...await readControl(project, n2), ...patch, version: 1, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
-  await mkdir8(episodeDir(project, n2), { recursive: true });
+  await mkdir12(episodeDir(project, n2), { recursive: true });
   await writeJsonFile(controlPath(project, n2), ControlSchema, next, "control.json");
   return next;
 }
@@ -34800,9 +37119,9 @@ async function takeCorrection(project, n2, o2 = {}) {
   const path8 = controlPath(project, n2);
   const peek = await readControlFile(path8);
   if (!peek || peek.correction === null) return null;
-  const claim2 = join19(episodeDir(project, n2), claimName());
+  const claim2 = join26(episodeDir(project, n2), claimName());
   try {
-    await rename6(path8, claim2);
+    await rename7(path8, claim2);
   } catch (e) {
     if (e.code === "ENOENT") return null;
     throw e;
@@ -34811,7 +37130,7 @@ async function takeCorrection(project, n2, o2 = {}) {
   const text = claimed?.correction ?? null;
   if (claimed) {
     const rest = ControlSchema.parse({ ...claimed, correction: null, updatedAt: text === null ? claimed.updatedAt : (/* @__PURE__ */ new Date()).toISOString() });
-    const tmp = `${path8}.tmp-${randomUUID8()}`;
+    const tmp = `${path8}.tmp-${randomUUID9()}`;
     await writeJsonFile(tmp, ControlSchema, rest, "control.json");
     try {
       await (o2.link ?? link2)(tmp, path8);
@@ -34820,10 +37139,10 @@ async function takeCorrection(project, n2, o2 = {}) {
       if (code === "EPERM" || code === "ENOTSUP" || code === "EXDEV" || code === "ENOSYS") await writeControlIfNone(path8, rest);
       else if (code !== "EEXIST") throw e;
     } finally {
-      await rm10(tmp, { force: true });
+      await rm11(tmp, { force: true });
     }
   }
-  await rm10(claim2, { force: true });
+  await rm11(claim2, { force: true });
   return text;
 }
 async function readSessionState(project, sessionId) {
@@ -34837,7 +37156,7 @@ async function readSessionState(project, sessionId) {
 async function writeSessionState(project, sessionId, patch) {
   const path8 = sessionStatePath(project, sessionId);
   const next = SessionStateSchema.parse({ ...await readSessionState(project, sessionId), ...patch });
-  await mkdir8(dirname7(path8), { recursive: true });
+  await mkdir12(dirname7(path8), { recursive: true });
   await writeJsonFile(path8, SessionStateSchema, next, `.mirage/sessions/${sessionId}.json`);
   return next;
 }
@@ -34852,16 +37171,16 @@ async function touchSessionState(project, sessionId) {
 }
 function claudeProcessPath(project, pid) {
   if (!Number.isInteger(pid) || pid <= 0) throw new MirageError("BAD_INPUT", `"${pid}" is not a process id`, "A process id is a whole number above 0.");
-  return join19(resolve13(project), ".mirage", "claude", `${pid}.json`);
+  return join26(resolve13(project), ".mirage", "claude", `${pid}.json`);
 }
-async function writeClaudeProcess(project, pid, sessionId, at2 = /* @__PURE__ */ new Date()) {
+async function writeClaudeProcess(project, pid, sessionId, at4 = /* @__PURE__ */ new Date()) {
   const path8 = claudeProcessPath(project, pid);
-  await mkdir8(dirname7(path8), { recursive: true });
-  await writeJsonFile(path8, ClaudeProcessSchema, { sessionId: checkSessionId(sessionId), updatedAt: at2.toISOString() }, `.mirage/claude/${pid}.json`);
+  await mkdir12(dirname7(path8), { recursive: true });
+  await writeJsonFile(path8, ClaudeProcessSchema, { sessionId: checkSessionId(sessionId), updatedAt: at4.toISOString() }, `.mirage/claude/${pid}.json`);
 }
 function readClaudeProcess(project, pid) {
   try {
-    const r = ClaudeProcessSchema.safeParse(JSON.parse(readFileSync5(claudeProcessPath(project, pid), "utf8")));
+    const r = ClaudeProcessSchema.safeParse(JSON.parse(readFileSync6(claudeProcessPath(project, pid), "utf8")));
     return r.success ? r.data.sessionId : null;
   } catch {
     return null;
@@ -34876,32 +37195,32 @@ var init_session_files = __esm({
     init_json_file();
     init_render_episode();
     SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-    sessionDir = (project, n2, sessionId) => join19(episodeDir(project, n2), "sessions", checkSessionId(sessionId));
-    stepsPath = (dir) => join19(dir, "steps.jsonl");
-    logPath = (dir) => join19(dir, "log.jsonl");
-    progressPath = (dir) => join19(dir, "progress.json");
+    sessionDir = (project, n2, sessionId) => join26(episodeDir(project, n2), "sessions", checkSessionId(sessionId));
+    stepsPath = (dir) => join26(dir, "steps.jsonl");
+    logPath = (dir) => join26(dir, "log.jsonl");
+    progressPath = (dir) => join26(dir, "progress.json");
     appendStep = (dir, line) => appendLine(stepsPath(dir), StepLineSchema, line);
     readSteps = (dir) => readLines(stepsPath(dir), StepLineSchema);
     appendLog = (dir, entry) => appendLine(logPath(dir), LogEntrySchema, entry);
     readLog = (dir) => readLines(logPath(dir), LogEntrySchema);
-    clearProgress = (dir) => rm10(progressPath(dir), { force: true });
-    controlPath = (project, n2) => join19(episodeDir(project, n2), "control.json");
+    clearProgress = (dir) => rm11(progressPath(dir), { force: true });
+    controlPath = (project, n2) => join26(episodeDir(project, n2), "control.json");
     CLAIM = "control.json.take-";
     defaultControl = () => ({ version: 1, paused: false, pauseNow: false, stop: null, correction: null, updatedAt: (/* @__PURE__ */ new Date()).toISOString() });
     CLAIM_STALE_MS = 6e4;
-    claimName = () => `${CLAIM}${Date.now()}-${randomUUID8()}`;
+    claimName = () => `${CLAIM}${Date.now()}-${randomUUID9()}`;
     claimedAt = (name, mtime) => {
       const m = /^control\.json\.take-(\d{13})-/.exec(name);
       return m ? Number(m[1]) : mtime;
     };
-    sessionStatePath = (project, sessionId) => join19(resolve13(project), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
+    sessionStatePath = (project, sessionId) => join26(resolve13(project), ".mirage", "sessions", `${checkSessionId(sessionId)}.json`);
     emptySession = () => ({ video: null, overnight: null, awakePid: null });
   }
 });
 
 // packages/core/src/mirage/notes.ts
-import { mkdir as mkdir9, readdir as readdir8, rm as rm11 } from "node:fs/promises";
-import { join as join20 } from "node:path";
+import { mkdir as mkdir13, readdir as readdir11, rm as rm12 } from "node:fs/promises";
+import { join as join27 } from "node:path";
 async function readNotes(project, n2) {
   try {
     return (await readJsonFile(notesPath(project, n2), NotesFileSchema, `episodes/${n2}/notes.json`)).notes;
@@ -34920,12 +37239,12 @@ async function addNote(project, n2, o2) {
   const notes = await readNotes(project, n2);
   const id = `n${notes.reduce((m, x) => Math.max(m, Number(x.id.slice(1))), 0) + 1}`;
   const note = NoteSchema.parse({ id, versionId: o2.versionId, t: o2.t, text: o2.text, box: o2.box, still: `notes/${id}.jpg`, createdAt: (/* @__PURE__ */ new Date()).toISOString(), round: null });
-  const out = join20(episodeDir(project, n2), note.still);
-  await mkdir9(join20(episodeDir(project, n2), "notes"), { recursive: true });
+  const out = join27(episodeDir(project, n2), note.still);
+  await mkdir13(join27(episodeDir(project, n2), "notes"), { recursive: true });
   try {
     await o2.tools.runFfmpeg(["-ss", o2.t.toFixed(3), "-i", o2.videoPath, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "3", out]);
   } catch (e) {
-    await rm11(out, { force: true });
+    await rm12(out, { force: true });
     throw e;
   }
   await saveNotes(project, n2, [...notes, note]);
@@ -34943,29 +37262,29 @@ async function deleteNote(project, n2, id) {
   const note = find(notes, id);
   if (!NOTE_STILL.test(note.still)) throw new MirageError("BAD_INPUT", `Note ${id} has a still outside notes/.`, "Check notes.json.");
   await saveNotes(project, n2, notes.filter((x) => x.id !== id));
-  await rm11(join20(episodeDir(project, n2), note.still), { force: true });
+  await rm12(join27(episodeDir(project, n2), note.still), { force: true });
 }
 async function sendNotes(project, n2) {
   const notes = await readNotes(project, n2);
   const unsent = notes.filter((x) => x.round === null);
   if (!unsent.length) return [];
-  const round = notes.reduce((m, x) => Math.max(m, x.round ?? 0), 0) + 1;
-  const next = notes.map((x) => x.round === null ? { ...x, round } : x);
+  const round2 = notes.reduce((m, x) => Math.max(m, x.round ?? 0), 0) + 1;
+  const next = notes.map((x) => x.round === null ? { ...x, round: round2 } : x);
   await saveNotes(project, n2, next);
   return next.filter((x) => unsent.some((u2) => u2.id === x.id));
 }
 async function noteStatuses(project, n2) {
-  const sessions = join20(episodeDir(project, n2), "sessions");
-  const entries = await readdir8(sessions, { withFileTypes: true }).catch(() => []);
-  const names = entries.filter((d) => d.isDirectory()).map((d) => d.name).sort();
+  const sessions = join27(episodeDir(project, n2), "sessions");
+  const entries = await readdir11(sessions, { withFileTypes: true }).catch(() => []);
+  const names2 = entries.filter((d) => d.isDirectory()).map((d) => d.name).sort();
   const newest = /* @__PURE__ */ new Map();
-  for (const name of names) {
-    for (const e of await readLog(join20(sessions, name))) {
+  for (const name of names2) {
+    for (const e of await readLog(join27(sessions, name))) {
       if (e.kind !== "note-status" || !e.noteId || !e.status) continue;
-      const at2 = Date.parse(e.at);
+      const at4 = Date.parse(e.at);
       const prev = newest.get(e.noteId);
-      if (prev && prev.at > at2) continue;
-      newest.set(e.noteId, { at: at2, status: e.status, ...e.text ? { reason: e.text } : {} });
+      if (prev && prev.at > at4) continue;
+      newest.set(e.noteId, { at: at4, status: e.status, ...e.text ? { reason: e.text } : {} });
     }
   }
   return Object.fromEntries([...newest].map(([id, { at: _at, ...status }]) => [id, status]));
@@ -34979,14 +37298,14 @@ var init_notes2 = __esm({
     init_json_file();
     init_render_episode();
     init_session_files();
-    notesPath = (project, n2) => join20(episodeDir(project, n2), "notes.json");
+    notesPath = (project, n2) => join27(episodeDir(project, n2), "notes.json");
     saveNotes = (project, n2, notes) => writeJsonFile(notesPath(project, n2), NotesFileSchema, { version: 1, notes }, `episodes/${n2}/notes.json`);
     sentError = () => new MirageError("BAD_INPUT", "This note was already sent.", "Add a new note instead.");
   }
 });
 
 // packages/core/src/mirage/reports.ts
-function checkReport({ episode: ep, warnings, notes, problems = [] }) {
+function checkReport({ episode: ep, warnings, notes, problems = [], playbook = [] }) {
   const lines = [];
   for (const l of layoutTimeline(ep)) {
     const it = l.item;
@@ -34997,6 +37316,7 @@ function checkReport({ episode: ep, warnings, notes, problems = [] }) {
   lines.push(...problems);
   for (const m of notes) lines.push(`\u2022 ${m}`);
   for (const w of warnings) lines.push(`\u26A0 ${w}`);
+  lines.push(...playbook);
   return lines;
 }
 function ingestReport(r) {
@@ -35031,12 +37351,12 @@ async function updateSlots(project, n2) {
 function slotsReport({ slots, moved, dropped }) {
   const lines = [];
   for (const s of slots) {
-    const words = wordCount(s.line);
+    const words = wordCount2(s.line);
     const over = words > s.maxWords ? `  \u26A0 over budget (${words} > ${s.maxWords} words)` : "";
-    lines.push(`  ${s.id}  ${range2(s)} s  \u2264${s.maxWords} words  ${s.line || "(no line yet)"}${over}`);
+    lines.push(`  ${s.id}  ${range3(s)} s  \u2264${s.maxWords} words  ${s.line || "(no line yet)"}${over}`);
   }
-  for (const m of moved) lines.push(`\u26A0 moved line (was ${m.from.id} ${range2(m.from)}, now ${m.to.id} ${range2(m.to)}): "${m.line}" \u2014 it followed its picture; check it still fits`);
-  for (const s of dropped) lines.push(`\u26A0 dropped line (was ${s.id} ${range2(s)}): "${s.line}"`);
+  for (const m of moved) lines.push(`\u26A0 moved line (was ${m.from.id} ${range3(m.from)}, now ${m.to.id} ${range3(m.to)}): "${m.line}" \u2014 it followed its picture; check it still fits`);
+  for (const s of dropped) lines.push(`\u26A0 dropped line (was ${s.id} ${range3(s)}): "${s.line}"`);
   for (const s of slots) {
     if (notEnglish(s.line)) lines.push(`\u26A0 ${s.id}'s line isn't in English \u2014 voice-over matching supports English only for now`);
     else if (s.line.trim() && !hasWords(s.line)) lines.push(`\u26A0 ${s.id}'s line has no words to read ("${s.line}") \u2014 write words, or leave it empty`);
@@ -35070,7 +37390,7 @@ function speakReport(r, n2, voice) {
     ...voReport(r.report, n2, "speak")
   ];
 }
-var range2, wordCount;
+var range3, wordCount2;
 var init_reports = __esm({
   "packages/core/src/mirage/reports.ts"() {
     "use strict";
@@ -35081,8 +37401,8 @@ var init_reports = __esm({
     init_slots();
     init_timeline();
     init_voiceover();
-    range2 = (s) => `${s.start.toFixed(1)}\u2013${s.end.toFixed(1)}`;
-    wordCount = (text) => text.split(/\s+/).filter(Boolean).length;
+    range3 = (s) => `${s.start.toFixed(1)}\u2013${s.end.toFixed(1)}`;
+    wordCount2 = (text) => text.split(/\s+/).filter(Boolean).length;
   }
 });
 
@@ -35127,7 +37447,7 @@ var init_report = __esm({
 });
 
 // packages/core/src/mirage/one-line.ts
-function oneLine(text, max = 1e3) {
+function oneLine2(text, max = 1e3) {
   const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
@@ -35137,302 +37457,204 @@ var init_one_line = __esm({
   }
 });
 
-// packages/core/src/mirage/thumbnail.ts
-import { randomUUID as randomUUID9 } from "node:crypto";
-import { existsSync as existsSync11, statSync as statSync6 } from "node:fs";
-import { mkdir as mkdir10, mkdtemp as mkdtemp2, readdir as readdir9, readFile as readFile9, rename as rename7, rm as rm12, writeFile as writeFile8 } from "node:fs/promises";
-import { tmpdir as tmpdir3 } from "node:os";
-import { join as join21 } from "node:path";
-function thumbCandidates(ep, catalog, loudness, max = MAX_CANDIDATES) {
-  const laid = layoutTimeline(ep);
-  const fps = ep.output.fps;
-  const duration3 = laid.length ? laid[laid.length - 1].end : 0;
-  const frames = laid.reduce((n2, l) => n2 + l.frames, 0);
-  const clips = new Map(catalog.clips.map((c3) => [c3.id, c3]));
-  const picks = [];
-  const add = (at2, reason) => {
-    const f = outputFrame(at2, fps);
-    if (picks.length >= max || at2 < -EPS5 || f < 0 || f >= frames) return;
-    const t = frameTime(f, fps);
-    if (picks.some((p) => Math.abs(p.t - t) < MIN_GAP_SEC - EPS5)) return;
-    picks.push({ t, reason });
-  };
-  for (const l of laid) {
-    const item = l.item;
-    if (isCard(item)) continue;
-    const moments = (clips.get(item.clip)?.moments ?? []).filter((m) => m.t >= item.src.in && m.t < item.src.out).sort((a2, b) => a2.t - b.t);
-    for (const m of moments) add(l.start + (m.t - item.src.in) / item.speed, `moment: ${m.label}`);
+// packages/core/src/mirage/predict.ts
+import { existsSync as existsSync15 } from "node:fs";
+import { join as join28 } from "node:path";
+function sitsWith(value, better, weaker) {
+  const d = Math.abs(better - weaker);
+  const towardsBetter = better > weaker ? value - weaker : weaker - value;
+  return towardsBetter >= 2 * d / 3 ? "better" : towardsBetter <= d / 3 ? "weaker" : "between";
+}
+function bandOf(sits) {
+  if (!sits.length) return null;
+  const net = (sits.filter((s) => s === "better").length - sits.filter((s) => s === "weaker").length) / sits.length;
+  return net > BAND_MARGIN ? "above" : net < -BAND_MARGIN ? "below" : "around";
+}
+function platformRules(p, cut) {
+  const rules = [];
+  const add = (rule, status, text) => rules.push({ rule, status, text });
+  add("length", cut.lengthSec <= p.limitSec + 1e-6 ? "met" : "missed", `${formatTime(cut.lengthSec)} long \u2014 ${p.limit}`);
+  const opening = cut.measured.find((r) => r.rule === "opening");
+  const first = cut.measured.find((r) => r.rule === "firstWord");
+  if (opening?.status === "missed") add("opening", "missed", `${opening.text} \u2014 ${p.opening}`);
+  else if (!cut.wordsKnown) add("opening", "unmeasured", `the opening: not measured \u2014 the cut's words are not known (${p.opening})`);
+  else if (cut.firstWordSec === null) add("opening", p.openingSec === null ? first?.status ?? "unmeasured" : "missed", `opens on the picture, and no word is spoken \u2014 ${p.opening}`);
+  else {
+    const ok = p.openingSec === null ? first?.status !== "missed" : cut.firstWordSec <= p.openingSec + 1e-6;
+    add("opening", ok ? "met" : "missed", `opens on the picture, its first word at ${cut.firstWordSec.toFixed(1)} s \u2014 ${p.opening}`);
   }
-  for (const l of laid) {
-    const item = l.item;
-    if (isCard(item) || item.audio !== "keep" || item.speed !== 1) continue;
-    const shown2 = l.start + l.srcFrames / ep.output.fps;
-    let best = null;
-    for (const s of loudness) {
-      if (s.t < l.start - EPS5 || s.t >= shown2 - EPS5 || !(s.lufs > SILENT_LUFS2)) continue;
-      if (!best || s.lufs > best.lufs) best = s;
+  const ending = cut.measured.find((r) => r.rule === "ending");
+  if (ending) add("ending", ending.status, ending.text);
+  if (!p.covered) add("covered", "unmeasured", "the covered areas: not measured \u2014 TikTok publishes no fixed margins (check holds the cut to the Shorts and Reels areas only)");
+  else if (cut.covered) add("covered", "missed", `${cut.covered} caption${cut.covered === 1 ? " or overlay falls" : "s or overlays fall"} where the app's buttons cover the picture \u2014 check names each`);
+  else add("covered", "met", "no caption or overlay falls where the app's buttons cover the picture");
+  add("unseen", "unmeasured", `not measurable from a cut: ${p.unseen}`);
+  return { platform: p.id, rules };
+}
+async function predictVideo(project, n2, o2) {
+  const dir = episodeDir(project, n2);
+  if (!existsSync15(dir)) throw new MirageError("BAD_INPUT", `there is no video ${n2}`, "Run status to see the videos.");
+  const video = await readVideo(project, n2);
+  const format2 = formatOf(video, loadFormats(o2.formatsDir).formats);
+  const at4 = (o2.now?.() ?? /* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const episode = await loadEpisode(project, n2);
+  const { playbook, overrides } = playbookFor(format2, loadFormulas(o2.formulasDir ?? formulasDir(), project).formulas);
+  const series = await seriesOf(project, n2);
+  const measured = await measurePlaybook(project, n2, { episode, catalog: await loadCatalog(project), video, format: format2, playbook, overrides });
+  const features = await cutFeatures(project, n2, video, format2, at4);
+  const cut = existsSync15(join28(dir, "final.mp4")) ? "final" : existsSync15(join28(dir, "rough.mp4")) ? "rough" : "timeline";
+  let changed = null;
+  if (cut !== "timeline") {
+    const file2 = `${cut}.mp4`;
+    const probe2 = await o2.tools.probe(join28(dir, file2));
+    const rendered = probe2.videoDurationSec ?? probe2.durationSec;
+    if (Math.abs(rendered - features.lengthSec) > 0.1 + 5e-3) {
+      changed = `\u26A0 the timeline is ${features.lengthSec.toFixed(1)} s long and ${file2} is ${rendered.toFixed(1)} s \u2014 the timeline changed after that render, so this forecast is of the timeline, not of the file: render again before posting`;
     }
-    if (best) add(best.t, `loudest moment of item ${item.id}`);
   }
-  for (const l of laid) {
-    if (THUMB_BEATS.includes(l.item.beat)) add((l.start + l.end) / 2, `${l.item.beat} beat (item ${l.item.id})`);
+  const results = [...measured.results];
+  if (!format2.short) {
+    results.push(features.thumbnail.exists ? { rule: "thumbnail", status: "met", text: `a thumbnail is written (episodes/${n2}/thumbnail.jpg)` } : { rule: "thumbnail", status: "missed", text: "no thumbnail yet \u2014 the click is on the title and the thumbnail", moments: [{ where: `episodes/${n2}/thumbnail.jpg`, change: "pick a frame with the thumbnail tool and write the thumbnail" }] });
   }
-  for (const n2 of [max, max * 2, max * 4, max * 8]) {
-    for (let i2 = 0; i2 < n2; i2++) add(duration3 * (i2 + 0.5) / n2, "even spacing");
-    if (picks.length >= max) break;
-  }
-  return picks;
-}
-async function cutLoudness(file2, tools, o2 = {}) {
-  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
-  try {
-    const af = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,ebur128=metadata=1,ametadata=mode=print:file=loudness.txt";
-    await tools.runFfmpeg(["-i", file2, "-vn", "-af", af, "-f", "null", "-"], { cwd: work, signal: o2.signal });
-    const text = await readFile9(join21(work, "loudness.txt"), "utf8");
-    const out = [];
-    let at2 = null;
-    for (const line of text.split(/\r?\n/)) {
-      const frame = /pts_time:(\S+)/.exec(line);
-      if (frame) at2 = Number(frame[1]);
-      const m = /^lavfi\.r128\.M=(\S+)$/.exec(line);
-      if (m && at2 !== null && Number.isFinite(at2)) {
-        const lufs2 = Number(m[1]);
-        const end = at2 + STEP_SEC;
-        if (Number.isFinite(lufs2)) out.push({ t: ms((Math.max(0, end - WINDOW_SEC) + end) / 2), lufs: lufs2 });
-      }
-    }
-    return out;
-  } finally {
-    await rm12(work, { recursive: true, force: true });
-  }
-}
-async function openElsewhere(op, shown2) {
-  try {
-    return await op;
-  } catch (e) {
-    const code = e.code;
-    if (code === "EBUSY" || code === "EPERM") throw new MirageError("BUSY", `${shown2} is open in another app`, "Close it there, then run thumbnail again.");
-    throw e;
-  }
-}
-async function sweep(dir, pattern) {
-  const names = await readdir9(dir).catch(() => []);
-  for (const f of names) if (pattern.test(f)) await rm12(join21(dir, f), { recursive: true, force: true }).catch(() => {
+  const steps = STEPS.map((step) => {
+    const rules = results.flatMap((r) => WEIGHTS[step][r.rule] === void 0 ? [] : [{ ...r, weight: WEIGHTS[step][r.rule] }]);
+    const counted = rules.filter((r) => r.status !== "unmeasured");
+    const total = counted.reduce((sum, r) => sum + r.weight, 0);
+    const met = counted.filter((r) => r.status === "met").reduce((sum, r) => sum + r.weight, 0);
+    return { step, score: total ? Math.round(10 * met / total) : null, rules };
   });
-}
-function latestCut(dir, n2) {
-  const made = ["final.mp4", "rough.mp4"].flatMap((f) => existsSync11(join21(dir, f)) ? [{ f, at: statSync6(join21(dir, f)).mtimeMs }] : []);
-  if (!made.length) throw new MirageError("NO_EPISODE", `video ${n2} has no cut yet`, "Run cut (or render) first.");
-  return made.reduce((a2, b) => b.at > a2.at ? b : a2).f;
-}
-async function writeCandidates(project, n2, tools, o2 = {}) {
-  const dir = episodeDir(project, n2);
-  const source = latestCut(dir, n2);
-  const cut = join21(dir, source);
-  const ep = await loadEpisode(project, n2);
-  const catalog = await loadCatalog(project);
-  const probe2 = await tools.probe(cut);
-  const ownSound2 = ep.items.some((i2) => !isCard(i2) && i2.audio === "keep" && i2.speed === 1);
-  const loudness = ownSound2 && probe2.hasAudio ? await cutLoudness(cut, tools, o2) : [];
-  const laid = layoutTimeline(ep);
-  const cutSec = probe2.videoDurationSec ?? probe2.durationSec;
-  const timelineChanged = Math.abs(cutSec - laid[laid.length - 1].end) > Math.max(0.1, 1 / ep.output.fps) + EPS5;
-  const picks = thumbCandidates(ep, catalog, loudness).filter((p) => p.t < cutSec - 1 / ep.output.fps);
-  await sweep(dir, LEFT_CANDIDATES);
-  const work = await mkdtemp2(join21(dir, ".thumbs-"));
-  try {
-    const frames = [];
-    for (const [i2, p] of picks.entries()) {
-      const file2 = `cand-${String(i2 + 1).padStart(2, "0")}.jpg`;
-      const seek = Math.max(0, p.t - 1 / ep.output.fps);
-      await tools.runFfmpeg(["-accurate_seek", "-ss", ffNum(seek), "-i", cut, "-vf", JPEG_COLOUR, "-frames:v", "1", "-q:v", "2", join21(work, file2)], { signal: o2.signal });
-      if (!existsSync11(join21(work, file2))) throw new MirageError("BAD_INPUT", `${source} has no picture at ${p.t.toFixed(1)} s`, `Render video ${n2} again (cut or render), then pick frames.`);
-      frames.push({ ...p, file: file2 });
-    }
-    o2.signal?.throwIfAborted();
-    const thumbs = join21(dir, "thumbs");
-    await mkdir10(thumbs, { recursive: true });
-    for (const f of await readdir9(thumbs)) if (CAND_FILE.test(f)) await openElsewhere(rm12(join21(thumbs, f), { force: true }), `episodes/${n2}/thumbs/${f}`);
-    for (const f of frames) await openElsewhere(rename7(join21(work, f.file), join21(thumbs, f.file)), `episodes/${n2}/thumbs/${f.file}`);
-    return { source, timelineChanged, frames };
-  } finally {
-    await rm12(work, { recursive: true, force: true });
+  const scored = steps.filter((s) => s.score !== null && s.score < 10);
+  const weakest = scored.length ? scored.reduce((a2, b) => b.score < a2.score ? b : a2).step : null;
+  const order = [...steps].sort((a2, b) => Number(b.step === weakest) - Number(a2.step === weakest) || (a2.score ?? 10) - (b.score ?? 10));
+  const moments = order.flatMap((s) => [...s.rules].sort((a2, b) => b.weight - a2.weight).flatMap((r) => r.status === "missed" ? (r.moments ?? []).map((m) => ({ step: s.step, rule: r.rule, ...m })) : [])).slice(0, MOMENTS);
+  const evidence = await readJsonFile(join28(resultsDir(project), "evidence.json"), EvidenceSchema, "results/evidence.json").catch((e) => {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  });
+  const history = evidence?.formats.find((f) => f.format === format2.id);
+  const postedVideos2 = history?.videos.length ?? 0;
+  const compared = [];
+  for (const h2 of history?.halves?.features ?? []) {
+    const value = features[h2.feature];
+    if (typeof value !== "number" || h2.better === null || h2.weaker === null || h2.better === h2.weaker) continue;
+    compared.push({ feature: h2.feature, value, better: h2.better, weaker: h2.weaker, sits: sitsWith(value, h2.better, h2.weaker) });
   }
-}
-function formatThumbTime(t) {
-  const tenths = Math.round(t * 10);
-  return `${Math.floor(tenths / 600)}:${(tenths % 600 / 10).toFixed(1).padStart(4, "0")}`;
-}
-function candidatesReport(n2, r) {
-  return [
-    `wrote ${r.frames.length} candidate frames to episodes/${n2}/thumbs/ (from ${r.source})`,
-    ...r.frames.map((f) => `${f.file}  ${formatThumbTime(f.t)}  at ${secs(f.t)}  ${f.reason}`),
-    ...r.timelineChanged ? [`\u26A0 the timeline changed after ${r.source} was made \u2014 run cut again for frames that match`] : []
-  ];
-}
-function thumbSize(output2) {
-  return output2.width > output2.height ? { width: 1280, height: 720 } : { width: 1080, height: 1920 };
-}
-function thumbSource(ep, at2) {
-  const fps = ep.output.fps;
-  const laid = layoutTimeline(ep);
-  const total = laid.reduce((f, l) => f + l.frames, 0);
-  const outside = () => new MirageError("BAD_INPUT", `${at2} s is outside the video (0\u2013${secs(total / fps)} s)`, "");
-  if (!Number.isFinite(at2) || at2 < 0) throw outside();
-  const frame = outputFrame(at2, fps);
-  let first = 0;
-  for (const l of laid) {
-    if (frame < first + l.frames) {
-      if (isCard(l.item)) return { laid: l, card: true };
-      const { src, speed } = l.item;
-      return { laid: l, src: src.in + Math.min(frame - first, l.srcFrames) * speed / fps, frame: frame - first };
-    }
-    first += l.frames;
+  const band2 = history?.halves ? bandOf(compared.map((c3) => c3.sits)) : null;
+  const platforms = format2.short ? PLATFORMS.map((p) => platformRules(p, { lengthSec: features.lengthSec, firstWordSec: features.firstWordSec, wordsKnown: features.wordsPerMin !== null, measured: measured.results, covered: coveredWarnings(episode).length })) : null;
+  const prediction = {
+    version: 1,
+    video: n2,
+    at: at4,
+    format: format2.id,
+    cut,
+    lengthSec: features.lengthSec,
+    steps: steps.map((s) => ({ step: s.step, score: s.score, rules: s.rules.map((r) => ({ rule: r.rule, status: r.status, weight: r.weight })) })),
+    weakest,
+    moments,
+    band: band2,
+    postedVideos: postedVideos2,
+    features: compared,
+    ...platforms ? { platforms } : {}
+  };
+  await writeJsonFile(predictionFile(project, n2), PredictionSchema, prediction, `episodes/${n2}/prediction.json`);
+  const yours = overrides.length ? `, with your ${format2.id}-mine formula's ${overrides.join(", ")}` : "";
+  const lines = [`Forecast for video ${n2}${video ? ` \u201C${video.title}\u201D` : ""}${series ? `, series \u201C${series.name}\u201D` : ""} (${format2.id}${yours}), from ${CUT_TEXT[cut]}: an approximate reading of the cut against the playbook \u2014 not a promise, and not a view count`];
+  for (const s of steps) {
+    const [name, question] = STEP_TEXT[s.step];
+    lines.push(`${name} (${question}): ${s.score === null ? "not scored \u2014 none of its rules could be measured" : `${s.score}/10`}`);
+    for (const r of s.rules) lines.push(`  ${playbookLine(r)}`);
   }
-  throw outside();
-}
-function thumbFraming(l, frame, fps) {
-  const item = l.item;
-  const at2 = moveFrames(item, l.frames, fps, l.clock)[Math.min(Math.max(0, frame), l.frames - 1)] ?? { zoom: item.zoom, x: item.focus.x, y: item.focus.y };
-  return { zoom: at2.zoom, focus: { x: at2.x, y: at2.y } };
-}
-function thumbCrop(o2) {
-  const { width: W, height: H } = o2.thumb;
-  const z2 = ffNum(o2.zoom);
-  const [vw, vh] = o2.frame === "fill" ? [`min(iw,ih*${o2.output.width}/${o2.output.height})/${z2}`, `min(ih,iw*${o2.output.height}/${o2.output.width})/${z2}`] : [`iw/${z2}`, `ih/${z2}`];
-  return `crop=w='min(${vw},${vh}*${W}/${H})':h='min(${vh},${vw}*${H}/${W})':x='(iw-ow)*${ffNum(o2.focus.x)}':y='(ih-oh)*${ffNum(o2.focus.y)}'`;
-}
-function thumbWordCount(text) {
-  return tidy(text).split(/\s+/).filter((w) => HAS_WORD2.test(w)).length;
-}
-function thumbnailAss(width, height, text) {
-  const px = scaler(width, height);
-  const side = Math.round(width * 0.05);
-  return [
-    "[Script Info]",
-    "ScriptType: v4.00+",
-    `PlayResX: ${width}`,
-    `PlayResY: ${height}`,
-    "WrapStyle: 0",
-    "ScaledBorderAndShadow: yes",
-    "",
-    "[V4+ Styles]",
-    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    // The bundled face is heavy already: no faux bold.
-    `Style: Thumb,${CAPTION_FONT},${px(150)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${px(10)},0,5,${side},${side},0,1`,
-    "",
-    "[Events]",
-    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    `Dialogue: 0,0:00:00.00,0:00:${CARD_SEC}.00,Thumb,,0,0,0,,{\\pos(${Math.round(width / 2)},${Math.round(width > height ? height * 5 / 6 : height * 0.6)})}${assDraw(text.toUpperCase())}`,
-    ""
-  ].join("\n");
-}
-async function writeThumbnail(project, n2, o2, tools, run2 = {}) {
-  const words = o2.text === void 0 ? 0 : thumbWordCount(o2.text);
-  if (words > MAX_THUMB_WORDS) throw new MirageError("BAD_INPUT", `thumbnail text is ${words} words \u2014 keep it to ${MAX_THUMB_WORDS} or fewer`, "");
-  if (o2.focus && ![o2.focus.x, o2.focus.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
-    throw new MirageError("BAD_INPUT", "focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)", "");
+  lines.push(weakest ? `Weakest step: ${STEP_TEXT[weakest][0]}` : steps.some((s) => s.score !== null) ? "No step is weak against the playbook" : "No step could be scored");
+  if (moments.length) {
+    lines.push(`Moments to fix, the weakest step's first:`);
+    moments.forEach((m, i2) => lines.push(`  ${i2 + 1}. ${m.where}: ${m.change}`));
   }
-  const dir = episodeDir(project, n2);
-  const ep = await loadEpisode(project, n2);
-  const fps = ep.output.fps;
-  const shown2 = thumbSource(ep, o2.at);
-  const { width: W, height: H } = thumbSize(ep.output);
-  const look = "unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08";
-  const fontsDir = filterValue(bundledFontsDir());
-  const scripts = [];
-  let input2;
-  let picture;
-  let from;
-  let where;
-  if ("card" in shown2) {
-    const item = shown2.laid.item;
-    const focus = o2.focus ?? { x: 0.5, y: 0.5 };
-    if (item.card.style === "image") {
-      const pic = cardImagesFor(project, { ...ep, items: [item] }).get(item.id);
-      input2 = cardPictureInput(pic, fps);
-      picture = `${cardPicture(pic, { width: W, height: H }, 0, focus)},${look}`;
-    } else {
-      input2 = ["-f", "lavfi", "-i", `color=c=black:s=${W}x${H}:r=${ffNum(fps)}:d=1`];
-      picture = "setsar=1";
+  if (history?.halves) {
+    lines.push(`Against your ${postedVideos2} posted ${format2.id} videos (the middle of the better half and of the weaker half, from learn):`);
+    for (const c3 of compared) {
+      const [label, text] = COMPARED[c3.feature];
+      lines.push(`  ${label}: ${text(c3.value)} \u2014 ${c3.sits === "between" ? "between the halves" : `with the ${c3.sits} half`} (better half ${text(c3.better)} \xB7 weaker half ${text(c3.weaker)})`);
     }
-    if (item.card.text.trim()) {
-      scripts.push(["card.ass", buildAss({ width: W, height: H, captions: [], overlays: [], prompts: [], cards: [{ start: 0, end: CARD_SEC, card: item.card }] })]);
-    }
-    from = "card";
-    where = { name: `card ${item.id}`, hint: `Check card ${item.id} (run check), then write the thumbnail again.` };
+    const count2 = (side) => compared.filter((c3) => c3.sits === side).length;
+    lines.push(band2 ? `Band: ${band2} your usual for ${format2.id} (${count2("better")} with the better half, ${count2("weaker")} with the weaker, ${count2("between")} between) \u2014 what goes with better results, not proof of cause` : `No band: the better and weaker halves of your posted ${format2.id} videos don't differ on any number this cut has`);
   } else {
-    const item = shown2.laid.item;
-    const catalog = await loadCatalog(project);
-    const src = sourcesFor({ ...ep, items: [item] }, catalog).get(item.clip);
-    const videoEnd = (() => {
-      const p = catalog.clips.find((c3) => c3.id === item.clip).probe;
-      return p.videoDurationSec ?? p.durationSec;
-    })();
-    const from0 = Math.max(0, Math.min(shown2.src - item.speed / fps, videoEnd - 1));
-    const back = shown2.src - from0;
-    const k = Math.max(0, Math.ceil(back * fps / item.speed - 1e-6));
-    input2 = readFrom(src, from0);
-    const framing = thumbFraming(shown2.laid, shown2.frame, fps);
-    const crop = thumbCrop({ frame: item.frame, zoom: framing.zoom, focus: o2.focus ?? framing.focus, output: ep.output, thumb: { width: W, height: H } });
-    picture = `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',${crop},scale=${W}:${H}:flags=lanczos,setsar=1,${look}`;
-    from = { clip: item.clip, src: ms(shown2.src) };
-    where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
+    const have = postedVideos2 ? `${plural3(postedVideos2, `posted ${format2.id} video`)} ${postedVideos2 === 1 ? "has" : "have"} results` : `no posted ${format2.id} video has results yet`;
+    lines.push(`No band: this forecast compares against the playbook only \u2014 ${have}, and ${MIN_TO_COMPARE} are needed (${MIN_TO_COMPARE - Math.min(postedVideos2, MIN_TO_COMPARE)} more)`);
   }
-  if (o2.text !== void 0 && tidy(o2.text) !== "") scripts.push(["thumbnail.ass", thumbnailAss(W, H, o2.text)]);
-  const vf = [picture, ...scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : [], ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`), JPEG_COLOUR].join(",");
-  const file2 = join21(dir, "thumbnail.jpg");
-  await sweep(dir, LEFT_THUMBNAIL);
-  const part = join21(dir, `.thumbnail-${randomUUID9().slice(0, 8)}.jpg`);
-  const work = await mkdtemp2(join21(tmpdir3(), "mirage-thumb-"));
-  try {
-    for (const [name, text] of scripts) await writeFile8(join21(work, name), text);
-    await tools.runFfmpeg([...input2, "-vf", vf, "-frames:v", "1", "-q:v", "2", part], { cwd: work, signal: run2.signal });
-    if (!existsSync11(part)) throw new MirageError("BAD_INPUT", `${"card" in shown2 ? where.name : `${where.name} at ${secs(shown2.src)} s`} gave no picture`, where.hint);
-    run2.signal?.throwIfAborted();
-    await openElsewhere(rename7(part, file2), `episodes/${n2}/thumbnail.jpg`);
-  } finally {
-    await rm12(part, { force: true });
-    await rm12(work, { recursive: true, force: true });
+  if (platforms) {
+    lines.push("Per platform, the same cut against what each platform itself says (formulas youtube, instagram and tiktok) \u2014 no platform publishes weights, so these are not scores:");
+    for (const p of platforms) {
+      lines.push(`  ${PLATFORMS.find((x) => x.id === p.platform).name}:`);
+      for (const r of p.rules) lines.push(`    ${playbookLine(r)}`);
+    }
   }
-  return { file: file2, width: W, height: H, from };
+  if (changed) lines.push(changed);
+  lines.push(`wrote episodes/${n2}/prediction.json`);
+  lines.push(moments.length ? "Fix the weakest moments, run predict again, then post." : "Nothing to fix against the playbook.");
+  return lines;
 }
-function thumbnailReport(n2, r) {
-  const from = r.from === "card" ? "the card" : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
-  return `wrote episodes/${n2}/thumbnail.jpg (${r.width}\xD7${r.height}, from ${from})`;
-}
-var MAX_CANDIDATES, MIN_GAP_SEC, THUMB_BEATS, SILENT_LUFS2, WINDOW_SEC, STEP_SEC, EPS5, ms, secs, outputFrame, frameTime, CAND_FILE, JPEG_COLOUR, LEFT_CANDIDATES, LEFT_THUMBNAIL, CARD_SEC, MAX_THUMB_WORDS, HAS_WORD2;
-var init_thumbnail = __esm({
-  "packages/core/src/mirage/thumbnail.ts"() {
+var WEIGHTS, BAND_MARGIN, MOMENTS, plural3, PLATFORMS, CUT_TEXT;
+var init_predict = __esm({
+  "packages/core/src/mirage/predict.ts"() {
     "use strict";
-    init_src();
-    init_encode();
+    init_check();
     init_errors4();
-    init_fonts();
+    init_formats();
+    init_formulas();
     init_ingest();
-    init_cards();
-    init_overlays();
+    init_json_file();
+    init_learn();
+    init_playbook();
+    init_prediction();
     init_render_episode();
-    init_move();
+    init_series2();
     init_timeline();
-    MAX_CANDIDATES = 12;
-    MIN_GAP_SEC = 1;
-    THUMB_BEATS = ["truth", "headline", "payoff", "twist", "reveal"];
-    SILENT_LUFS2 = -70;
-    WINDOW_SEC = 0.4;
-    STEP_SEC = 0.1;
-    EPS5 = 1e-9;
-    ms = (t) => Math.round(t * 1e3) / 1e3;
-    secs = (n2) => String(ms(n2));
-    outputFrame = (t, fps) => Math.floor(t * fps + 1e-6);
-    frameTime = (f, fps) => (f + 0.5) / fps;
-    CAND_FILE = /^cand-\d+\.jpg$/;
-    JPEG_COLOUR = "scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p";
-    LEFT_CANDIDATES = /^\.thumbs-/;
-    LEFT_THUMBNAIL = /^\.thumbnail-[^/\\]*\.jpg$/;
-    CARD_SEC = 10;
-    MAX_THUMB_WORDS = 4;
-    HAS_WORD2 = /[\p{L}\p{N}]/u;
+    init_video2();
+    WEIGHTS = {
+      chosen: { idea: 3, firstWord: 3, title: 3, opening: 2, thumbnail: 2 },
+      stayed: { empty: 3, answerPlace: 3, pace: 2, words: 2 },
+      satisfied: { answer: 4, ending: 3, length: 2 }
+    };
+    BAND_MARGIN = 1 / 3;
+    MOMENTS = 5;
+    plural3 = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`;
+    PLATFORMS = [
+      {
+        id: "youtube",
+        name: "YouTube Shorts",
+        limitSec: 180,
+        limit: "YouTube takes Shorts up to 3:00",
+        openingSec: null,
+        covered: true,
+        opening: "YouTube names no number: there is no click, so the opening is the whole pitch",
+        unseen: "viewed vs swiped away, the percentage viewed and likes (YouTube Studio shows them once it is posted)"
+      },
+      {
+        id: "instagram",
+        name: "Instagram Reels",
+        limitSec: 180,
+        limit: "Instagram recommends reels of 3:00 or less to people who don't follow the account",
+        openingSec: 3,
+        covered: true,
+        opening: "Instagram says to make the first 3 seconds engaging; whether they are is not something a cut shows",
+        unseen: "sends, watch time and likes, whether the sound is on or trending, a watermark of another app in the footage, and whether Instagram counts it as original (the app's insights show the numbers once it is posted)"
+      },
+      {
+        id: "tiktok",
+        name: "TikTok",
+        limitSec: 180,
+        limit: "every TikTok account can post up to 3:00 (some up to 10:00)",
+        openingSec: 3,
+        covered: false,
+        opening: "TikTok, in its advice to advertisers, puts the point in the first 3 seconds; whether it lands is not something a cut shows",
+        unseen: "whether viewers finish it (TikTok's strongest stated signal), shares, comments, the sound, the caption and hashtags, and whether TikTok counts it as original (the app's analytics show the numbers once it is posted)"
+      }
+    ];
+    CUT_TEXT = {
+      final: "the final render",
+      rough: "the rough cut (there is no final render yet)",
+      timeline: "the timeline (nothing is rendered yet)"
+    };
   }
 });
 
@@ -35469,6 +37691,13 @@ var init_mirage = __esm({
     init_cards();
     init_formats();
     init_thumbnail();
+    init_formulas();
+    init_channel();
+    init_learn();
+    init_playbook();
+    init_prediction();
+    init_predict();
+    init_series2();
   }
 });
 
@@ -35476,14 +37705,26 @@ var init_mirage = __esm({
 var src_exports2 = {};
 __export(src_exports2, {
   AUDIO_EXTENSIONS: () => AUDIO_EXTENSIONS,
+  BANDS: () => BANDS,
   BUILTIN_SFX: () => BUILTIN_SFX,
+  CHANGES_FILE: () => CHANGES_FILE,
   CHUNK_ITEMS: () => CHUNK_ITEMS,
   CHUNK_ITEMS_LARGE: () => CHUNK_ITEMS_LARGE,
+  COMPARED: () => COMPARED,
+  ChannelFileSchema: () => ChannelFileSchema,
+  DEFAULT_FACE_SHARE: () => DEFAULT_FACE_SHARE,
+  DEFAULT_VIDEOS: () => DEFAULT_VIDEOS,
   DELIVERY_LABEL: () => DELIVERY_LABEL,
+  EvidenceSchema: () => EvidenceSchema,
+  FEATURE_KEYS: () => FEATURE_KEYS,
   FILLERS: () => FILLERS,
+  FeaturesSchema: () => FeaturesSchema,
   FormatSchema: () => FormatSchema,
+  FormulaSchema: () => FormulaSchema,
   JPEG_COLOUR: () => JPEG_COLOUR,
   JsonFileError: () => JsonFileError,
+  LATEST: () => LATEST,
+  LIST: () => LIST,
   MAX_BACKUPS: () => MAX_BACKUPS,
   MAX_CANDIDATES: () => MAX_CANDIDATES,
   MAX_CHECKPOINTS: () => MAX_CHECKPOINTS,
@@ -35491,20 +37732,32 @@ __export(src_exports2, {
   MAX_PERSON_SFX_SEC: () => MAX_PERSON_SFX_SEC,
   MAX_SPEEDUP: () => MAX_SPEEDUP,
   MAX_THUMB_WORDS: () => MAX_THUMB_WORDS,
+  MAX_VIDEOS: () => MAX_VIDEOS,
   MIN_GAP_SEC: () => MIN_GAP_SEC,
+  MIN_TO_COMPARE: () => MIN_TO_COMPARE,
   MirageError: () => MirageError,
   NARRATION_GAPS: () => NARRATION_GAPS,
   OVERLAY_STYLE: () => OVERLAY_STYLE,
   PAD_SEC: () => PAD_SEC,
   PASS: () => PASS,
   PEAK_DB: () => PEAK_DB,
+  PLATFORMS: () => PLATFORMS,
+  PlaybookSchema: () => PlaybookSchema,
+  PredictionSchema: () => PredictionSchema,
+  READS: () => READS,
   RECIPES: () => RECIPES,
+  ResultsSchema: () => ResultsSchema,
   SFX_EXTENSIONS: () => SFX_EXTENSIONS,
   SFX_RECIPE_VERSION: () => SFX_RECIPE_VERSION,
   SPEECH_PAD_SEC: () => SPEECH_PAD_SEC,
   SR: () => SR,
+  STEPS: () => STEPS,
+  STEP_TEXT: () => STEP_TEXT,
+  THUMBNAIL_RECORD: () => THUMBNAIL_RECORD,
   THUMB_BEATS: () => THUMB_BEATS,
   VIDEO_EXTENSIONS: () => VIDEO_EXTENSIONS,
+  WEIGHTS: () => WEIGHTS,
+  addEpisode: () => addEpisode,
   addNote: () => addNote,
   alignWritten: () => alignWritten,
   analyzeLibrary: () => analyzeLibrary,
@@ -35513,18 +37766,24 @@ __export(src_exports2, {
   asCancelled: () => asCancelled,
   assDraw: () => assDraw,
   assembleNarration: () => assembleNarration,
+  bandOf: () => bandOf,
   bitrateFor: () => bitrateFor,
   buildAss: () => buildAss,
   buildReport: () => buildReport,
   buildVoiceTrack: () => buildVoiceTrack,
   builtinSfx: () => builtinSfx,
   candidatesReport: () => candidatesReport,
+  captionsReport: () => captionsReport,
   cardImageFile: () => cardImageFile,
   cardImagesFor: () => cardImagesFor,
   cardLabel: () => cardLabel,
   cardPicture: () => cardPicture,
   cardPictureInput: () => cardPictureInput,
   carrySlots: () => carrySlots,
+  channelAddress: () => channelAddress,
+  channelCaptions: () => channelCaptions,
+  channelPatterns: () => channelPatterns,
+  channelThumbnails: () => channelThumbnails,
   checkCardImages: () => checkCardImages,
   checkCueFiles: () => checkCueFiles,
   checkEpisode: () => checkEpisode,
@@ -35534,13 +37793,19 @@ __export(src_exports2, {
   chunkSize: () => chunkSize,
   chunkTimeoutMs: () => chunkTimeoutMs,
   clearProgress: () => clearProgress,
+  clockText: () => clockText,
   commandLength: () => commandLength,
   computeSlots: () => computeSlots,
+  confidence: () => confidence,
+  countsText: () => countsText,
+  coveredWarnings: () => coveredWarnings,
   cueTrack: () => cueTrack,
   cutChanged: () => cutChanged,
   cutChangedError: () => cutChangedError,
+  cutFeatures: () => cutFeatures,
   cutLoudness: () => cutLoudness,
   cutOf: () => cutOf,
+  cutParts: () => cutParts,
   decodeMono: () => decodeMono,
   defaultCjkFont: () => defaultCjkFont,
   deleteNote: () => deleteNote,
@@ -35558,17 +37823,22 @@ __export(src_exports2, {
   ffNum: () => ffNum,
   fileUnreadable: () => fileUnreadable,
   filterValue: () => filterValue,
+  findSeries: () => findSeries,
   findTrack: () => findTrack,
   fitRecording: () => fitRecording,
   fitVoiceover: () => fitVoiceover,
   fittedRecordingSha: () => fittedRecordingSha,
+  forecastText: () => forecastText,
   formatOf: () => formatOf,
   formatThumbTime: () => formatThumbTime,
   formatTime: () => formatTime,
   formatsDir: () => formatsDir,
+  formulaLine: () => formulaLine,
+  formulasDir: () => formulasDir,
   frameInterval: () => frameInterval,
   frameTime: () => frameTime,
   frameTolerance: () => frameTolerance,
+  gatherChannel: () => gatherChannel,
   groupCaptions: () => groupCaptions,
   groupSpans: () => groupSpans,
   groupWords: () => groupWords,
@@ -35587,19 +37857,27 @@ __export(src_exports2, {
   jpegSize: () => jpegSize,
   keptSegments: () => keptSegments,
   layoutTimeline: () => layoutTimeline,
+  learnResults: () => learnResults,
+  lengthLimit: () => lengthLimit,
+  lengthWarning: () => lengthWarning,
   lineChangeWarnings: () => lineChangeWarnings,
   lineChanges: () => lineChanges,
   lineSentences: () => lineSentences,
+  listSeries: () => listSeries,
   listVersions: () => listVersions,
   loadCatalog: () => loadCatalog,
   loadEpisode: () => loadEpisode,
   loadFormats: () => loadFormats,
+  loadFormulas: () => loadFormulas,
   loadLibrary: () => loadLibrary,
   loadVoiceoverTranscripts: () => loadVoiceoverTranscripts,
   lockEpisode: () => lockEpisode,
+  markPosted: () => markPosted,
   matchTokens: () => matchTokens,
+  measurePlaybook: () => measurePlaybook,
   measureSfxLevel: () => measureSfxLevel,
   mergeSlots: () => mergeSlots,
+  mineId: () => mineId,
   missingSlots: () => missingSlots,
   musicReport: () => musicReport,
   musicTrackArgs: () => musicTrackArgs,
@@ -35611,52 +37889,79 @@ __export(src_exports2, {
   notEnglish: () => notEnglish,
   noteStatuses: () => noteStatuses,
   numberWords: () => numberWords,
-  oneLine: () => oneLine,
+  oneLine: () => oneLine2,
   onsetEnvelope: () => onsetEnvelope,
   outputFrame: () => outputFrame,
+  parseVideoLines: () => parseVideoLines,
+  pickVideos: () => pickVideos,
   placedStatus: () => placedStatus,
+  planSeries: () => planSeries,
   planVideo: () => planVideo,
+  playbookFor: () => playbookFor,
+  playbookLine: () => playbookLine,
+  playbookSection: () => playbookSection,
+  predictVideo: () => predictVideo,
+  predictionFile: () => predictionFile,
   previewSize: () => previewSize,
+  readAt: () => readAt,
+  readChannel: () => readChannel,
   readClaudeProcess: () => readClaudeProcess,
   readControl: () => readControl,
+  readDue: () => readDue,
   readFrom: () => readFrom,
   readJsonFile: () => readJsonFile,
   readLog: () => readLog,
   readNotes: () => readNotes,
+  readPrediction: () => readPrediction,
   readProgress: () => readProgress,
   readProject: () => readProject,
+  readSeries: () => readSeries,
   readSessionState: () => readSessionState,
   readSteps: () => readSteps,
   readVideo: () => readVideo,
   readWavMono: () => readWavMono,
   readWrittenControl: () => readWrittenControl,
+  realChannelDeps: () => realChannelDeps,
   realMediaTools: () => realMediaTools,
   refineTranscript: () => refineTranscript,
   refineWordTimes: () => refineWordTimes,
+  refreshReadme: () => refreshReadme,
   renderEpisode: () => renderEpisode,
   renderReport: () => renderReport,
+  replayPeaks: () => replayPeaks,
   requireProject: () => requireProject,
   resolveSfx: () => resolveSfx,
   resolveUserPath: () => resolveUserPath,
   restoreVersion: () => restoreVersion,
+  resultsDir: () => resultsDir,
+  resultsLine: () => resultsLine,
   revertHolds: () => revertHolds,
   sameFileName: () => sameFileName,
   saveCatalog: () => saveCatalog,
   saveEpisode: () => saveEpisode,
   scaler: () => scaler,
+  scoresText: () => scoresText,
   sendNotes: () => sendNotes,
   sentenceTokens: () => sentenceTokens,
   sentenceWords: () => sentenceWords,
+  seriesDir: () => seriesDir,
+  seriesLine: () => seriesLine,
+  seriesOf: () => seriesOf,
+  seriesReport: () => seriesReport,
+  seriesSlug: () => seriesSlug,
   sessionDir: () => sessionDir,
   sfxDir: () => sfxDir,
   sfxSource: () => sfxSource,
   sfxTrackArgs: () => sfxTrackArgs,
   sfxVolumeDb: () => sfxVolumeDb,
   sha256File: () => sha256File,
+  sheetArgs: () => sheetArgs,
   shiftAfter: () => shiftAfter,
+  shortKind: () => shortKind,
   shotStarts: () => shotStarts,
   shotWords: () => shotWords,
   similarity: () => similarity,
+  sitsWith: () => sitsWith,
   slotsReport: () => slotsReport,
   slotsStale: () => slotsStale,
   slotsStaleError: () => slotsStaleError,
@@ -35669,6 +37974,7 @@ __export(src_exports2, {
   spillTrackArgs: () => spillTrackArgs,
   spillTrackCommands: () => spillTrackCommands,
   spilledWords: () => spilledWords,
+  splitFile: () => splitFile,
   splitScript: () => splitScript,
   splitSentences: () => splitSentences,
   spreadWords: () => spreadWords,
@@ -35685,26 +37991,35 @@ __export(src_exports2, {
   thumbnailReport: () => thumbnailReport,
   tidy: () => tidy,
   timelineDuration: () => timelineDuration,
+  titleFeatures: () => titleFeatures,
   toSrt: () => toSrt,
   touchSessionState: () => touchSessionState,
   undoFitEdits: () => undoFitEdits,
   undrawable: () => undrawable,
   unreadableSfx: () => unreadableSfx,
   updateNote: () => updateNote,
+  updateSeries: () => updateSeries,
   updateSlots: () => updateSlots,
+  videoAddress: () => videoAddress,
+  videoNumbers: () => videoNumbers,
   videoStage: () => videoStage,
+  viewsAtAge: () => viewsAtAge,
+  viewsText: () => viewsText,
   voReport: () => voReport,
   voTranscriptFile: () => voTranscriptFile,
   voiceRecordings: () => voiceRecordings,
   voicedSpan: () => voicedSpan,
   wavBytes: () => wavBytes,
+  wordsFromJson3: () => wordsFromJson3,
   writeCandidates: () => writeCandidates,
   writeClaudeProcess: () => writeClaudeProcess,
   writeControl: () => writeControl,
   writeJsonFile: () => writeJsonFile,
   writeProgress: () => writeProgress,
+  writeSeries: () => writeSeries,
   writeSessionState: () => writeSessionState,
-  writeThumbnail: () => writeThumbnail
+  writeThumbnail: () => writeThumbnail,
+  writeVideo: () => writeVideo
 });
 var init_src3 = __esm({
   "packages/core/src/index.ts"() {
@@ -35723,15 +38038,15 @@ __export(hook_exports, {
   logHookError: () => logHookError,
   runHook: () => runHook
 });
-import { appendFileSync as appendFileSync2, existsSync as existsSync12, mkdirSync as mkdirSync2, readdirSync as readdirSync2 } from "node:fs";
-import { mkdir as mkdir11, writeFile as writeFile9 } from "node:fs/promises";
-import { join as join22 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync16, mkdirSync as mkdirSync2, readdirSync as readdirSync3 } from "node:fs";
+import { mkdir as mkdir14, writeFile as writeFile11 } from "node:fs/promises";
+import { join as join29 } from "node:path";
 function logHookError(pluginData2, event2, e) {
   if (!pluginData2) return;
   try {
     mkdirSync2(pluginData2, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync2(join22(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
+    appendFileSync2(join29(pluginData2, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event2} ${msg}
 `);
   } catch {
   }
@@ -35799,7 +38114,7 @@ var init_hook = __esm({
     preDecision = (permissionDecision, reason) => result(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, ...reason === void 0 ? {} : { permissionDecisionReason: reason } } }));
     videoNumbers2 = (project) => {
       try {
-        return readdirSync2(join22(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
+        return readdirSync3(join29(project, "episodes")).filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
       } catch {
         return [];
       }
@@ -35833,7 +38148,7 @@ var init_hook = __esm({
       async session() {
         return await this.soft(() => this.core.readSessionState(this.project, this.sid)) ?? { video: null, overnight: null, awakePid: null };
       }
-      videoExists = (n2) => existsSync12(this.core.episodeDir(this.project, n2));
+      videoExists = (n2) => existsSync16(this.core.episodeDir(this.project, n2));
       /** Appends a step line for video `n`; nothing for a video that isn't there (a step needs a video's folder). */
       async step(n2, line) {
         if (n2 === null || !this.videoExists(n2)) return;
@@ -35872,7 +38187,7 @@ var init_hook = __esm({
         await this.soft(() => core.touchSessionState(project, this.sid));
         const toolInput = this.input.tool_input;
         const { label } = stepLabel(tool, toolInput);
-        const file2 = fileDecision(tool, toolInput, project, await this.footage());
+        const file2 = fileDecision(tool, toolInput, project, await this.footage(), this.deps.pluginRoot);
         const n2 = videoOf(tool, toolInput, project, await this.session());
         const deny = async (reason) => {
           await this.step(n2, this.stepLine(label, "denied"));
@@ -35936,7 +38251,7 @@ var init_hook = __esm({
         const numbers = videoNumbers2(project);
         const touched = new Set(numbers.filter((n2) => {
           try {
-            return existsSync12(core.sessionDir(project, n2, sid));
+            return existsSync16(core.sessionDir(project, n2, sid));
           } catch {
             return false;
           }
@@ -35983,8 +38298,8 @@ var init_hook = __esm({
           delivered,
           ...last ? { stoppedAt: last.label } : {}
         });
-        await mkdir11(dir, { recursive: true });
-        await writeFile9(join22(dir, "report.md"), md);
+        await mkdir14(dir, { recursive: true });
+        await writeFile11(join29(dir, "report.md"), md);
       }
     };
   }
@@ -35992,9 +38307,9 @@ var init_hook = __esm({
 
 // packages/hooks/src/main.ts
 init_project_root();
-import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync6 } from "node:fs";
-import { homedir as homedir4 } from "node:os";
-import { join as join23 } from "node:path";
+import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync7 } from "node:fs";
+import { homedir as homedir5 } from "node:os";
+import { join as join30 } from "node:path";
 
 // packages/hooks/src/setup-notice.ts
 init_setup_state();
@@ -36067,13 +38382,13 @@ function describeMissing(missing) {
   const ffmpeg = missing.includes("ffmpeg") ? "FFmpeg" : missing.includes("ffmpeg-captions") ? "FFmpeg with caption support" : missing.includes("ffprobe") ? "FFmpeg (ffprobe)" : null;
   const whisper = missing.includes("whisper-cli");
   const model = missing.includes("speech-model");
-  const names = [];
-  if (ffmpeg) names.push(ffmpeg);
-  if (whisper && model) names.push("whisper.cpp with its speech model");
-  else if (whisper) names.push("whisper.cpp");
-  else if (model) names.push("whisper.cpp's speech model");
-  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0] ?? "";
-  return { list, several: names.length > 1 };
+  const names2 = [];
+  if (ffmpeg) names2.push(ffmpeg);
+  if (whisper && model) names2.push("whisper.cpp with its speech model");
+  else if (whisper) names2.push("whisper.cpp");
+  else if (model) names2.push("whisper.cpp's speech model");
+  const list = names2.length > 1 ? `${names2.slice(0, -1).join(", ")} and ${names2[names2.length - 1]}` : names2[0] ?? "";
+  return { list, several: names2.length > 1 };
 }
 function setupNotice(o2) {
   if (o2.missing.length === 0) return null;
@@ -36097,7 +38412,7 @@ function logError2(e) {
   try {
     mkdirSync3(pluginData, { recursive: true });
     const msg = (e instanceof Error ? e.stack ?? e.message : String(e)).replace(/\s*\n\s*/g, " | ");
-    appendFileSync3(join23(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
+    appendFileSync3(join30(pluginData, "hook-errors.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${event} ${msg}
 `);
   } catch {
   }
@@ -36111,7 +38426,7 @@ function pluginVersion() {
   try {
     const root = process.env.CLAUDE_PLUGIN_ROOT;
     if (!root) return "unknown";
-    const version2 = JSON.parse(readFileSync6(join23(root, ".claude-plugin", "plugin.json"), "utf8")).version;
+    const version2 = JSON.parse(readFileSync7(join30(root, ".claude-plugin", "plugin.json"), "utf8")).version;
     return typeof version2 === "string" && version2 !== "" ? version2 : "unknown";
   } catch {
     return "unknown";
@@ -36124,7 +38439,7 @@ function sessionNotice(inProject) {
     version: pluginVersion(),
     inProject,
     now: /* @__PURE__ */ new Date(),
-    missing: missingTools({ env: process.env, platform: process.platform, home: homedir4(), dataDir: pluginData })
+    missing: missingTools({ env: process.env, platform: process.platform, home: homedir5(), dataDir: pluginData })
   });
 }
 async function main() {
@@ -36144,6 +38459,7 @@ async function main() {
     pluginData,
     ppid: process.ppid,
     projectDir,
+    pluginRoot: process.env.CLAUDE_PLUGIN_ROOT || void 0,
     setupNotice: notice
   });
   if (r.stdout) process.stdout.write(r.stdout);

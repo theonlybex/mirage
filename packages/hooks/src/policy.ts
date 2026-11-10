@@ -8,6 +8,9 @@ import type { SessionState } from '@wordedits/shared';
 export const ENGINE_PREFIX = 'mcp__plugin_mirage_engine__';
 export const FOOTAGE_DENY = 'Footage folders are read-only in Mirage.';
 export const DOTDOT_DENY = 'Use a plain path inside the project (no “..”).';
+export const PLUGIN_DENY = "Mirage's own formats, formulas and skills are read-only. Save your own formula in the project's formulas folder, under a new name.";
+/** The folders of the plugin that hold what Mirage itself says: nobody edits them from a session. */
+const PLUGIN_FOLDERS = ['formats', 'formulas', 'skills'];
 
 /** The engine tool's short name (`check` for `mcp__plugin_mirage_engine__check`), or null for any other tool. */
 export const engineTool = (tool: string): string | null => (tool.startsWith(ENGINE_PREFIX) ? tool.slice(ENGINE_PREFIX.length) : null);
@@ -15,10 +18,14 @@ export const engineTool = (tool: string): string | null => (tool.startsWith(ENGI
 const SAVE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 const FILE_TOOLS = new Set([...SAVE_TOOLS, 'NotebookEdit']);
 // thumbnail writes only thumbs/ and thumbnail.jpg in the episode folder: it changes no picture, sound or timeline, so it needs no `before` version.
-const READ_ONLY = new Set(['versions', 'status', 'get_notes', 'log', 'formats', 'thumbnail']);
+// channel writes only under analysis/ (a channel's public numbers): no video changes, so it needs no `before` version either.
+// posted writes only where the video is live (video.json) and features.json; learn writes only under results/: the same.
+// predict writes only prediction.json in the episode folder (a forecast of the cut): the same.
+// series writes only under series/ (what a series carries between episodes): the same.
+const READ_ONLY = new Set(['versions', 'status', 'get_notes', 'log', 'formats', 'thumbnail', 'formulas', 'channel', 'posted', 'learn', 'predict', 'series']);
 const STAGES = new Set(['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']);
-/** Engine tools that make a project or a video, or are about Mirage and not a video (setup_later, formats): they belong to no video. */
-const NO_VIDEO = new Set(['new_project', 'new_video', 'setup_later', 'formats']);
+/** Engine tools that make a project or a video, or are about Mirage, a channel, a series or every posted video and not one video (setup_later, formats, formulas, channel, learn, series): they belong to no video. */
+const NO_VIDEO = new Set(['new_project', 'new_video', 'setup_later', 'formats', 'formulas', 'channel', 'learn', 'series']);
 
 const ENGINE_LABELS: Record<string, [string, string]> = {
   new_project: ['Starting the project', 'Project started'],
@@ -42,6 +49,12 @@ const ENGINE_LABELS: Record<string, [string, string]> = {
   setup_later: ['Noting that for later', 'Noted for later'],
   formats: ['Looking up the formats', 'Formats looked up'],
   thumbnail: ['Picking thumbnail frames', 'Thumbnail frames ready'],
+  formulas: ['Looking up the formulas', 'Formulas looked up'],
+  channel: ['Reading the channel', 'Channel read'],
+  posted: ['Noting where the video is posted', 'Posted video noted'],
+  learn: ['Reading how your videos did', 'Results read'],
+  predict: ['Forecasting how the video will do', 'Forecast ready'],
+  series: ['Looking up the series', 'Series looked up'],
 };
 
 const record = (input: unknown): Record<string, unknown> =>
@@ -158,10 +171,11 @@ export function isChanging(tool: string, input: unknown, project: string): boole
 export const isStage = (tool: string): boolean => STAGES.has(engineTool(tool) ?? '');
 
 /**
- * The file guard. Writes (Write, Edit, MultiEdit, NotebookEdit) inside any footage folder, or to a path with a `..` segment, are denied. Saves of the project's
+ * The file guard. Writes (Write, Edit, MultiEdit, NotebookEdit) inside any footage folder, inside the plugin's own formats, formulas or
+ * skills folder (`pluginRoot`, when known), or to a path with a `..` segment, are denied. Saves of the project's
  * catalog.json, or of episode.json or summary.md directly in episodes/<n>/, are allowed without a prompt. Anything else: null.
  */
-export function fileDecision(tool: string, input: unknown, project: string, footage: string[]): 'allow' | { deny: string } | null {
+export function fileDecision(tool: string, input: unknown, project: string, footage: string[], pluginRoot?: string): 'allow' | { deny: string } | null {
   if (!FILE_TOOLS.has(tool)) return null;
   const p = filePathOf(input);
   if (p === null) return null;
@@ -169,6 +183,7 @@ export function fileDecision(tool: string, input: unknown, project: string, foot
   if (p.split(/[\\/]/).includes('..')) return { deny: DOTDOT_DENY };
   const target = normalisePath(p, project);
   if (footage.some((f) => inside(target, normalisePath(f, project)) !== null)) return { deny: FOOTAGE_DENY };
+  if (pluginRoot && PLUGIN_FOLDERS.some((f) => inside(target, normalisePath(path.join(pluginRoot, f), project)) !== null)) return { deny: PLUGIN_DENY };
   if (!SAVE_TOOLS.has(tool)) return null;
   const rel = inside(target, normalisePath(project, path.sep));
   if (rel === null) return null;

@@ -15,8 +15,8 @@ import { hasWords, notEnglish, type FitReport } from './voiceover.js';
 const range = (s: { start: number; end: number }) => `${s.start.toFixed(1)}–${s.end.toFixed(1)}`;
 const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
 
-/** The timeline item by item, its total, then notes (•) and warnings (⚠). */
-export function checkReport({ episode: ep, warnings, notes, problems = [] }: { episode: Episode; warnings: string[]; notes: string[]; problems?: string[] }): string[] {
+/** The timeline item by item, its total, then notes (•) and warnings (⚠), then the cut against its format's playbook (`Playbook (<format>):`, ✓ met and ✗ missed). */
+export function checkReport({ episode: ep, warnings, notes, problems = [], playbook = [] }: { episode: Episode; warnings: string[]; notes: string[]; problems?: string[]; playbook?: string[] }): string[] {
   const lines: string[] = [];
   for (const l of layoutTimeline(ep)) {
     const it = l.item;
@@ -27,6 +27,7 @@ export function checkReport({ episode: ep, warnings, notes, problems = [] }: { e
   lines.push(...problems);
   for (const m of notes) lines.push(`• ${m}`);
   for (const w of warnings) lines.push(`⚠ ${w}`);
+  lines.push(...playbook);
   return lines;
 }
 

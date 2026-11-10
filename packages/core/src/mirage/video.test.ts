@@ -130,6 +130,26 @@ describe('planVideo', () => {
     expect((await planVideo(dir, { title: 'Day 6', about: 'x', footage: [], format: 'vlog', vlog: { name: 'Ibiza', date: '2026-07-06' } }, loaded)).video.vlog?.number).toBe(5);
   });
 
+  it('keeps the idea answers the person gave, and only those; a short never copies the big video\'s', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
+    const { video } = await planVideo(dir, { title: 'Part 1', about: 'x', footage: [], idea: { gap: ' a lamp that never lit ', question: 'Will it light?', doubt: '', stake: '   ' } }, loaded);
+    expect(video.idea).toEqual({ gap: 'a lamp that never lit', question: 'Will it light?' });
+    const n = await newVideo(dir, video);
+    expect((await readVideo(dir, n))!.idea).toEqual({ gap: 'a lamp that never lit', question: 'Will it light?' });
+    expect('idea' in (await planVideo(dir, { title: 'Part 2', about: 'x', footage: [], idea: { doubt: ' ' } }, loaded)).video).toBe(false);
+    expect('idea' in (await planVideo(dir, { title: 'A short', from: n }, loaded)).video).toBe(false);
+  });
+
+  it('video.json takes where the video is posted and the idea, and refuses a misspelled key in either', () => {
+    const base = { version: 1, title: 't', about: '', mention: '', hide: '', footage: [], createdAt: '2026-11-09T10:00:00Z' };
+    const posted = { url: 'https://www.youtube.com/watch?v=abcDEF_-123', id: 'abcDEF_-123', at: '2026-11-09' };
+    expect(VideoSchema.parse({ ...base, posted, idea: { stake: '£40' } })).toMatchObject({ posted, idea: { stake: '£40' } });
+    expect(VideoSchema.safeParse({ ...base, posted: { ...posted, at: '9 November' } }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...base, posted: { ...posted, views: 3 } }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...base, idea: { stakes: '£40' } }).success).toBe(false);
+    expect(VideoSchema.safeParse({ ...base, idea: { gap: '' } }).success).toBe(false);
+  });
+
   it('refuses vlog for a video that is not in the vlog format', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-video-'));
     const n = await newVideo(dir, big);

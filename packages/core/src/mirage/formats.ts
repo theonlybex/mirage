@@ -10,6 +10,65 @@ import type { Captions, Video } from '@wordedits/shared';
 
 const even = z.number().int().positive().refine((n) => n % 2 === 0, { message: 'must be even' });
 
+const share = z.number().min(0).max(1);
+const atLeastOne = (o: object) => Object.values(o).some((v) => v !== undefined);
+const range = strictObject({ min: z.number().min(0).optional(), max: z.number().positive().optional() }).refine(atLeastOne, { message: 'needs min or max' });
+
+/**
+ * A format's playbook: the numbers its rules state, so `check` can measure a cut against them (its `Playbook (<format>):`
+ * section) and `predict` can score it. Every key is optional: a format states only what its rules and formulas give a
+ * number for, and only what can be measured honestly from the timeline, the catalog's transcripts and the narration
+ * lines. A person's own formula for the format (`formulas/<format>-mine.md` in the project) may carry the same object in
+ * its front matter: each key it has replaces the format's for that project.
+ */
+export const PlaybookSchema = strictObject({
+  /** The first word is spoken within this many seconds. */
+  firstWordSec: z.number().min(0).optional(),
+  /**
+   * The beat that holds the answer, and where it should start, 0–1 of the length. A teaser short has no answer of its
+   * own to place (it leaves the big video's question open), so this is not measured on one.
+   */
+  answer: strictObject({ beat: BeatSchema, fromShare: share, toShare: share }).refine((a) => a.fromShare <= a.toShare, { message: 'fromShare must not be after toShare' }).optional(),
+  /** The longest stretch, in seconds, in which nothing new may happen: no word (kept sound or narration), no cut and no overlay starting. */
+  emptySec: z.number().positive().optional(),
+  /**
+   * Cuts a minute. `except` names beats whose time and cuts are left out (a vlog's held `headline`). Where the format gives
+   * a pace for particular beats, `beats` holds each one's own range (measured over that beat's shots only), and `after`
+   * the range for what comes after a beat (the shots that start once its last item has ended, `except` its named beats: a
+   * vlog's back half, after the `headline`). The whole-cut number stays.
+   */
+  cutsPerMin: strictObject({
+    min: z.number().min(0).optional(), max: z.number().positive().optional(), except: z.array(BeatSchema).optional(),
+    beats: z.record(BeatSchema, range).optional(),
+    after: strictObject({ beat: BeatSchema, min: z.number().min(0).optional(), max: z.number().positive().optional(), except: z.array(BeatSchema).optional() })
+      .refine((c) => c.min !== undefined || c.max !== undefined, { message: 'needs min or max' }).optional(),
+  }).refine((c) => c.min !== undefined || c.max !== undefined, { message: 'needs min or max' }).optional(),
+  /** Spoken words a minute over the whole video. */
+  wordsPerMin: strictObject({ min: z.number().min(0).optional(), max: z.number().positive().optional() }).refine(atLeastOne, { message: 'needs min or max' }).optional(),
+  /** Whether the video's `idea` (video.json: gap, question, doubt, stake) is expected: its gap and its question at least. */
+  ideaNeeded: z.boolean().optional(),
+  /** The beats a video of the format ends on: its last item is one of them. */
+  endsOn: z.array(BeatSchema).min(1).optional(),
+  /**
+   * The measurable parts of the format's title style, held against the title the person chose (video.json's
+   * `titles.chosen`): in capitals, with a number, in the first person, how it ends, how many words. Each is left out when
+   * the format's titles don't share it.
+   */
+  title: strictObject({
+    allCaps: z.boolean().optional(), hasNumber: z.boolean().optional(), firstPerson: z.boolean().optional(),
+    endsWith: z.enum(['?', '!!']).optional(), words: range.optional(),
+  }).refine(atLeastOne, { message: 'needs at least one of allCaps, hasNumber, firstPerson, endsWith, words' }).optional(),
+  /**
+   * The length a video of the format aims for in this project, in seconds, and the length past which `check` warns
+   * (default 1.5 × targetSec). They replace the format's own `targetSec` and `warnPastSec`, so each format's length is
+   * set per project: first from the channels of the niche, then from the person's own results. A short's limit never
+   * goes past the format's (the longest the platforms take).
+   */
+  targetSec: z.number().positive().optional(),
+  warnPastSec: z.number().positive().optional(),
+});
+export type Playbook = z.infer<typeof PlaybookSchema>;
+
 /**
  * The front matter of a format file (`plugin/formats/<id>.md`): a JSON object between two `---` lines. The rest of the
  * file is the format's rules, in Markdown.
@@ -36,6 +95,8 @@ export const FormatSchema = strictObject({
    * makes a video of the format whose id is `short`, whatever other formats have this.
    */
   short: strictObject({ kind: z.enum(['teaser', 'standalone']) }).optional(),
+  /** The format's numbers, which `check` measures a cut against and `predict` scores (see PlaybookSchema). */
+  playbook: PlaybookSchema.optional(),
 });
 
 export type Format = z.infer<typeof FormatSchema> & {
@@ -64,8 +125,8 @@ export function formatsDir(from: string = import.meta.url): string {
   return SOURCE_LAYOUT.test(here) ? resolve(here, '..', '..', '..', '..', 'plugin', 'formats') : resolve(here, '..', 'formats');
 }
 
-/** A format file split into its front matter (parsed) and its rules, or why it can't be. */
-function splitFile(text: string): { front: unknown; rules: string } | string {
+/** A format file (or a formula file: the same shape) split into its front matter (parsed) and its rules, or why it can't be. */
+export function splitFile(text: string): { front: unknown; rules: string } | string {
   const lines = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
   if (lines[0]?.trimEnd() !== '---') return 'no front matter: the file must start with a --- line, a JSON object, and a --- line';
   const end = lines.findIndex((l, i) => i > 0 && l.trimEnd() === '---');
@@ -131,4 +192,12 @@ export function formatOf(video: Video | null, formats: Format[]): Format {
   const found = formats.find((f) => f.id === id) ?? formats.find((f) => f.id === 'build-story');
   if (!found) throw new MirageError('BAD_INPUT', "Mirage's build-story format is missing or broken", 'Run the formats tool to see what is wrong with plugin/formats, or reinstall the Mirage plugin.');
   return found;
+}
+
+/**
+ * The kind of short a video of this format is: one made from a big video is the format's kind (a teaser), one with no big
+ * video behind it stands alone. Null for a format that is no short.
+ */
+export function shortKind(format: Format, video: Video | null): 'teaser' | 'standalone' | null {
+  return format.short ? (video?.from !== undefined ? format.short.kind : 'standalone') : null;
 }

@@ -79,6 +79,7 @@ async function main(): Promise<void> {
     pluginData,
     ppid: process.ppid,
     projectDir,
+    pluginRoot: process.env.CLAUDE_PLUGIN_ROOT || undefined,
     setupNotice: notice,
   });
   if (r.stdout) process.stdout.write(r.stdout);

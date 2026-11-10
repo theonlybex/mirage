@@ -7,6 +7,11 @@ export const MirageProjectSchema = strictObject({
   version: z.literal(1),
   title: z.string(),
   createdAt: z.string(),
+  /**
+   * The channels that lead the person's niche, per format id: their YouTube addresses, as the person named them. The
+   * mirage:learn skill writes it and learns from them (with mirage:analyse) while the person's own videos are too few.
+   */
+  niche: z.record(z.string().min(1), z.array(z.string().min(1))).optional(),
 });
 export type MirageProject = z.infer<typeof MirageProjectSchema>;
 

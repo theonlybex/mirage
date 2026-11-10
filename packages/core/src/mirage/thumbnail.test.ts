@@ -10,6 +10,8 @@ import { realMediaTools, type MediaTools } from '../media-tools.js';
 import { saveCatalog } from './ingest.js';
 import { bundledFontsDir } from './fonts.js';
 import { renderEpisode, saveEpisode } from './render-episode.js';
+import { writeSeries } from './series.js';
+import { writeVideo } from './video.js';
 import {
   candidatesReport, cutLoudness, formatThumbTime, thumbCandidates, thumbnailAss, thumbnailReport, thumbSize, thumbSource, thumbWordCount, writeCandidates, writeThumbnail,
 } from './thumbnail.js';
@@ -589,6 +591,62 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       expect(near(px.avg(0, 0, 1280, 720), 'red')).toBe(true);
     });
 
+    it('builds a thumbnail from two sources side by side: the face on its side, a white line, the subject filling the rest; a photo is a source too', async () => {
+      const dir = await thumbProject('two', mapped, { cut: true });
+      const record = async () => JSON.parse(await readFile(join(dir, 'episodes', '1', 'thumbnail.json'), 'utf8'));
+      // The face is the frame at 4.6 s (blue), the subject the one at 9 s (green): the face on the left, 34% of 1280 = 436 px.
+      const r = await writeThumbnail(dir, 1, { two: { face: { at: 4.6 }, subject: { at: 9 } } }, tools);
+      expect(r).toEqual({ file: thumbFile(dir), width: 1280, height: 720, from: { face: 'c001 at 2.4 s', subject: 'c001 at 1.5 s', layout: { face: 'left', share: 0.34 } } });
+      expect(thumbnailReport(1, r)).toBe('wrote episodes/1/thumbnail.jpg (1280×720, from two sources: the face (c001 at 2.4 s) on the left, 34% of the width, and the subject (c001 at 1.5 s) filling the rest)');
+      expect(await size(thumbFile(dir))).toEqual([1280, 720]);
+      let px = await pixels(thumbFile(dir));
+      expect(near(px.avg(10, 10, 420, 710), 'blue')).toBe(true);
+      expect(near(px.avg(460, 10, 1270, 710), 'green')).toBe(true);
+      expect(Math.min(...px.at(440, 360))).toBeGreaterThan(200);
+      expect(await record()).toEqual({ made: 'two-sources', face: { at: 4.6 }, subject: { at: 9 }, layout: { face: 'left', share: 0.34 }, text: null });
+
+      // The face on the right at a quarter of the width, from a photo inside the project (red), with text.
+      await mkdir(join(dir, 'photos'));
+      await ff(['-f', 'lavfi', '-i', 'color=c=0xC80000:s=600x800:d=1', '-frames:v', '1', join(dir, 'photos', 'me.png')]);
+      const right = await writeThumbnail(dir, 1, { text: 'It works', two: { face: { image: 'photos/me.png', focus: { x: 0.5, y: 0.2 } }, subject: { at: 9 }, side: 'right', share: 0.25 } }, tools);
+      expect(right.from).toEqual({ face: 'photos/me.png', subject: 'c001 at 1.5 s', layout: { face: 'right', share: 0.25 } });
+      px = await pixels(thumbFile(dir));
+      expect(near(px.avg(10, 10, 940, 400), 'green')).toBe(true);
+      expect(near(px.avg(970, 10, 1270, 400), 'red')).toBe(true);
+      expect(Math.min(...px.at(955, 100))).toBeGreaterThan(200);
+      expect(await record()).toEqual({ made: 'two-sources', face: { image: 'photos/me.png', focus: { x: 0.5, y: 0.2 } }, subject: { at: 9 }, layout: { face: 'right', share: 0.25 }, text: 'It works' });
+
+      // What it refuses, leaving the thumbnail as it was.
+      const before = await readFile(thumbFile(dir));
+      const two = (face: object, subject: object = { at: 9 }, more: object = {}) => writeThumbnail(dir, 1, { two: { face, subject, ...more } }, tools);
+      await expect(two({})).rejects.toThrow('the face needs at (a second of the video) or image (a picture inside the project), one of the two');
+      await expect(two({ at: 1 }, { at: 2, image: 'photos/me.png' })).rejects.toThrow('the subject needs at (a second of the video) or image (a picture inside the project), one of the two');
+      await expect(two({ image: 'photos/gone.jpg' })).rejects.toThrow("the face's picture photos/gone.jpg is missing");
+      await expect(two({ image: '../me.png' })).rejects.toThrow("the face's picture ../me.png must be a plain path inside the project");
+      await writeFile(join(dir, 'photos', 'notes.jpg'), 'not a picture');
+      await expect(two({ at: 1 }, { image: 'photos/notes.jpg' })).rejects.toThrow("the subject's picture photos/notes.jpg isn't a PNG or JPEG");
+      await expect(two({ at: 10 })).rejects.toThrow('the face: the video shows a card at 10 s');
+      await expect(two({ at: 1 }, { at: 9 }, { share: 0.7 })).rejects.toThrow("the face's share of the width goes from 0.2 to 0.5");
+      await expect(writeThumbnail(dir, 1, { at: 1, two: { face: { at: 1 }, subject: { at: 9 } } }, tools)).rejects.toThrow('a thumbnail is written from at');
+      expect((await readFile(thumbFile(dir))).equals(before)).toBe(true);
+      // A vertical video's cover is one frame.
+      const tall = await thumbProject('two-tall', mapped, { output: { width: 1080, height: 1920 } });
+      await expect(writeThumbnail(tall, 1, { two: { face: { at: 4.6 }, subject: { at: 9 } } }, tools)).rejects.toThrow('a thumbnail from two sources is for a landscape video');
+    });
+
+    it('uses the layout its series keeps, and says when the one given differs', async () => {
+      const dir = await thumbProject('two-series', mapped);
+      await writeVideo(dir, 1, { version: 1, title: 'Ep', about: '', mention: '', hide: '', footage: [], createdAt: '2026-11-01T00:00:00Z', series: 'the-lamp' });
+      await writeSeries(dir, { version: 1, slug: 'the-lamp', name: 'The lamp', format: 'build-story', counts: {}, thumbnail: { face: 'right', share: 0.3 }, episodes: [1], createdAt: '2026-11-01T00:00:00Z' });
+      const kept = await writeThumbnail(dir, 1, { two: { face: { at: 4.6 }, subject: { at: 9 } } }, tools);
+      expect(kept.from).toMatchObject({ layout: { face: 'right', share: 0.3 } });
+      expect(kept.warnings).toBeUndefined();
+      const px = await pixels(thumbFile(dir));
+      expect(near(px.avg(910, 10, 1270, 710), 'blue')).toBe(true);
+      const other = await writeThumbnail(dir, 1, { two: { face: { at: 4.6 }, subject: { at: 9 }, side: 'left' } }, tools);
+      expect(other.warnings).toEqual(["this thumbnail has the face on the left at 30% of the width, and the series “The lamp” keeps it on the right at 30% — leave side and share out so every episode matches, or change the series' layout with the series tool"]);
+    });
+
     it('freezes on a clip\'s last frame, and shows the last frame of a shot that runs past the video', async () => {
       // c001 is 12 s: 11–12 s is blue. A hold with src.out at the clip's end looks for a frame at 12 s, which isn't there.
       const dir = await thumbProject('lastframe', [item('a', [10, 12], { hold: 1 }), item('b', [11, 12.05]), item('c', [11.5, 12.05], { hold: 1 })]);
@@ -775,7 +833,11 @@ describe('writeCandidates and cutLoudness (real ffmpeg)', () => {
       expect((await readdir(ep1)).sort()).toEqual(before);
       await writeThumbnail(dir, 1, { at: 1 }, tools);
       expect((await readFile(thumbFile(dir))).length).toBeGreaterThan(1000);
-      expect((await readdir(ep1)).sort()).toEqual(before);
+      // Beside it, only the record of what it was written with (for posted's snapshot of the video).
+      expect((await readdir(ep1)).sort()).toEqual([...before, 'thumbnail.json'].sort());
+      expect(JSON.parse(await readFile(join(ep1, 'thumbnail.json'), 'utf8'))).toEqual({ made: 'one-frame', at: 1, text: null });
+      await writeThumbnail(dir, 1, { at: 1, text: 'It works' }, tools);
+      expect(JSON.parse(await readFile(join(ep1, 'thumbnail.json'), 'utf8'))).toEqual({ made: 'one-frame', at: 1, text: 'It works' });
       expect(await readFile(join(ep1, 'thumbs', 'cand-01.jpg'), 'utf8')).toBe('cand');
       expect((await readdir(footage)).sort()).toEqual(Object.values(clips).map((c) => c.file).sort());
     });

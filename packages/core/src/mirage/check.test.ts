@@ -530,14 +530,14 @@ describe('checkEpisode with cards', () => {
 describe('checkEpisode against the video format', () => {
   const VIDEO = { version: 1, title: 't', about: '', mention: '', hide: '', footage: [], createdAt: '2026-11-06T00:00:00.000Z' };
   const writeVideo = (dir: string, extra: object = {}) => writeFile(join(dir, 'episodes', '1', 'video.json'), JSON.stringify({ ...VIDEO, ...extra }, null, 2) + '\n');
-  /** A vertical short: a hook that keeps its sound, a payoff, a pointer; pop captions in the middle. */
+  /** A vertical short: a hook that keeps its sound, a tease, a payoff; pop captions in the middle. */
   const short = (extra: object = {}) =>
     EpisodeSchema.parse({
       version: 2, number: 1, title: 't', output: { width: 1080, height: 1920, fps: 30 },
       items: [
         { id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' },
         { id: 'b', beat: 'tease', clip: 'c001', src: { in: 5, out: 10 } },
-        { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 12, out: 14 } },
+        { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 12, out: 14 } },
       ],
       captions: { style: 'pop', position: 'middle' },
       ...extra,
@@ -568,7 +568,12 @@ describe('checkEpisode against the video format', () => {
       overlays: [{ kind: 'badge', text: 'FAILED', start: 2, end: 3 }, { kind: 'label', text: 'later', start: 3, end: 4 }, { kind: 'badge', text: 'LATE', start: 40, end: 41 }],
     });
     await saveEpisode(dir, ep);
-    const before = checkReport(await checkEpisode(dir, 1));
+    // Everything above the playbook section, which came later and is pinned in its own tests.
+    const report = async () => {
+      const lines = checkReport(await checkEpisode(dir, 1));
+      return lines.slice(0, lines.findIndex((l) => l.startsWith('Playbook (')));
+    };
+    const before = await report();
     // The report as it was before formats existed (taken from the code at a2c8458).
     expect(before).toEqual([
       '  1  cold-open a            c001  0.00–1.50  ×1  0.00–1.50',
@@ -579,12 +584,12 @@ describe('checkEpisode against the video format', () => {
     ]);
     await writeVideo(dir);
     await saveEpisode(dir, ep);
-    expect(checkReport(await checkEpisode(dir, 1))).toEqual(before);
+    expect(await report()).toEqual(before);
   });
 
   it("warns about a beat that isn't one of the format's, and in a build story only about beats outside the old list", async () => {
     const { dir } = await project(spoken(0.2));
-    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'b', beat: 'montage', clip: 'c001', src: { in: 5, out: 10 } }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 12, out: 14 } }] }));
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'b', beat: 'montage', clip: 'c001', src: { in: 5, out: 10 } }, { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 12, out: 14 } }] }));
     await writeVideo(dir, { format: 'short', from: 1 });
     expect((await checkEpisode(dir, 1)).warnings).toEqual([`item b's beat "montage" isn't one of the Short format's beats ${SHORT_BEATS}`]);
     await saveEpisode(dir, base({ items: [{ id: 'a', beat: 'problem', clip: 'c001', src: { in: 0, out: 2 } }, { id: 'b', beat: 'bit', clip: 'c001', src: { in: 5, out: 10 } }], music: [] }));
@@ -592,24 +597,22 @@ describe('checkEpisode against the video format', () => {
     expect((await checkEpisode(dir, 1)).warnings).toEqual([`item b's beat "bit" isn't one of the Build story format's beats ${BUILD_BEATS}`]);
   });
 
-  it("warns when the video is longer than the format's limit, which the video's own target moves", async () => {
+  it("warns when a short is longer than the 3:00 the platforms take, which a video's own target doesn't move", async () => {
     const { dir } = await project(spoken(0.2));
     const items = (n: number) => [
       { id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 25 }, audio: 'keep' },
-      { id: 'b', beat: 'tease', clip: 'c001', src: { in: 0, out: 25 } },
-      { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 0, out: n } },
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `b${i}`, beat: 'tease', clip: 'c001', src: { in: 0, out: 30 } })),
+      { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 0, out: n } },
     ];
-    await saveEpisode(dir, short({ items: items(15) }));
-    await writeVideo(dir, { format: 'short', from: 1 });
-    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1:05, longer than the Short format's 1:00 — cut whole moments"]);
     await saveEpisode(dir, short({ items: items(10) }));
-    expect((await checkEpisode(dir, 1)).warnings).toEqual([]); // exactly 60 s
-    await saveEpisode(dir, short({ items: items(15) }));
-    await writeVideo(dir, { format: 'short', from: 1, targetSec: 90 }); // twice the format's 45 s: the limit is 2:00
-    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
-    // The video's own target is its own limit, and the warning says so.
-    await writeVideo(dir, { format: 'short', from: 1, targetSec: 30 }); // 60 s × 30 / 45: 0:40
-    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 1:05, longer than this video's 0:40 limit — cut whole moments"]);
+    await writeVideo(dir, { format: 'short', from: 1 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 3:05, longer than the Short format's 3:00 — cut whole moments"]);
+    await saveEpisode(dir, short({ items: items(5) }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]); // exactly 3:00
+    // The short format favours no length (it has no targetSec), so a video's own target changes nothing: 3:00 is the platforms' limit.
+    await saveEpisode(dir, short({ items: items(10) }));
+    await writeVideo(dir, { format: 'short', from: 1, targetSec: 400 });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(["the video is 3:05, longer than the Short format's 3:00 — cut whole moments"]);
   });
 
   it("a long vlog is told to cut whole bits rather than thin its laughs", async () => {
@@ -656,29 +659,36 @@ describe('checkEpisode against the video format', () => {
     expect(r.warnings).toEqual([]);
   });
 
-  it('warns when a short opens on silence, measured from the first item\'s own sound', async () => {
+  it('measures the first word of a short against the playbook instead of warning: a miss names the opening item', async () => {
     const { dir } = await project(spoken(2, 6));
+    const firstWord = async () => {
+      const r = await checkEpisode(dir, 1);
+      expect(r.warnings).toEqual([]);
+      return r.playbook.filter((l) => l.includes('first word') || l.includes('no word'));
+    };
     await saveEpisode(dir, short());
     await writeVideo(dir, { format: 'short', from: 1 });
-    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a short opens on its hook: item a starts with 2.0 s of silence']);
-    // No word in the first item at all: all of it is silence.
-    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 3, out: 4.5 }, audio: 'keep' }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 }, audio: 'keep' }] }));
-    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a short opens on its hook: item a starts with 1.5 s of silence']);
-    // A muted first item has no sound of its own to check.
-    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 } }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 } }] }));
-    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    expect(await firstWord()).toEqual(['  ✗ first word at 2.0 s (the cut opens on item a) — the playbook asks for one within 0.5 s']);
+    // No word in the first item at all: the first word is the next item's.
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 3, out: 4.5 }, audio: 'keep' }, { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 5, out: 9 }, audio: 'keep' }] }));
+    expect(await firstWord()).toEqual(['  ✗ first word at 2.5 s (the cut opens on item a) — the playbook asks for one within 0.5 s']);
+    // A muted cut has no word at all: a hook that is seen rather than heard is the person's call, so it is a miss, never a warning.
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 } }, { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 5, out: 9 } }] }));
+    expect(await firstWord()).toEqual(['  ✗ no word is spoken — the playbook asks for one within 0.5 s']);
   });
 
-  it('starts speaking within half a second: no silence warning', async () => {
+  it('starts speaking within half a second: the first word is met', async () => {
     const { dir } = await project(spoken(0.5, 3));
     await saveEpisode(dir, short());
     await writeVideo(dir, { format: 'short', from: 1 });
-    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual([]);
+    expect(r.playbook).toContain('  ✓ first word at 0.5 s — the playbook asks for one within 0.5 s');
   });
 
-  it('a short whose first item is a card: no silence warning, the beat warnings still apply', async () => {
+  it('a short whose first item is a title card: the beat warnings apply, and say it once', async () => {
     const { dir } = await project(spoken(3));
-    await saveEpisode(dir, short({ items: [{ id: 'k', beat: 'title', card: { text: 'MY SHORT', style: 'bold', sec: 2 } }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 }, audio: 'keep' }] }));
+    await saveEpisode(dir, short({ items: [{ id: 'k', beat: 'title', card: { text: 'MY SHORT', style: 'bold', sec: 2 } }, { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 5, out: 9 }, audio: 'keep' }] }));
     await writeVideo(dir, { format: 'short', from: 1 });
     expect((await checkEpisode(dir, 1)).warnings).toEqual([
       `item k's beat "title" isn't one of the Short format's beats ${SHORT_BEATS}`,
@@ -691,7 +701,7 @@ describe('checkEpisode against the video format', () => {
     await saveEpisode(dir, short({
       items: [
         { id: 'a', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' },
-        { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 12, out: 14 } },
+        { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 12, out: 14 } },
         { id: 'z', beat: 'outro', clip: 'c001', src: { in: 15, out: 17 } },
       ],
     }));
@@ -704,19 +714,50 @@ describe('checkEpisode against the video format', () => {
     ]);
   });
 
-  it('a teaser (made from a big video) ends on a pointer; a standalone short loops, so its last cue must not fade out at the end', async () => {
+  it('a teaser (made from a big video) pays off one small question and needs no pointer; a standalone short loops, so its last cue must not fade out at the end', async () => {
     const { dir } = await project(spoken(0.1));
     const standalone = [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'b', beat: 'payoff', clip: 'c001', src: { in: 5, out: 9 } }, { id: 'c', beat: 'loop', clip: 'c001', src: { in: 10, out: 12 } }];
     const music = (fadeOut?: number) => [{ track: 'beat.wav', start: 0, end: 4 }, { track: 'beat.wav', start: 4, end: 10, ...(fadeOut === undefined ? {} : { fadeOut }) }];
-    await saveEpisode(dir, short({ items: standalone, music: music() }));
+    // A teaser with no pointer at its end is fine: the platform's own link points to the big video.
+    await saveEpisode(dir, short({ music: music() }));
     await writeVideo(dir, { format: 'short', from: 1 });
-    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a teaser short ends pointing to the full video: add a pointer beat at the end']);
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    // A pointer is still allowed: a line the person says on camera, after the payoff.
+    await saveEpisode(dir, short({ items: [...short().items, { id: 'p', beat: 'pointer', clip: 'c001', src: { in: 15, out: 17 }, audio: 'keep' }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    // A teaser that only teases pays nothing off.
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'hook', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'b', beat: 'tease', clip: 'c001', src: { in: 5, out: 10 } }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a teaser short answers one small question and leaves the big one open: add a payoff beat']);
+    await saveEpisode(dir, short({ items: standalone, music: music() }));
     await writeVideo(dir, { format: 'short' }); // no big video behind it: standalone
     expect((await checkEpisode(dir, 1)).warnings).toEqual(['a standalone short loops: the last music cue fades out at the end — set its fadeOut to 0']);
     await saveEpisode(dir, short({ items: standalone, music: music(0) }));
     expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
     // A cue that ends before the video does doesn't fade out at the end.
     await saveEpisode(dir, short({ items: standalone, music: [{ track: 'beat.wav', start: 0, end: 4 }] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    // A standalone short with no payoff never pays off its hook.
+    await saveEpisode(dir, short({ items: standalone.filter((i) => i.beat !== 'payoff') }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual(['a standalone short pays off its hook: add a payoff beat']);
+  });
+
+  it('warns when a short ends on a full-screen card, teaser or standalone, and not when a card sits earlier', async () => {
+    const { dir } = await project(spoken(0.1));
+    const card = { id: 'k', beat: 'pointer', card: { text: 'Full video on my channel', style: 'bold', sec: 2 } };
+    const warning = 'a short never ends on a full-screen card: item k — end on the last shot, with at most an overlay over it';
+    await saveEpisode(dir, short({ items: [...short().items, card] }));
+    await writeVideo(dir, { format: 'short', from: 1 });
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual([warning]);
+    // The ⚠ says it: the playbook section doesn't say it again.
+    expect(r.playbook.join('\n')).not.toContain('full-screen card');
+    await writeVideo(dir, { format: 'short' });
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([warning]);
+    const [a, b, c] = short().items;
+    await saveEpisode(dir, short({ items: [a, b, card, c] }));
+    expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
+    // An overlay over the last shot keeps the picture playing: no warning.
+    await saveEpisode(dir, short({ overlays: [{ kind: 'callout', text: 'Full video on my channel', start: 9.5, end: 11 }] }));
     expect((await checkEpisode(dir, 1)).warnings).toEqual([]);
   });
 
@@ -780,11 +821,242 @@ describe('checkEpisode against the video format', () => {
     expect((await checkEpisode(dir, 1, undefined, { formatsDir: missing })).problems).toEqual(['✖ plugin/formats/build-story.md: the file is missing']);
     expect((await checkEpisode(dir, 1, undefined, { formatsDir: join(missing, 'nowhere') })).problems).toEqual(['✖ plugin/formats: the folder is missing or unreadable']);
     // A short checked while vlog.md has a typo: the ✖ for vlog.md, and the short's own warnings.
-    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'title', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'c', beat: 'pointer', clip: 'c001', src: { in: 5, out: 9 } }] }));
+    await saveEpisode(dir, short({ items: [{ id: 'a', beat: 'title', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' }, { id: 'c', beat: 'payoff', clip: 'c001', src: { in: 5, out: 9 } }] }));
     await writeVideo(dir, { format: 'short', from: 1 });
     const typo = await formatsFolder({ 'build-story.md': await readFile(join(formatsDir(), 'build-story.md'), 'utf8'), 'short.md': await shortFile(), 'vlog.md': '---\n{"id":"vlog","nmae":"Vlog"}\n---\n' });
     const s = await checkEpisode(dir, 1, undefined, { formatsDir: typo });
     expect(s.problems).toEqual([expect.stringMatching(/^✖ plugin\/formats\/vlog\.md: /)]);
     expect(s.warnings).toContain('a short opens on its hook, not a title: item a');
+  });
+});
+
+describe("checkEpisode against the format's playbook", () => {
+  const VIDEO = { version: 1, title: 't', about: '', mention: '', hide: '', footage: [], createdAt: '2026-11-06T00:00:00.000Z' };
+  const writeVideo = (dir: string, extra: object = {}) => writeFile(join(dir, 'episodes', '1', 'video.json'), JSON.stringify({ ...VIDEO, ...extra }, null, 2) + '\n');
+  const spoken = (...starts: number[]) => ({ words: starts.map((s, i) => ({ w: `w${i}`, start: s, end: s + 0.3, conf: 1 })), segments: [], speech: [] });
+  const IDEA = { gap: 'a lamp that should light and is dead', question: 'Will it ever light?' };
+  /** A build story of 20.5 s: a spoken cold open, a problem, a 9 s montage, the truth at 18 s (88%), an outro. */
+  const story = (extra: object = {}) =>
+    EpisodeSchema.parse({
+      version: 2, number: 1, title: 't', output: { width: 1920, height: 1080, fps: 30 },
+      items: [
+        { id: 'a', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 4 }, audio: 'keep' },
+        { id: 'b', beat: 'problem', clip: 'c001', src: { in: 5, out: 10 } },
+        { id: 'c', beat: 'montage', clip: 'c001', src: { in: 10, out: 19 } },
+        { id: 't', beat: 'truth', clip: 'c001', src: { in: 20, out: 21.5 }, audio: 'keep' },
+        { id: 'o', beat: 'outro', clip: 'c001', src: { in: 22, out: 23 } },
+      ],
+      ...extra,
+    });
+  /** A vertical short of 6 s in 2 s shots, a word in each: a hook, a tease, a payoff. */
+  const short = (extra: object = {}) =>
+    EpisodeSchema.parse({
+      version: 2, number: 1, title: 't', output: { width: 1080, height: 1920, fps: 30 },
+      items: [
+        { id: 'h', beat: 'hook', clip: 'c001', src: { in: 0, out: 2 }, audio: 'keep' },
+        { id: 'm', beat: 'tease', clip: 'c001', src: { in: 2, out: 4 }, audio: 'keep' },
+        { id: 'p', beat: 'payoff', clip: 'c001', src: { in: 4, out: 6 }, audio: 'keep' },
+      ],
+      captions: { style: 'pop', position: 'middle' },
+      ...extra,
+    });
+  const mine = (dir: string, front: object) => mkdir(join(dir, 'formulas'), { recursive: true }).then(() =>
+    writeFile(join(dir, 'formulas', 'short-mine.md'), `---\n${JSON.stringify({ id: 'short-mine', name: 'My shorts', describe: 'What my shorts showed.', formats: ['short'], source: 'my posted videos', ...front })}\n---\nRules.\n`));
+
+  it('prints one line per rule of the build story, met or missed, with the number, the target and where a miss happens', async () => {
+    const { dir } = await project(spoken(0.2, 20.5));
+    await saveEpisode(dir, story());
+    await writeVideo(dir, { idea: IDEA });
+    const r = await checkEpisode(dir, 1);
+    expect(r.playbook).toEqual([
+      'Playbook (build-story):',
+      '  ✓ opens on the picture (item a)',
+      '  ✓ the idea is on record: gap, question (no doubt, no stake)',
+      '  – the title: not measured — no title is chosen yet (titles.chosen in episodes/1/video.json)',
+      '  ✗ longest stretch with nothing new 9.0 s, 0:09.0–0:18.0 (item c) — the playbook allows 8 s',
+      '  ✗ 6 words a minute — the playbook asks for 145–200; the longest stretch without words is 0:00.5–0:18.5 (item a)',
+      '  ✓ the answer (truth, item t) starts 88% of the way through — the playbook asks for 85–93%',
+      '  ✓ has its answer: a truth beat (item t)',
+      '  ✓ ends on its outro (item o)',
+    ]);
+    // A miss is neither a warning nor a problem, and the section closes the report.
+    expect(r.warnings).toEqual([]);
+    expect(r.problems).toEqual([]);
+    expect(checkReport(r).slice(-9)).toEqual(r.playbook);
+    expect(checkReport(r).join('\n')).not.toMatch(/[⚠✖]/);
+  });
+
+  it('silence over changing pictures is not empty: a cut or an overlay starting ends the stretch', async () => {
+    const { dir } = await project(spoken(0.2, 20.5));
+    const empty = async () => (await checkEpisode(dir, 1)).playbook.find((l) => l.includes('nothing new'));
+    // An overlay starting at 14 s splits the 9 s montage into 5 s and 4 s.
+    await saveEpisode(dir, story({ overlays: [{ kind: 'label', text: 'Day 2', start: 14, end: 16 }] }));
+    expect(await empty()).toBe('  ✓ longest stretch with nothing new 5.0 s — the playbook allows 8 s');
+    // The montage cut in two: no stretch is longer than the 5 s problem.
+    const [a, b, , t, o] = story().items;
+    await saveEpisode(dir, story({ items: [a, b, { id: 'c1', beat: 'montage', clip: 'c001', src: { in: 10, out: 14 } }, { id: 'c2', beat: 'montage', clip: 'c001', src: { in: 14, out: 19 } }, t, o] }));
+    expect(await empty()).toBe('  ✓ longest stretch with nothing new 5.0 s — the playbook allows 8 s');
+    // Two stretches over the limit: the longest is named, the other counted.
+    await saveEpisode(dir, story({ items: [a, { ...b, src: { in: 0, out: 12 } }, ...story().items.slice(2)] }));
+    expect(await empty()).toBe('  ✗ longest stretch with nothing new 12.0 s, 0:04.0–0:16.0 (item b), and 1 more — the playbook allows 8 s');
+  });
+
+  it('says where the answer starts when it is early or late, and that it is missing', async () => {
+    const { dir } = await project(spoken(0.2, 20.5));
+    const [a, b, c, t, o] = story().items;
+    const answer = async () => (await checkEpisode(dir, 1)).playbook.filter((l) => l.includes('answer'));
+    await saveEpisode(dir, story({ items: [a, t, b, c, o] }));
+    expect(await answer()).toEqual([
+      '  ✗ the answer (truth, item t) starts 20% of the way through, at 0:04.0 — the playbook asks for 85–93%',
+      '  ✓ has its answer: a truth beat (item t)',
+    ]);
+    await saveEpisode(dir, story({ items: [a, b, c, o, { ...b, id: 'z' }, t] }));
+    expect(await answer()).toEqual([
+      '  ✗ the answer (truth, item t) starts 94% of the way through, at 0:24.0 — the playbook asks for 85–93%',
+      '  ✓ has its answer: a truth beat (item t)',
+    ]);
+    await saveEpisode(dir, story({ items: [a, b, c, o] }));
+    expect(await answer()).toEqual(['  ✗ no truth beat in the cut — the playbook asks for the answer on screen']);
+  });
+
+  it('says what the idea lacks, where the cut ends, and that it opens on a card', async () => {
+    const { dir } = await project(spoken(0.2, 20.5));
+    const [a, b, c, t, o] = story().items;
+    await saveEpisode(dir, story({ items: [{ id: 'k', beat: 'title', card: { text: 'THE LAMP', style: 'bold', sec: 2 } }, a, b, c, t, o, { ...b, id: 'z' }] }));
+    await writeVideo(dir, { idea: { gap: IDEA.gap, stake: '£40' } });
+    const lines = (await checkEpisode(dir, 1)).playbook;
+    expect(lines).toContain('  ✗ opens on a full-screen card (item k) — the playbook opens on the picture');
+    expect(lines).toContain('  ✗ the idea has no question on record — the playbook asks for the gap and the question before cutting');
+    expect(lines).toContain('  ✗ ends on problem (item z), not on outro or blooper');
+    await writeVideo(dir, {});
+    expect((await checkEpisode(dir, 1)).playbook).toContain('  ✗ the idea has no gap and no question on record — the playbook asks for the gap and the question before cutting');
+  });
+
+  it('lists a rule it cannot measure as not measured, with the reason, and never guesses', async () => {
+    // A kept clip without a transcript: its speech is invisible, so nothing about words is measured. No video.json: no idea to read.
+    const { dir } = await project(null);
+    await saveEpisode(dir, story());
+    const r = await checkEpisode(dir, 1);
+    expect(r.playbook).toEqual([
+      'Playbook (build-story):',
+      '  ✓ opens on the picture (item a)',
+      '  – the idea: not measured — the video has no video.json',
+      '  – the title: not measured — the video has no video.json',
+      '  – longest stretch with nothing new: not measured — item a keeps the sound of c001, which has no transcript',
+      '  – words a minute: not measured — item a keeps the sound of c001, which has no transcript',
+      '  ✓ the answer (truth, item t) starts 88% of the way through — the playbook asks for 85–93%',
+      '  ✓ has its answer: a truth beat (item t)',
+      '  ✓ ends on its outro (item o)',
+    ]);
+  });
+
+  it('counts narration lines that are written but not recorded yet, and says so', async () => {
+    const { dir } = await project(spoken(0.2, 20.5));
+    const line = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ');
+    await saveEpisode(dir, story({ slots: [{ id: 'n1', start: 4, end: 16, maxWords: 30, line }] }));
+    const lines = (await checkEpisode(dir, 1)).playbook;
+    expect(lines).toContain('  ✗ 94 words a minute (counting the written narration lines, not recorded yet) — the playbook asks for 145–200; the longest stretch without words is 0:00.5–0:04.0 (item a)');
+    // The words of the line fill the stretch the bare cut left empty.
+    expect(lines).toContain('  ✓ longest stretch with nothing new 3.5 s — the playbook allows 8 s');
+  });
+
+  it('a short against its playbook: the first word, no empty stretch, the idea, the pace, the payoff', async () => {
+    const { dir } = await project(spoken(0.2, 2.4, 4.4));
+    await saveEpisode(dir, short());
+    await writeVideo(dir, { format: 'short', idea: { ...IDEA, doubt: 'the shop said no', stake: '£40' } });
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual([]);
+    expect(r.playbook).toEqual([
+      'Playbook (short):',
+      '  ✓ opens on the picture (item h)',
+      '  ✓ first word at 0.2 s — the playbook asks for one within 0.5 s',
+      '  ✓ the idea is on record: gap, question, doubt, stake',
+      '  – the title: not measured — no title is chosen yet (titles.chosen in episodes/1/video.json)',
+      '  ✓ longest stretch with nothing new 1.5 s — the playbook allows 3 s',
+      '  ✗ 20.0 cuts a minute — the playbook asks for 29 or more; the longest shot is item h, 2.0 s (0:00.0–0:02.0)',
+      '  ✓ the answer (payoff, item p) starts 67% of the way through — the playbook asks for 50–90%',
+      '  ✓ has its answer: a payoff beat (item p)',
+      '  ✓ ends on the picture, with no outro (item p)',
+      '  ✗ ends on payoff (item p), not on a loop beat — a standalone short ends where the restart flows into the hook',
+    ]);
+  });
+
+  it("a teaser's question is the big video's, and its payoff is a small one that is not placed", async () => {
+    const { dir } = await project(spoken(0.2, 2.4, 4.4));
+    await saveEpisode(dir, short());
+    await writeVideo(dir, { format: 'short', from: 2 });
+    await mkdir(join(dir, 'episodes', '2'), { recursive: true });
+    await writeFile(join(dir, 'episodes', '2', 'video.json'), JSON.stringify({ ...VIDEO, idea: IDEA }));
+    const lines = (await checkEpisode(dir, 1)).playbook;
+    expect(lines).toContain("  ✓ the idea is on record: gap, question (no doubt, no stake), the big video's (video 2) where the short has none");
+    expect(lines).toContain('  ✓ pays off one small question: a payoff beat (item p)');
+    expect(lines.join('\n')).not.toContain('of the way through');
+  });
+
+  it("a vlog's pace leaves its held headline out, and it ends on its tag", async () => {
+    const { dir } = await project(spoken(0.2));
+    const bits = Array.from({ length: 6 }, (_, i) => ({ id: `b${i}`, beat: 'bit', clip: 'c001', src: { in: i, out: i + 2 }, ...(i === 0 ? { audio: 'keep' } : {}) }));
+    const items = [...bits, { id: 'h', beat: 'headline', clip: 'c001', src: { in: 0, out: 20 } }, { id: 'g', beat: 'tag', clip: 'c001', src: { in: 20, out: 24 } }];
+    await saveEpisode(dir, base({ items, music: [], captions: { style: 'chosen' } }));
+    await writeVideo(dir, { format: 'vlog', idea: IDEA });
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual([]);
+    expect(r.playbook).toEqual([
+      'Playbook (vlog):',
+      '  ✓ opens on the picture (item b0)',
+      '  ✓ the idea is on record: gap, question (no doubt, no stake)',
+      '  – the title: not measured — no title is chosen yet (titles.chosen in episodes/1/video.json)',
+      '  ✓ longest stretch with nothing new 20.0 s — the playbook allows 20 s',
+      '  ✓ 22.5 cuts a minute outside headline — the playbook asks for 15 or more; in bit 25.0 (15 or more)',
+      '  ✓ the answer (headline, item h) starts 33% of the way through — the playbook asks for 25–71%',
+      '  ✓ has its answer: a headline beat (item h)',
+      '  ✓ ends on its tag (item g)',
+      '  ✓ 0:36 long — it aims for 4:20 and warns past 6:40',
+    ]);
+  });
+
+  it("a video past its format's limit is told once, by the ⚠", async () => {
+    const { dir } = await project(spoken(0.2));
+    const bits = Array.from({ length: 14 }, (_, i) => ({ id: `b${i}`, beat: 'bit', clip: 'c001', src: { in: 0, out: 30 } }));
+    await saveEpisode(dir, base({ items: bits, music: [], captions: { style: 'chosen' } }));
+    await writeVideo(dir, { format: 'vlog' });
+    const r = await checkEpisode(dir, 1);
+    expect(r.warnings).toEqual(["the video is 7:00, longer than the Vlog format's 6:40 — cut whole bits rather than thinning laughs"]);
+    expect(r.playbook.join('\n')).not.toContain('7:00');
+    expect(r.measured!.results.find((x) => x.rule === 'length')).toMatchObject({ status: 'missed', warnings: r.warnings });
+  });
+
+  it("the person's own formula for the format replaces the playbook's numbers, key by key, and the section says which", async () => {
+    const { dir } = await project(spoken(1.5, 2.4, 4.4));
+    await saveEpisode(dir, short());
+    await writeVideo(dir, { format: 'short', idea: IDEA });
+    expect((await checkEpisode(dir, 1)).playbook.slice(0, 3)).toEqual([
+      'Playbook (short):',
+      '  ✓ opens on the picture (item h)',
+      '  ✗ first word at 1.5 s (the cut opens on item h) — the playbook asks for one within 0.5 s',
+    ]);
+    await mine(dir, { playbook: { firstWordSec: 2, cutsPerMin: { min: 18 } } });
+    const r = await checkEpisode(dir, 1);
+    expect(r.playbook).toEqual([
+      "Playbook (short, with your short-mine formula's firstWordSec, cutsPerMin):",
+      '  ✓ opens on the picture (item h)',
+      '  ✓ first word at 1.5 s — the playbook asks for one within 2 s',
+      '  ✓ the idea is on record: gap, question (no doubt, no stake)',
+      '  – the title: not measured — no title is chosen yet (titles.chosen in episodes/1/video.json)',
+      '  ✓ longest stretch with nothing new 1.5 s — the playbook allows 3 s',
+      '  ✓ 20.0 cuts a minute — the playbook asks for 18 or more',
+      '  ✓ the answer (payoff, item p) starts 67% of the way through — the playbook asks for 50–90%',
+      '  ✓ has its answer: a payoff beat (item p)',
+      '  ✓ ends on the picture, with no outro (item p)',
+      '  ✗ ends on payoff (item p), not on a loop beat — a standalone short ends where the restart flows into the hook',
+    ]);
+    // A formula without a playbook changes nothing; another format's formula is not read for this one.
+    await mine(dir, {});
+    expect((await checkEpisode(dir, 1)).playbook[0]).toBe('Playbook (short):');
+    // A broken one is one ✖ line, and the format's own numbers hold.
+    await mine(dir, { playbook: { firstWordSec: 'soon' } });
+    const broken = await checkEpisode(dir, 1);
+    expect(broken.problems).toEqual(['✖ formulas/short-mine.md: playbook.firstWordSec: Invalid input: expected number, received string']);
+    expect(broken.playbook[0]).toBe('Playbook (short):');
   });
 });

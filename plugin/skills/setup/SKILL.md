@@ -30,6 +30,7 @@ Add what the person has to do themselves, for example pasting the Homebrew insta
 
 **Required now, and later**
 - This version of Mirage needs three things: Node 22 or newer, FFmpeg (with ffprobe), and whisper.cpp with its speech model.
+- yt-dlp is optional and only needed for `mirage:analyse` and `mirage:learn` (step 4c): don't install it unless the person wants to analyse a channel or learn from their posted videos.
 - The other tools are marked **later**: a later version of Mirage uses them, and each step says which. Don't install them unless the person asks. When they ask, follow that tool's step.
 
 **Keys and sign-ins**
@@ -47,6 +48,7 @@ The jobs below come from a working "editor while I sleep" setup. Each tool does 
 | 2 | Finisher: joins, encodes, checks black frames and A/V sync | FFmpeg | required now | free |
 | 3 | Speech recognition, so Claude can "hear" the footage: words with timestamps, on this computer | whisper.cpp (`whisper-cli`) with the large-v3-turbo model | required now | free |
 | 3b | Narrator: an AI voice that reads the narration lines, for footage without a voice of its own | Kokoro (`kokoro-js`, Apache 2.0), on this computer | optional, fetched by Mirage on first use | free |
+| 3c | Channel reader: a channel's public video list, thumbnails and captions, for the mirage:analyse skill only | yt-dlp | optional, only for `mirage:analyse` | free |
 | 4 | Animator: titles, logos, diagrams, motion graphics | HyperFrames (HeyGen, Apache 2.0) | later (Phase 4) | free |
 | 5 | Researcher: screenshots of real pages and posts as proof on screen | Chrome with Claude in Chrome | later (Phase 4) | needs a Claude plan |
 | 6 | Screen editor: face + screen recordings, cuts, zooms, layouts | Tella (MCP) | later (Phase 2), optional | Tella account |
@@ -197,6 +199,28 @@ Mirage reads narration lines aloud with [Kokoro](https://huggingface.co/hexgrad/
 
 ---
 
+## Step 4c · yt-dlp (optional; only for mirage:analyse and mirage:learn)
+
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) reads a YouTube channel's public pages: its video list, captions and "most replayed" graph. Only the `mirage:analyse` skill (the `channel` engine tool) and the `mirage:learn` skill (the `learn` engine tool, which reads how the person's own posted videos did) use it, and Mirage never downloads a video with it. Editing, rendering and everything else work without it, so install it only when the person wants to analyse a channel or learn from their posted videos, or when `channel` or `learn` says `✖ yt-dlp was not found`.
+
+**Check:**
+
+```bash
+yt-dlp --version
+```
+
+Mirage also looks in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` (Windows: the WinGet links folder), so a yt-dlp the desktop app's PATH doesn't show is still found.
+
+**Install if missing** (ask first; it is small):
+- macOS: `brew install yt-dlp`
+- Windows: `winget install yt-dlp`
+
+If it is somewhere else, set `WORDEDITS_YTDLP_DIR` to the folder that holds it (then start a new Claude Code session).
+
+**Then:** run the `channel` call again. On a Mac, installing needs no restart; on Windows, start a new Claude Code session first so Mirage sees the new PATH. YouTube changes its pages often: when `channel` says `✖ yt-dlp exited with code …`, update it first (`brew upgrade yt-dlp`, `winget upgrade yt-dlp`).
+
+---
+
 ## Step 5 · HyperFrames (job 4, the animator; later, Phase 4)
 
 Only if the person asks. HyperFrames needs Node 22+ and FFmpeg. It renders through headless Chrome, which it fetches itself.
@@ -309,6 +333,7 @@ Then give the person one table, one row per tool, each with ✓ (working), – (
 | FFmpeg | | |
 | whisper.cpp + model (speech) | | |
 | Kokoro (AI narration voice) | | |
+| yt-dlp (only for mirage:analyse and mirage:learn) | | |
 | HyperFrames | | |
 | Chrome + Claude in Chrome | | |
 | Tella | | |

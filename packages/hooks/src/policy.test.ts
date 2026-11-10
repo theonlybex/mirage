@@ -32,6 +32,11 @@ describe('stepLabel', () => {
     [E('overnight'), {}, 'Getting ready for overnight', 'Ready for overnight'],
     [E('setup_later'), {}, 'Noting that for later', 'Noted for later'],
     [E('formats'), {}, 'Looking up the formats', 'Formats looked up'],
+    [E('formulas'), { id: 'episode' }, 'Looking up the formulas', 'Formulas looked up'],
+    [E('channel'), { url: '@demo' }, 'Reading the channel', 'Channel read'],
+    [E('posted'), { video: 1, url: 'https://youtu.be/aaaaaaaaaa1' }, 'Noting where the video is posted', 'Posted video noted'],
+    [E('learn'), {}, 'Reading how your videos did', 'Results read'],
+    [E('predict'), { video: 2 }, 'Forecasting how the video will do', 'Forecast ready'],
     [E('thumbnail'), { video: 1 }, 'Picking thumbnail frames', 'Thumbnail frames ready'],
     [E('thumbnail'), { video: 1, at: 12.5 }, 'Writing the thumbnail', 'Thumbnail written'],
     [E('thumbnail'), { video: 1, at: 0, text: 'Ship it' }, 'Writing the thumbnail', 'Thumbnail written'],
@@ -77,6 +82,13 @@ describe('videoOf', () => {
     expect(videoOf(E('new_video'), { title: 'x' }, p, session(2))).toBeNull();
     expect(videoOf(E('setup_later'), {}, p, session(2))).toBeNull();
     expect(videoOf(E('formats'), { id: 'short' }, p, session(2))).toBeNull();
+    expect(videoOf(E('formulas'), { id: 'episode' }, p, session(2))).toBeNull();
+    expect(videoOf(E('channel'), { name: 'demo', thumbnails: 'top' }, p, session(2))).toBeNull();
+    // learn is about every posted video (its studio numbers name one inside `studio`); posted is about the video it names.
+    expect(videoOf(E('learn'), { studio: { video: 3, clickRate: 4 } }, p, session(2))).toBeNull();
+    expect(videoOf(E('posted'), { video: 3, url: 'https://youtu.be/aaaaaaaaaa1' }, p, session(2))).toBe(3);
+    // predict forecasts the video it names.
+    expect(videoOf(E('predict'), { video: 3 }, p, session(2))).toBe(3);
   });
 
   it('ignores odd input', () => {
@@ -93,7 +105,7 @@ describe('isChanging and isStage', () => {
   const p = '/proj';
   it('counts engine tools but the read-only ones, and saves inside episodes/ or of catalog.json', () => {
     for (const t of ['check', 'cut', 'ingest', 'restore', 'note_status', 'new_video', 'vo', 'speak']) expect(isChanging(E(t), {}, p)).toBe(true);
-    for (const t of ['versions', 'status', 'get_notes', 'log', 'formats', 'thumbnail']) expect(isChanging(E(t), {}, p)).toBe(false);
+    for (const t of ['versions', 'status', 'get_notes', 'log', 'formats', 'thumbnail', 'formulas', 'channel', 'posted', 'learn', 'predict']) expect(isChanging(E(t), {}, p)).toBe(false);
     expect(isChanging('Write', { file_path: '/proj/episodes/1/episode.json' }, p)).toBe(true);
     expect(isChanging('Edit', { file_path: '/proj/episodes/1/notes/x.txt' }, p)).toBe(true);
     expect(isChanging('MultiEdit', { file_path: '/proj/catalog.json' }, p)).toBe(true);
@@ -105,7 +117,7 @@ describe('isChanging and isStage', () => {
 
   it('isStage is true only for the engine stages', () => {
     for (const t of ['ingest', 'check', 'cut', 'slots', 'guide', 'vo', 'speak', 'render']) expect(isStage(E(t))).toBe(true);
-    for (const t of ['new_project', 'new_video', 'music', 'versions', 'restore', 'status', 'log', 'overnight', 'setup_later', 'formats', 'thumbnail']) expect(isStage(E(t))).toBe(false);
+    for (const t of ['new_project', 'new_video', 'music', 'versions', 'restore', 'status', 'log', 'overnight', 'setup_later', 'formats', 'thumbnail', 'formulas', 'channel', 'posted', 'learn', 'predict']) expect(isStage(E(t))).toBe(false);
     expect(isStage('check')).toBe(false);
     expect(isStage('Write')).toBe(false);
   });
@@ -137,6 +149,30 @@ describe('fileDecision', () => {
     expect(fileDecision('NotebookEdit', { notebook_path: `${footage}/../x.ipynb` }, project, [footage])).toEqual(dotdot);
     expect(fileDecision('Edit', { file_path: 'a\\..\\catalog.json' }, project, [footage])).toEqual(dotdot);
     expect(fileDecision('Read', { file_path: '../x' }, project, [footage])).toBeNull();
+  });
+
+  it('denies writes into the plugin\'s own formats, formulas and skills, and leaves the project\'s formulas folder alone', () => {
+    const project = tmp();
+    const plugin = tmp();
+    for (const f of ['formats', 'formulas', 'skills', 'dist']) mkdirSync(join(plugin, f), { recursive: true });
+    const deny = { deny: "Mirage's own formats, formulas and skills are read-only. Save your own formula in the project's formulas folder, under a new name." };
+    expect(fileDecision('Write', { file_path: join(plugin, 'formulas', 'episode.md') }, project, [], plugin)).toEqual(deny);
+    expect(fileDecision('Edit', { file_path: join(plugin, 'formulas', 'new.md') }, project, [], plugin)).toEqual(deny);
+    expect(fileDecision('MultiEdit', { file_path: join(plugin, 'formats', 'vlog.md') }, project, [], plugin)).toEqual(deny);
+    expect(fileDecision('Write', { file_path: join(plugin, 'skills', 'edit', 'SKILL.md') }, project, [], plugin)).toEqual(deny);
+    expect(fileDecision('NotebookEdit', { notebook_path: join(plugin, 'skills', 'n.ipynb') }, project, [], plugin)).toEqual(deny);
+    // Through a link in the project too.
+    symlinkSync(join(plugin, 'formulas'), join(project, 'theirs'));
+    expect(fileDecision('Write', { file_path: join(project, 'theirs', 'episode.md') }, project, [], plugin)).toEqual(deny);
+    // The person's own formula and analysis, a read of Mirage's, and the rest of the plugin are not this guard's business.
+    expect(fileDecision('Write', { file_path: join(project, 'formulas', 'mine.md') }, project, [], plugin)).toBeNull();
+    expect(fileDecision('Write', { file_path: join(project, 'analysis', 'demo', 'diagnosis.md') }, project, [], plugin)).toBeNull();
+    expect(fileDecision('Read', { file_path: join(plugin, 'formulas', 'episode.md') }, project, [], plugin)).toBeNull();
+    expect(fileDecision('Write', { file_path: join(plugin, 'dist', 'x.txt') }, project, [], plugin)).toBeNull();
+    expect(fileDecision('Write', { file_path: `${join(plugin, 'formulas')}-mine/a.md` }, project, [], plugin)).toBeNull();
+    // Without a known plugin folder there is nothing to guard.
+    expect(fileDecision('Write', { file_path: join(plugin, 'formulas', 'episode.md') }, project, [])).toBeNull();
+    expect(fileDecision('Write', { file_path: join(plugin, 'formulas', 'episode.md') }, project, [], '')).toBeNull();
   });
 
   it('sees through symlinks, both ways', () => {

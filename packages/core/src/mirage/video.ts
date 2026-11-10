@@ -41,19 +41,26 @@ export interface VideoRequest {
   from?: number;
   vlog?: { name: string; number?: number; date: string };
   targetSec?: number;
+  /** The question the video is built on; an answer left empty is left out. */
+  idea?: { gap?: string; question?: string; doubt?: string; stake?: string };
+  /** The one deliberate change against the format's formula. */
+  experiment?: { rule: string; change: string; expect: string };
+  /** The slug of the series the video joins (see series.ts: the series itself is saved once the video has its number). */
+  series?: string;
 }
 
-/** The numbered folders of episodes/. */
-async function videoNumbers(project: string): Promise<number[]> {
+/** The numbered folders of episodes/, lowest first. */
+export async function videoNumbers(project: string): Promise<number[]> {
   const names = await readdir(join(resolve(project), 'episodes')).catch(() => [] as string[]);
-  return names.filter((f) => /^[1-9]\d*$/.test(f)).map(Number);
+  return names.filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a, b) => a - b);
 }
 
 /**
  * The video.json answers of a new video (for `newVideo`) and its format (null when even the build story can't be
  * loaded). `from: n` starts from video n's footage and answers (the request's own are added to them) and makes a short
  * unless a format is given; a vlog without a number gets one more than the highest of the project's vlogs of that name. Only keys asked for or
- * copied are set, so a plain video's video.json is as it always was.
+ * copied are set, so a plain video's video.json is as it always was. `idea` and `experiment` are this video's own: they are
+ * never copied from the video a short is made from.
  */
 export async function planVideo(
   project: string,
@@ -92,6 +99,8 @@ export async function planVideo(
     }
     vlog = { name: req.vlog.name, number, date: req.vlog.date };
   }
+  // Only the answers the person gave: an empty one is no answer.
+  const idea = Object.fromEntries(Object.entries(req.idea ?? {}).flatMap(([k, t]) => (typeof t === 'string' && t.trim() ? [[k, t.trim()]] : []))) as NonNullable<Video['idea']>;
   const video: Omit<Video, 'version' | 'createdAt'> = {
     title: req.title,
     about: add(base.about, req.about),
@@ -102,6 +111,9 @@ export async function planVideo(
     ...(req.from !== undefined ? { from: req.from } : {}),
     ...(vlog ? { vlog } : {}),
     ...(req.targetSec !== undefined ? { targetSec: req.targetSec } : {}),
+    ...(Object.keys(idea).length ? { idea } : {}),
+    ...(req.experiment ? { experiment: req.experiment } : {}),
+    ...(req.series !== undefined ? { series: req.series } : {}),
   };
   let found: Format | null;
   try {
@@ -110,6 +122,11 @@ export async function planVideo(
     found = null;
   }
   return { video, format: found };
+}
+
+/** Writes the video's video.json (the folder must be there). */
+export async function writeVideo(project: string, n: number, video: Video): Promise<void> {
+  await writeJsonFile(videoPath(project, n), VideoSchema, video, `episodes/${n}/video.json`);
 }
 
 /** The video's video.json, or null when it has none. */

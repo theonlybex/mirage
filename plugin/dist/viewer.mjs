@@ -27605,6 +27605,16 @@ var ClaudeProcessSchema = strictObject2({
 });
 
 // packages/shared/src/schemas/video.ts
+var IdeaSchema = strictObject2({
+  gap: external_exports.string().min(1).optional(),
+  question: external_exports.string().min(1).optional(),
+  doubt: external_exports.string().min(1).optional(),
+  stake: external_exports.string().min(1).optional()
+});
+var ExperimentSchema = strictObject2({ rule: external_exports.string().min(1), change: external_exports.string().min(1), expect: external_exports.string().min(1) });
+var SeriesSlugSchema = external_exports.string().regex(/^[a-z0-9][a-z0-9-]*$/);
+var ALSO_PLATFORMS = ["instagram", "tiktok"];
+var AlsoPostedSchema = strictObject2({ platform: external_exports.enum(ALSO_PLATFORMS), url: external_exports.string().min(1) });
 var VideoSchema = strictObject2({
   version: external_exports.literal(1),
   title: external_exports.string().min(1).max(200),
@@ -27621,7 +27631,50 @@ var VideoSchema = strictObject2({
   /** A vlog's series: its name, which one it is, and the date it covers. */
   vlog: strictObject2({ name: external_exports.string().min(1), number: external_exports.number().int().positive(), date: external_exports.string().min(1) }).optional(),
   /** The length the video aims for, in seconds; overrides the format's. */
-  targetSec: external_exports.number().positive().optional()
+  targetSec: external_exports.number().positive().optional(),
+  /** The question the video is built on, when the person said it (`new_video`'s `idea`). */
+  idea: IdeaSchema.optional(),
+  /** The video's experiment (`new_video`'s `experiment`, or written here later by the mirage:learn skill before the video is posted). */
+  experiment: ExperimentSchema.optional(),
+  /** Where the video is live, once the person said so (`posted`): its YouTube address, its id there, and the day that was recorded (YYYY-MM-DD). */
+  posted: strictObject2({
+    url: external_exports.string().min(1),
+    id: external_exports.string().min(1),
+    at: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    /** Where else the same short went (`posted`'s `also`), so the record is complete. */
+    also: external_exports.array(AlsoPostedSchema).optional()
+  }).optional(),
+  /** The series the video belongs to (`new_video`'s `series`): the slug of its folder, `series/<slug>/`. */
+  series: SeriesSlugSchema.optional(),
+  /** The title the person picked and the options they were offered, written by the mirage:edit skill's packaging step; `check` and `predict` hold the chosen one against the format's title shape. */
+  titles: strictObject2({ chosen: external_exports.string().min(1).max(200).optional(), options: external_exports.array(external_exports.string().min(1).max(200)).max(10).optional() }).optional()
+});
+
+// packages/shared/src/schemas/series.ts
+var ThumbLayoutSchema = strictObject2({ face: external_exports.enum(["left", "right"]), share: external_exports.number().min(0.2).max(0.5) });
+var SeriesSchema = strictObject2({
+  version: external_exports.literal(1),
+  /** Equal to the folder's name. */
+  slug: SeriesSlugSchema,
+  name: external_exports.string().min(1).max(200),
+  /** The id of the format its episodes are made in. */
+  format: external_exports.string().min(1),
+  /** The big question the whole series asks. */
+  question: external_exports.string().min(1).optional(),
+  /** The question the latest episode's outro left open: the next episode's recap starts from it. */
+  openQuestion: external_exports.string().min(1).optional(),
+  /** The video whose outro left `openQuestion`. */
+  openQuestionFrom: external_exports.number().int().positive().optional(),
+  /** The running counts (cost so far, attempts used), by name: numbers the person or the catalog gave. */
+  counts: external_exports.record(external_exports.string().min(1), strictObject2({ value: external_exports.number(), unit: external_exports.string().min(1).optional() })),
+  /** The line every episode ends on. */
+  signOff: external_exports.string().min(1).optional(),
+  /** How its titles are shaped, in words ("ATTEMPTING TO … IN [N] DAYS"). */
+  titleShape: external_exports.string().min(1).optional(),
+  thumbnail: ThumbLayoutSchema.optional(),
+  /** Its episodes' video numbers, in order. */
+  episodes: external_exports.array(external_exports.number().int().positive()),
+  createdAt: external_exports.string()
 });
 
 // packages/shared/src/schemas/notes.ts
@@ -27650,7 +27703,12 @@ var NotesFileSchema = strictObject2({
 var MirageProjectSchema = strictObject2({
   version: external_exports.literal(1),
   title: external_exports.string(),
-  createdAt: external_exports.string()
+  createdAt: external_exports.string(),
+  /**
+   * The channels that lead the person's niche, per format id: their YouTube addresses, as the person named them. The
+   * mirage:learn skill writes it and learns from them (with mirage:analyse) while the person's own videos are too few.
+   */
+  niche: external_exports.record(external_exports.string().min(1), external_exports.array(external_exports.string().min(1))).optional()
 });
 var ViewerInfoSchema = strictObject2({
   url: external_exports.string(),
@@ -28461,6 +28519,59 @@ var MIN_PAUSE = NARRATION_GAPS.sentence + 2 * MARGIN_SEC;
 
 // packages/core/src/mirage/formats.ts
 var even2 = external_exports.number().int().positive().refine((n2) => n2 % 2 === 0, { message: "must be even" });
+var share = external_exports.number().min(0).max(1);
+var atLeastOne = (o2) => Object.values(o2).some((v) => v !== void 0);
+var range2 = strictObject2({ min: external_exports.number().min(0).optional(), max: external_exports.number().positive().optional() }).refine(atLeastOne, { message: "needs min or max" });
+var PlaybookSchema = strictObject2({
+  /** The first word is spoken within this many seconds. */
+  firstWordSec: external_exports.number().min(0).optional(),
+  /**
+   * The beat that holds the answer, and where it should start, 0–1 of the length. A teaser short has no answer of its
+   * own to place (it leaves the big video's question open), so this is not measured on one.
+   */
+  answer: strictObject2({ beat: BeatSchema, fromShare: share, toShare: share }).refine((a2) => a2.fromShare <= a2.toShare, { message: "fromShare must not be after toShare" }).optional(),
+  /** The longest stretch, in seconds, in which nothing new may happen: no word (kept sound or narration), no cut and no overlay starting. */
+  emptySec: external_exports.number().positive().optional(),
+  /**
+   * Cuts a minute. `except` names beats whose time and cuts are left out (a vlog's held `headline`). Where the format gives
+   * a pace for particular beats, `beats` holds each one's own range (measured over that beat's shots only), and `after`
+   * the range for what comes after a beat (the shots that start once its last item has ended, `except` its named beats: a
+   * vlog's back half, after the `headline`). The whole-cut number stays.
+   */
+  cutsPerMin: strictObject2({
+    min: external_exports.number().min(0).optional(),
+    max: external_exports.number().positive().optional(),
+    except: external_exports.array(BeatSchema).optional(),
+    beats: external_exports.record(BeatSchema, range2).optional(),
+    after: strictObject2({ beat: BeatSchema, min: external_exports.number().min(0).optional(), max: external_exports.number().positive().optional(), except: external_exports.array(BeatSchema).optional() }).refine((c3) => c3.min !== void 0 || c3.max !== void 0, { message: "needs min or max" }).optional()
+  }).refine((c3) => c3.min !== void 0 || c3.max !== void 0, { message: "needs min or max" }).optional(),
+  /** Spoken words a minute over the whole video. */
+  wordsPerMin: strictObject2({ min: external_exports.number().min(0).optional(), max: external_exports.number().positive().optional() }).refine(atLeastOne, { message: "needs min or max" }).optional(),
+  /** Whether the video's `idea` (video.json: gap, question, doubt, stake) is expected: its gap and its question at least. */
+  ideaNeeded: external_exports.boolean().optional(),
+  /** The beats a video of the format ends on: its last item is one of them. */
+  endsOn: external_exports.array(BeatSchema).min(1).optional(),
+  /**
+   * The measurable parts of the format's title style, held against the title the person chose (video.json's
+   * `titles.chosen`): in capitals, with a number, in the first person, how it ends, how many words. Each is left out when
+   * the format's titles don't share it.
+   */
+  title: strictObject2({
+    allCaps: external_exports.boolean().optional(),
+    hasNumber: external_exports.boolean().optional(),
+    firstPerson: external_exports.boolean().optional(),
+    endsWith: external_exports.enum(["?", "!!"]).optional(),
+    words: range2.optional()
+  }).refine(atLeastOne, { message: "needs at least one of allCaps, hasNumber, firstPerson, endsWith, words" }).optional(),
+  /**
+   * The length a video of the format aims for in this project, in seconds, and the length past which `check` warns
+   * (default 1.5 × targetSec). They replace the format's own `targetSec` and `warnPastSec`, so each format's length is
+   * set per project: first from the channels of the niche, then from the person's own results. A short's limit never
+   * goes past the format's (the longest the platforms take).
+   */
+  targetSec: external_exports.number().positive().optional(),
+  warnPastSec: external_exports.number().positive().optional()
+});
 var FormatSchema = strictObject2({
   /** Equal to the file's name without `.md`. */
   id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
@@ -28482,7 +28593,43 @@ var FormatSchema = strictObject2({
    * vertical format should include `"short": {...}` to get the covered-area check. `new_video { from }` without a format
    * makes a video of the format whose id is `short`, whatever other formats have this.
    */
-  short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional()
+  short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]) }).optional(),
+  /** The format's numbers, which `check` measures a cut against and `predict` scores (see PlaybookSchema). */
+  playbook: PlaybookSchema.optional()
+});
+
+// packages/core/src/mirage/formulas.ts
+var oneLine = external_exports.string().min(1).refine((s) => !/[\r\n]/.test(s), { message: "must be one line" });
+var FormulaSchema = strictObject2({
+  /** Equal to the file's name without `.md`. */
+  id: external_exports.string().regex(/^[a-z][a-z0-9-]*$/),
+  name: external_exports.string().min(1),
+  describe: oneLine,
+  /** The ids of the formats it applies to (`build-story`, `short`, `vlog` …); may be empty. */
+  formats: external_exports.array(external_exports.string().min(1)),
+  /** What it was measured on, and when. */
+  source: oneLine,
+  /**
+   * Only read from a person's `<format>-mine` formula: the playbook numbers their own results gave (see PlaybookSchema).
+   * Each key replaces the format's for that project; `check` says which. This is how learning adjusts the playbook while
+   * Mirage's own files stay as they are.
+   */
+  playbook: PlaybookSchema.optional()
+});
+
+// packages/core/src/mirage/channel.ts
+var VideoSchema2 = strictObject2({
+  id: external_exports.string().min(1),
+  title: external_exports.string(),
+  durationSec: external_exports.number().nonnegative().nullable(),
+  views: external_exports.number().nonnegative().nullable()
+});
+var ChannelFileSchema = strictObject2({
+  version: external_exports.literal(1),
+  /** The page the list was read from. */
+  url: external_exports.string().min(1),
+  gatheredAt: external_exports.string().min(1),
+  videos: external_exports.array(VideoSchema2)
 });
 
 // packages/core/src/mirage/video.ts
@@ -28661,6 +28808,236 @@ async function videoStage(project2, n2) {
   return { stage, deliveries };
 }
 
+// packages/core/src/mirage/prediction.ts
+var STEPS = ["chosen", "stayed", "satisfied"];
+var BANDS = ["below", "around", "above"];
+var day = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+var PredictionSchema = strictObject2({
+  version: external_exports.literal(1),
+  video: external_exports.number().int().positive(),
+  /** The day the forecast was made (YYYY-MM-DD). */
+  at: day,
+  format: external_exports.string().min(1),
+  /** What was there to read: the final render, only a rough cut, or a timeline nothing was rendered from yet. The numbers are the timeline's either way. */
+  cut: external_exports.enum(["final", "rough", "timeline"]),
+  lengthSec: external_exports.number().positive(),
+  steps: external_exports.array(strictObject2({
+    step: external_exports.enum(STEPS),
+    /** Out of 10; null when no rule of the step could be measured. */
+    score: external_exports.number().int().min(0).max(10).nullable(),
+    /** Every rule of the step, with the weight it has in the score; one that was not measured is left out of the score. */
+    rules: external_exports.array(strictObject2({ rule: external_exports.string().min(1), status: external_exports.enum(["met", "missed", "unmeasured"]), weight: external_exports.number().positive() }))
+  })),
+  /** The step with the lowest score; null when every measured step has 10, or none could be measured. */
+  weakest: external_exports.enum(STEPS).nullable(),
+  /** Up to five moments behind the scores, the weakest step's first: where, and the one change to make. */
+  moments: external_exports.array(strictObject2({ step: external_exports.enum(STEPS), rule: external_exports.string().min(1), where: external_exports.string().min(1), change: external_exports.string().min(1) })).max(5),
+  /** Against the format's posted videos; null when too few are posted to compare (the forecast is against the playbook only). */
+  band: external_exports.enum(BANDS).nullable(),
+  /** How many posted videos of the format had results when the forecast was made. */
+  postedVideos: external_exports.number().int().min(0),
+  /** Each of the cut's numbers held against the middle of the better and of the weaker half of the posted videos. */
+  features: external_exports.array(strictObject2({ feature: external_exports.string().min(1), value: external_exports.number(), better: external_exports.number(), weaker: external_exports.number(), sits: external_exports.enum(["better", "between", "weaker"]) })),
+  /**
+   * Only for a short: the cut held against the rules each platform itself states (its formula file), as far as a cut
+   * shows them. No platform publishes weights, so there is no score per platform: each rule is met, missed or not measured.
+   */
+  platforms: external_exports.array(strictObject2({
+    platform: external_exports.enum(["youtube", "instagram", "tiktok"]),
+    rules: external_exports.array(strictObject2({ rule: external_exports.string().min(1), status: external_exports.enum(["met", "missed", "unmeasured"]), text: external_exports.string().min(1) }))
+  })).optional()
+});
+
+// packages/core/src/mirage/learn.ts
+var day2 = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+var FeaturesSchema = strictObject2({
+  version: external_exports.literal(1),
+  video: external_exports.number().int().positive(),
+  /** The day the snapshot was taken (YYYY-MM-DD). */
+  at: day2,
+  format: external_exports.string().min(1),
+  width: external_exports.number().int().positive(),
+  height: external_exports.number().int().positive(),
+  lengthSec: external_exports.number().positive(),
+  /** Seconds before the first spoken word; null without words, or when the words can't be seen. */
+  firstWordSec: external_exports.number().min(0).nullable(),
+  /** Where the answer beat starts, 0–1 of the length (`truth`, a vlog's `headline`, a standalone short's `payoff`). */
+  answerShare: external_exports.number().min(0).max(1).nullable(),
+  cutsPerMin: external_exports.number().min(0),
+  medianShotSec: external_exports.number().positive(),
+  wordsPerMin: external_exports.number().min(0).nullable(),
+  /** The longest stretch with no words, in seconds. */
+  longestSilenceSec: external_exports.number().min(0).nullable(),
+  /** The share of the length a music cue plays under, 0–1 (a cue's dips are not taken off). */
+  musicShare: external_exports.number().min(0).max(1),
+  overlays: external_exports.number().int().min(0),
+  captions: CaptionsSchema.shape.style,
+  /** Only on a short: its kind, and whether its last item is a `pointer`. */
+  short: strictObject2({ kind: external_exports.enum(["teaser", "standalone"]), endsOnPointer: external_exports.boolean() }).optional(),
+  /** The question the video was built on, as video.json holds it. */
+  idea: IdeaSchema.optional(),
+  /** The video's one deliberate change against its format's formula, as video.json holds it. */
+  experiment: ExperimentSchema.optional(),
+  /**
+   * What Mirage knows of the thumbnail: whether episodes/<n>/thumbnail.jpg is there, and whether it was written with
+   * text (null when that isn't on record: no thumbnail, or one not written by the thumbnail tool). What it shows (a face,
+   * the subject) is not known to Mirage: the mirage:learn skill looks at the picture.
+   */
+  thumbnail: strictObject2({
+    exists: external_exports.boolean(),
+    text: external_exports.boolean().nullable(),
+    /** How the thumbnail tool made it (its thumbnail.json): from one frame of the video, or from two sources side by side, and then in which layout. Left out when that isn't on record. */
+    made: external_exports.enum(["one-frame", "two-sources"]).optional(),
+    layout: ThumbLayoutSchema.optional()
+  }),
+  /** Each item's place in the output, so a moment viewers replay can be tied to what the cut shows there. */
+  items: external_exports.array(strictObject2({ id: external_exports.string().min(1), beat: external_exports.string().min(1), start: external_exports.number().min(0), end: external_exports.number().positive() }))
+});
+var StudioSchema = strictObject2({
+  at: day2,
+  /** Where the numbers are from; left out, YouTube Studio. Instagram's and TikTok's are typed by the person from the app's own insights: Mirage reads nothing there. */
+  platform: external_exports.enum(["youtube", ...ALSO_PLATFORMS]).optional(),
+  /** The counts the app shows its owner, for a platform Mirage can't read (on YouTube they are read, not typed). */
+  views: external_exports.number().min(0).optional(),
+  likes: external_exports.number().min(0).optional(),
+  comments: external_exports.number().min(0).optional(),
+  /** Shares, or Instagram's sends. */
+  shares: external_exports.number().min(0).optional(),
+  saves: external_exports.number().min(0).optional(),
+  /** The click rate on impressions, 0–100. */
+  clickRate: external_exports.number().min(0).max(100).optional(),
+  /** The average percentage viewed, 0–100. */
+  percentViewed: external_exports.number().min(0).max(100).optional(),
+  /** The average view duration, in seconds. */
+  avgViewSec: external_exports.number().min(0).optional(),
+  /** For a short: the share that viewed rather than swiped away, 0–100. */
+  viewedVsSwiped: external_exports.number().min(0).max(100).optional(),
+  /** Seconds into the video where the person's retention graph falls or viewers skip, each with what they noted. */
+  drops: external_exports.array(strictObject2({ at: external_exports.number().min(0), note: external_exports.string().min(1).optional() })).optional(),
+  /** Seconds into the video where the retention graph rises: viewers rewatch. */
+  spikes: external_exports.array(strictObject2({ at: external_exports.number().min(0) })).optional()
+});
+var ResultsSchema = strictObject2({
+  version: external_exports.literal(1),
+  video: external_exports.number().int().positive(),
+  /** The YouTube id the numbers are of: a video posted again under another address starts afresh. */
+  id: external_exports.string().min(1),
+  url: external_exports.string().min(1),
+  title: external_exports.string().nullable(),
+  uploadDate: day2.nullable(),
+  durationSec: external_exports.number().positive().nullable(),
+  /** Oldest first, at most one per day (the latest read of a day wins). */
+  snapshots: external_exports.array(strictObject2({ at: day2, views: external_exports.number().min(0), likes: external_exports.number().min(0).nullable(), comments: external_exports.number().min(0).nullable() })),
+  /** YouTube's "most replayed" graph as last read; null when it shows none. */
+  heatmap: external_exports.array(strictObject2({ start: external_exports.number().min(0), end: external_exports.number().min(0), value: external_exports.number().min(0) })).nullable(),
+  /** One entry per day the person gave numbers; a later entry's number replaces an earlier one's. */
+  studio: external_exports.array(StudioSchema)
+});
+var FEATURE_KEYS = ["lengthSec", "firstWordSec", "answerShare", "cutsPerMin", "medianShotSec", "wordsPerMin", "longestSilenceSec", "musicShare", "overlays"];
+var TitleSchema = strictObject2({
+  words: external_exports.number().int().min(0),
+  allCaps: external_exports.boolean(),
+  hasNumber: external_exports.boolean(),
+  /** I, my, me, we, our … */
+  firstPerson: external_exports.boolean(),
+  /** Ends with ? or !! (a bracket tag after it aside). */
+  endsEmphatic: external_exports.boolean(),
+  /** Ends with a tag in brackets: "(GONE WRONG)". */
+  bracketTag: external_exports.boolean()
+});
+var TITLE_KEYS = ["words", "allCaps", "hasNumber", "firstPerson", "endsEmphatic", "bracketTag"];
+var numberOrNull = external_exports.number().nullable();
+var moment = { sec: external_exports.number().min(0), item: external_exports.string().nullable(), beat: external_exports.string().nullable() };
+var EvidenceSchema = strictObject2({
+  version: external_exports.literal(1),
+  at: day2,
+  formats: external_exports.array(strictObject2({
+    format: external_exports.string().min(1),
+    videos: external_exports.array(strictObject2({
+      video: external_exports.number().int().positive(),
+      id: external_exports.string().min(1),
+      title: external_exports.string(),
+      /** The title Mirage has on record as chosen (video.json's `titles.chosen`), when it isn't the live one. */
+      recordedTitle: external_exports.string().optional(),
+      /** The name of the series the video belongs to. */
+      series: external_exports.string().optional(),
+      /** Where else the short went, with the newest numbers the person typed for that platform (null when none). Never read by Mirage. */
+      elsewhere: external_exports.array(strictObject2({ platform: external_exports.enum(ALSO_PLATFORMS), url: external_exports.string().nullable(), numbers: StudioSchema.nullable() })).optional(),
+      titleFeatures: TitleSchema,
+      ageDays: external_exports.number().int().min(0),
+      /** The read the video is at by its age; null before the early read. Before the main read, what it shows is early. */
+      read: external_exports.enum(["early", "main", "late"]).nullable(),
+      views: external_exports.number().min(0),
+      viewsPerDay: external_exports.number().min(0),
+      likesPer1000: numberOrNull,
+      commentsPer1000: numberOrNull,
+      /** The newest of each Studio number given, and the day of the newest entry. */
+      studio: StudioSchema.nullable(),
+      /** The strongest most replayed points, strongest first; `item` and `beat` are null when the cut can't be tied to them. */
+      mostReplayed: external_exports.array(strictObject2({ sec: external_exports.number().min(0), share: external_exports.number().min(0).max(1), item: external_exports.string().nullable(), beat: external_exports.string().nullable() })).nullable(),
+      /** Where the person's Studio retention graph falls or viewers skip, and where it rises, each with the item of the cut playing there. */
+      left: external_exports.array(strictObject2({ ...moment, note: external_exports.string().nullable() })).nullable(),
+      rewatched: external_exports.array(strictObject2(moment)).nullable(),
+      features: FeaturesSchema.nullable()
+    })),
+    /** How the videos are ranked, and the number each was ranked on, best first. */
+    rankedBy: external_exports.enum(["views-at-the-same-age", "views-per-day"]),
+    rankedAtAgeDays: external_exports.number().int().positive().nullable(),
+    ranking: external_exports.array(strictObject2({ video: external_exports.number().int().positive(), value: external_exports.number().min(0) })),
+    /** The better half against the weaker half, the median of each numeric feature; null with fewer than 4 videos. */
+    halves: strictObject2({
+      better: external_exports.array(external_exports.number().int().positive()),
+      weaker: external_exports.array(external_exports.number().int().positive()),
+      features: external_exports.array(strictObject2({ feature: external_exports.enum(FEATURE_KEYS), better: numberOrNull, weaker: numberOrNull })),
+      /** The titles: the middle word count of each half, and for the rest how many of the half's titles have it. */
+      titles: external_exports.array(strictObject2({ feature: external_exports.enum(TITLE_KEYS), better: external_exports.number(), weaker: external_exports.number() }))
+    }).nullable(),
+    /**
+     * Each video that carries an experiment, held against the format's other posted videos on the number its `expect`
+     * names (found by its words: click, swipe, percentage viewed, average view, likes, comments), else on the ranking's.
+     */
+    experiments: external_exports.array(strictObject2({
+      video: external_exports.number().int().positive(),
+      rule: external_exports.string(),
+      change: external_exports.string(),
+      expect: external_exports.string(),
+      measure: external_exports.string(),
+      value: external_exports.number(),
+      /** The middle value of the other videos that have the number, and how many they are; null with none. */
+      others: numberOrNull,
+      otherVideos: external_exports.number().int().min(0)
+    })),
+    /**
+     * Each video that had a forecast (`predict`, before it was posted) against where it landed: its place in the ranking,
+     * the band that place is (the better half is above, the weaker half below, the middle video around; null with fewer
+     * than 4 videos), and whether the forecast's band was right (null when it gave none, or none can be said yet).
+     */
+    forecasts: external_exports.array(strictObject2({
+      video: external_exports.number().int().positive(),
+      band: external_exports.enum(BANDS).nullable(),
+      weakest: external_exports.enum(STEPS).nullable(),
+      scores: external_exports.array(strictObject2({ step: external_exports.enum(STEPS), score: external_exports.number().nullable() })),
+      rank: external_exports.number().int().positive(),
+      of: external_exports.number().int().positive(),
+      landed: external_exports.enum(BANDS).nullable(),
+      right: external_exports.boolean().nullable()
+    })).default([]),
+    confidence: external_exports.enum(["weak", "fair", "strong"])
+  })),
+  /** Posted videos left out this time, each with why. */
+  leftOut: external_exports.array(strictObject2({ video: external_exports.number().int().positive(), why: external_exports.string() }))
+});
+var InfoSchema = external_exports.object({
+  title: external_exports.string().nullish(),
+  /** YYYYMMDD. */
+  upload_date: external_exports.string().nullish(),
+  duration: external_exports.number().nullish(),
+  view_count: external_exports.number().nullish(),
+  like_count: external_exports.number().nullish(),
+  comment_count: external_exports.number().nullish(),
+  heatmap: external_exports.array(external_exports.object({ start_time: external_exports.number(), end_time: external_exports.number(), value: external_exports.number() })).nullish()
+});
+
 // packages/core/src/mirage/session-files.ts
 import { appendFile, link as link2, mkdir as mkdir3, readdir as readdir4, readFile as readFile5, rename as rename3, rm as rm4, stat as stat4, utimes, writeFile as writeFile4 } from "node:fs/promises";
 import { dirname as dirname3, join as join9, resolve as resolve3 } from "node:path";
@@ -28837,10 +29214,13 @@ async function noteStatuses(project2, n2) {
 var REPORTED_ENGINE_TOOLS = new Set(["ingest", "music", "check", "cut", "slots", "guide", "vo", "speak", "render", "restore", "overnight"].map((t) => `mcp__plugin_mirage_engine__${t}`));
 
 // packages/core/src/mirage/one-line.ts
-function oneLine(text, max = 1e3) {
+function oneLine2(text, max = 1e3) {
   const flat = text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}\u2026` : flat;
 }
+
+// packages/core/src/mirage/predict.ts
+var BAND_MARGIN = 1 / 3;
 
 // packages/viewer/src/fallback.ts
 import { readFileSync as readFileSync4 } from "node:fs";
@@ -29013,9 +29393,9 @@ async function handleMedia(req, roots) {
     "accept-ranges": "bytes",
     "cache-control": "no-cache"
   };
-  const range2 = parseRange(req.headers.get("range"), size);
-  if (range2 === "none") return new Response(null, { status: 416, headers: { ...headers, "content-range": `bytes */${size}` } });
-  const [status, start, end2] = range2 === "whole" ? [200, 0, size - 1] : [206, range2.start, range2.end];
+  const range3 = parseRange(req.headers.get("range"), size);
+  if (range3 === "none") return new Response(null, { status: 416, headers: { ...headers, "content-range": `bytes */${size}` } });
+  const [status, start, end2] = range3 === "whole" ? [200, 0, size - 1] : [206, range3.start, range3.end];
   const length = size === 0 ? 0 : end2 - start + 1;
   headers["content-length"] = String(length);
   if (status === 206) headers["content-range"] = `bytes ${start}-${end2}/${size}`;
@@ -29431,7 +29811,7 @@ var AUDIO_LIMIT = 25 << 20;
 var TEXT_LIMIT = 2e3;
 var SAY_LIMIT = 1e3;
 var SPEECH_NOT_READY = "Speech recognition isn't set up yet. Run /mirage:setup in Claude, or type the note.";
-var oneLine2 = (text, max = SAY_LIMIT) => oneLine(text, max);
+var oneLine3 = (text, max = SAY_LIMIT) => oneLine2(text, max);
 function errorResult(e) {
   if (e instanceof HttpError) return { status: e.status, body: { error: e.message } };
   if (e instanceof external_exports.ZodError) return { status: 400, body: { error: describeError(e).message } };
@@ -29489,13 +29869,13 @@ async function requireVideo(project2, n2) {
   const ok = await stat7(episodeDir(project2, n2)).then((s) => s.isDirectory(), () => false);
   if (!ok) throw new HttpError(404, `There is no video ${n2}.`);
 }
-async function videoNumbers(project2) {
+async function videoNumbers2(project2) {
   const names = await readdir7(join15(project2, "episodes")).catch(() => []);
   return names.filter((f) => /^[1-9]\d*$/.test(f)).map(Number).sort((a2, b) => a2 - b);
 }
 async function listVideos(project2) {
   return Promise.all(
-    (await videoNumbers(project2)).map(async (number4) => {
+    (await videoNumbers2(project2)).map(async (number4) => {
       const title = (await readVideo(project2, number4).catch(() => null))?.title ?? `Video ${number4}`;
       return { number: number4, title, ...await videoStage(project2, number4) };
     })
@@ -29519,7 +29899,7 @@ async function control(ctx, req) {
   const correction = b.resume.correction?.trim() || null;
   const current = await readControl(project2, b.video);
   const hookWillTake = current.paused && await inTurn(project2, b.video);
-  if (correction && !hookWillTake) ctx.say(`Mirage viewer: the person says about video ${b.video}: \u201C${oneLine2(correction)}\u201D`);
+  if (correction && !hookWillTake) ctx.say(`Mirage viewer: the person says about video ${b.video}: \u201C${oneLine3(correction)}\u201D`);
   if (current.paused) return { status: 200, body: await writeControl(project2, b.video, { paused: false, pauseNow: false, correction: hookWillTake ? correction : null }) };
   return { status: 200, body: current };
 }
@@ -29538,7 +29918,7 @@ async function sendVideoNotes(ctx, req) {
   const sent = await sendNotes(ctx.project, video);
   if (!sent.length) return { status: 200, body: { sent: 0, round: null } };
   const versions = await listVersions(ctx.project, video);
-  const labels = [...new Set(sent.map((x) => oneLine2(versions.find((v) => v.id === x.versionId)?.label ?? x.versionId, 200)))];
+  const labels = [...new Set(sent.map((x) => oneLine3(versions.find((v) => v.id === x.versionId)?.label ?? x.versionId, 200)))];
   ctx.say(`Mirage viewer: the person sent ${sent.length} note(s) on video ${video} (${labels.join(", ")}). Use the mirage:notes skill for video ${video}.`);
   return { status: 200, body: { sent: sent.length, round: sent[0].round } };
 }
@@ -29566,7 +29946,7 @@ async function voiceNote(ctx, req, url2) {
     await rm7(wav, { force: true });
   }
 }
-var sayVoiceover = (ctx, video, path6) => ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${video}: \u201C${oneLine2(path6)}\u201D. Use the mirage:voiceover skill.`);
+var sayVoiceover = (ctx, video, path6) => ctx.say(`Mirage viewer: the person dropped a voice-over recording for video ${video}: \u201C${oneLine3(path6)}\u201D. Use the mirage:voiceover skill.`);
 async function voiceover(ctx, req) {
   const boundary = multipartBoundary(req.headers["content-type"]);
   if (boundary !== null) return voiceoverUpload(ctx, req, boundary);
@@ -29808,7 +30188,7 @@ async function startViewer(o2) {
   const sendJson = (res, r, extra = {}) => send(res, r.status, "application/json; charset=utf-8", JSON.stringify(r.body), extra);
   const sendStatic = (res, r) => r.status === 200 ? send(res, 200, r.type ?? "application/octet-stream", r.body ?? "") : send(res, r.status, "text/plain; charset=utf-8", r.status === 400 ? "Bad request" : "Not found");
   const mediaRoots = async () => {
-    const footage = await Promise.all((await videoNumbers(project2)).map(async (n2) => (await readVideo(project2, n2).catch(() => null))?.footage ?? []));
+    const footage = await Promise.all((await videoNumbers2(project2)).map(async (n2) => (await readVideo(project2, n2).catch(() => null))?.footage ?? []));
     return [project2, ...footage.flat()];
   };
   async function route(req, res) {

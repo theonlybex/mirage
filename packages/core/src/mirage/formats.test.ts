@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { formatOf, FormatSchema, formatsDir, loadFormats, type Format } from './formats.js';
+import { formatOf, FormatSchema, formatsDir, loadFormats, shortKind, type Format } from './formats.js';
 
 const FM = {
   id: 'demo', name: 'Demo', describe: 'A demo format.', words: ['demo'], beats: ['open', 'close'],
@@ -36,19 +36,28 @@ describe('the plugin\'s format files', () => {
       words: ['build', 'episode', 'part', 'series', 'project', 'devlog'],
       beats: ['cold-open', 'title', 'recap', 'new-toy', 'problem', 'montage', 'twist', 'truth', 'outro', 'blooper'],
       output: { width: 1920, height: 1080 },
+      playbook: { answer: { beat: 'truth', fromShare: 0.85, toShare: 0.93 }, emptySec: 8, wordsPerMin: { min: 145, max: 200 }, ideaNeeded: true, endsOn: ['outro', 'blooper'] },
     });
     expect(by['build-story']!.targetSec).toBeUndefined();
     expect(by.short).toMatchObject({
-      name: 'Short', describe: '20–45 s vertical video that opens on its hook; made from a big video it\'s a teaser pointing to it.',
+      name: 'Short', describe: 'A vertical video that opens on its hook and is as long as its story needs; made from a big video it\'s a teaser that answers one small question and leaves the big one open.',
       words: ['short', 'shorts', 'reel', 'reels', 'tiktok', 'teaser', 'clip'], beats: ['hook', 'tease', 'pointer', 'payoff', 'loop'],
-      targetSec: 45, warnPastSec: 60, output: { width: 1080, height: 1920 }, captions: { style: 'pop', position: 'middle' }, short: { kind: 'teaser' },
+      warnPastSec: 180, output: { width: 1080, height: 1920 }, captions: { style: 'pop', position: 'middle' }, short: { kind: 'teaser' },
+      playbook: { firstWordSec: 0.5, answer: { beat: 'payoff', fromShare: 0.5, toShare: 0.9 }, emptySec: 3, cutsPerMin: { min: 29 }, ideaNeeded: true },
     });
+    // No length is favoured for a short: it has a limit (the longest the platforms take) and no target.
+    expect(by.short!.targetSec).toBeUndefined();
     expect(by.vlog).toMatchObject({
       name: 'Vlog', describe: 'A day or a week of someone\'s life told as a few funny bits, ending on the headline bit.',
       words: ['vlog', 'day in the life', 'trip', 'week', 'hanging out', 'weekend'],
       beats: ['cold-open', 'title-card', 'premise', 'bit', 'headline', 'sponsor', 'plugs', 'tag'],
       targetSec: 260, warnPastSec: 400, output: { width: 1920, height: 1080 }, captions: { style: 'chosen' },
+      playbook: { answer: { beat: 'headline', fromShare: 0.25, toShare: 0.71 }, emptySec: 20, cutsPerMin: { min: 15, except: ['headline'] }, ideaNeeded: true, endsOn: ['tag'] },
     });
+    // Every playbook number is one the format's own rules or its formula state: a key with no number behind it is left out.
+    expect(Object.keys(by['build-story']!.playbook!)).not.toContain('firstWordSec');
+    expect(Object.keys(by.vlog!.playbook!)).not.toContain('wordsPerMin');
+    for (const f of Object.values(by)) for (const beat of [f.playbook?.answer?.beat, ...(f.playbook?.endsOn ?? []), ...(f.playbook?.cutsPerMin?.except ?? [])]) if (beat) expect(f.beats, `${f.id}'s playbook names ${beat}`).toContain(beat);
   });
 
   it('have rules that name every beat of their front matter, as `beat`', () => {
@@ -62,20 +71,59 @@ describe('the plugin\'s format files', () => {
     expect(story.rules).toContain('mirage:edit');
     // It has a Packaging part, so it can't say it adds nothing.
     expect(story.rules).not.toContain('This file adds nothing to them.');
-    expect(story.rules).toContain("its Packaging part below only points to the edit skill's");
+    expect(story.rules).toContain("Its Packaging part below builds on the edit skill's");
   });
 
-  it('the short keeps the payoff in the big video, and says how the two kinds end', () => {
+  it('the build story has its question, its series and its pacing', () => {
+    const story = loadFormats().formats.find((f) => f.id === 'build-story')!;
+    for (const words of ['## The question', 'The gap', 'The doubt', 'The stake', 'Never invent one', '3–6 episodes', 'first 60%', '85–93%', 'every 40–55 s', '145–200 words a minute', 'Never pad', 'never the result']) {
+      expect(story.rules, `build story never says ${words}`).toContain(words);
+    }
+  });
+
+  it('the short keeps the big answer in the big video, and says how the two kinds end', () => {
     const short = loadFormats().formats.find((f) => f.id === 'short')!;
     expect(short.rules).toContain("A teaser short never shows the headline's reveal.");
-    for (const words of ['frame 0', 'Full video on my channel', 'Related video', 'link in the bio', '1080×1920', '"style": "pop", "position": "middle"', '`from`']) {
+    for (const words of ['frame 0', 'Related video', 'link in the bio', '1080×1920', '"style": "pop", "position": "middle"', '`from`']) {
       expect(short.rules, `short never says ${words}`).toContain(words);
     }
   });
 
+  it('a teaser pays off one small question, has no outro card, and its pointer is optional', () => {
+    const short = loadFormats().formats.find((f) => f.id === 'short')!;
+    for (const words of [
+      'Its beats are `hook` → `tease` → `payoff`, with no loop',
+      'A teaser never ends with nothing paid off',
+      'No outro card. A teaser never ends on a full-screen card',
+      'YouTube\'s "Related video" link and Instagram\'s caption line do the pointing',
+      '`pointer` is optional: at most a line the person says on camera',
+      'an overlay over the last shot while the picture keeps playing',
+    ]) expect(short.rules, `short never says ${words}`).toContain(words);
+    expect(short.rules).not.toContain('Full video on my channel');
+    expect(short.rules).not.toContain('It still ends on the `pointer`');
+  });
+
+  it('the short favours no length: a starting point cut by empty seconds, and the platforms\' limit', () => {
+    const short = loadFormats().formats.find((f) => f.id === 'short')!;
+    for (const words of ['no length is favoured', 'As a starting point, a first cut usually lands between 20 and 45 s', 'then cut every empty second', '`check` warns past 3:00, the longest video YouTube Shorts and Instagram Reels take']) {
+      expect(short.rules, `short never says ${words}`).toContain(words);
+    }
+    expect(short.describe).not.toMatch(/\d+–\d+ s/);
+    expect(short.rules).not.toContain('A short is a 20–45 s');
+    expect(short.rules).not.toContain('warns past 60 s');
+  });
+
+  it('the short has its question, as the build story and the vlog do: for a teaser, the big video\'s', () => {
+    const short = loadFormats().formats.find((f) => f.id === 'short')!;
+    for (const words of ['## The question', 'The gap', 'The question', 'The doubt', 'The stake', 'Never invent one', "For a teaser the question is the big video's"]) {
+      expect(short.rules, `short never says ${words}`).toContain(words);
+    }
+    expect(short.rules.indexOf('## The question')).toBeLessThan(short.rules.indexOf('## The hook, in frame 0'));
+  });
+
   it('the vlog has the playbook\'s numbers and guardrails', () => {
     const vlog = loadFormats().formats.find((f) => f.id === 'vlog')!;
-    for (const words of ['8–15 s', '2 s', '30–50 s', '`mono`', 'Vlog #', 'Cut out on the laugh', 'one song per bit', 'Cut whole bits before thinning laughs', '`hide`', 'injur', "the number counts up from the project's last vlog of that name by itself"]) {
+    for (const words of ['8–15 s', '2 s', '30–50 s', '`mono`', 'Vlog #', 'Cut out on the laugh', 'one song per bit', 'Cut whole bits before thinning laughs', '`hide`', 'injur', "the number counts up from the project's last vlog of that name by itself", '## The question', 'how will this person react?', 'used only when it is true of the footage']) {
       expect(vlog.rules, `vlog never says ${words}`).toContain(words);
     }
   });
@@ -154,7 +202,7 @@ describe('loadFormats', () => {
       '✖ plugin/formats/noend.md: front matter has no closing --- line',
       '✖ plugin/formats/nofront.md: no front matter: the file must start with a --- line, a JSON object, and a --- line',
       '✖ plugin/formats/odd.md: output.width: must be even',
-      '✖ plugin/formats/unknown.md: unknown key "wrods" (valid keys: id, name, describe, words, beats, targetSec, warnPastSec, output, captions, short)',
+      '✖ plugin/formats/unknown.md: unknown key "wrods" (valid keys: id, name, describe, words, beats, targetSec, warnPastSec, output, captions, short, playbook)',
     ]);
   });
 
@@ -178,6 +226,33 @@ describe('FormatSchema', () => {
     expect(FormatSchema.safeParse({ ...FM, output: { width: 1080, height: 1919 } }).success).toBe(false);
     expect(FormatSchema.safeParse({ ...FM, short: { kind: 'standalone' } }).success).toBe(true);
     expect(FormatSchema.safeParse({ ...FM, short: { kind: 'other' } }).success).toBe(false);
+  });
+});
+
+describe('PlaybookSchema', () => {
+  const ok = (playbook: object) => FormatSchema.safeParse({ ...FM, playbook }).success;
+  it('every key is optional, and a format without a playbook is fine', () => {
+    expect(ok({})).toBe(true);
+    expect(FormatSchema.safeParse(FM).success).toBe(true);
+    expect(ok({ firstWordSec: 0, emptySec: 3, ideaNeeded: false, endsOn: ['tag'], answer: { beat: 'truth', fromShare: 0.85, toShare: 0.93 }, cutsPerMin: { min: 15, max: 25, except: ['headline'] }, wordsPerMin: { max: 200 } })).toBe(true);
+  });
+
+  it('refuses a number that can\'t be one, a range with neither end, shares out of order, and a misspelled key', () => {
+    for (const bad of [
+      { firstWordSec: -1 }, { emptySec: 0 }, { endsOn: [] }, { endsOn: ['The End'] }, { cutsPerMin: {} }, { cutsPerMin: { except: ['headline'] } }, { wordsPerMin: {} },
+      { answer: { beat: 'truth', fromShare: 0.9, toShare: 0.8 } }, { answer: { beat: 'truth', fromShare: 0.5, toShare: 1.2 } }, { answer: { beat: 'truth' } }, { firstWord: 1 },
+    ]) expect(ok(bad), JSON.stringify(bad)).toBe(false);
+  });
+});
+
+describe('shortKind', () => {
+  const format = (short?: object) => ({ ...FM, ...(short ? { short } : {}) }) as Format;
+  const video = { version: 1 as const, title: 't', about: '', mention: '', hide: '', footage: [], createdAt: 'x' };
+  it('a short made from a big video is the format\'s kind, one without stands alone, and any other format is no short', () => {
+    expect(shortKind(format({ kind: 'teaser' }), { ...video, from: 2 })).toBe('teaser');
+    expect(shortKind(format({ kind: 'teaser' }), video)).toBe('standalone');
+    expect(shortKind(format({ kind: 'teaser' }), null)).toBe('standalone');
+    expect(shortKind(format(), { ...video, from: 2 })).toBeNull();
   });
 });
 

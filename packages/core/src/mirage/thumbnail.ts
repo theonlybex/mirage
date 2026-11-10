@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { isCard, type CardItem, type Catalog, type ClipItem, type Episode } from '@wordedits/shared';
+import { isAbsolute, join } from 'node:path';
+import { isCard, type CardItem, type Catalog, type ClipItem, type Episode, type ThumbLayout } from '@wordedits/shared';
 import type { MediaTools } from '../media-tools.js';
 import { ffNum } from './encode.js';
 import { MirageError } from './errors.js';
@@ -14,6 +14,7 @@ import { cardImagesFor } from './cards.js';
 import { assDraw, buildAss, scaler, tidy } from './overlays.js';
 import { cardPicture, cardPictureInput, episodeDir, filterValue, frameTolerance, loadEpisode, readFrom, sourcesFor } from './render-episode.js';
 import { moveFrames } from './move.js';
+import { DEFAULT_FACE_SHARE, seriesOf } from './series.js';
 import { layoutTimeline, type LaidItem } from './timeline.js';
 
 /**
@@ -357,12 +358,104 @@ export function thumbnailAss(width: number, height: number, text: string): strin
   ].join('\n');
 }
 
+/**
+ * `episodes/<n>/thumbnail.json`: how the thumbnail beside it was last made, for `posted`'s snapshot (features.json) and so
+ * for `learn`: `made` (`one-frame`, with its `at`, or `two-sources`, with each source and the `layout`), and the `text`.
+ */
+export const THUMBNAIL_RECORD = 'thumbnail.json';
+
+/** One of the two sources of a two-source thumbnail: a second of the video (`at`), or a picture inside the project (`image`, a photo the person gave); `focus` is the point its crop keeps in view. */
+export interface ThumbPart {
+  at?: number;
+  image?: string;
+  focus?: { x: number; y: number };
+}
+
+/**
+ * A thumbnail from two sources, for when the face and the subject are never in one good frame: two crops side by side
+ * with a thin white line between them, the face on `side` taking `share` of the width (default: the series' layout, else
+ * the left third) and the subject filling the rest. Nothing is cut out and no background is removed.
+ */
+export interface TwoSources {
+  face: ThumbPart;
+  subject: ThumbPart;
+  side?: 'left' | 'right';
+  share?: number;
+}
+
+/** The white line between the two crops, in pixels of the 1280-wide thumbnail. */
+const JOIN_PX = 8;
+
 export interface Thumbnail {
   file: string;
   width: number;
   height: number;
-  /** The clip and the second of it the picture is, or the card (its frame from the cut). */
-  from: { clip: string; src: number } | 'card';
+  /** The clip and the second of it the picture is, or the card (its frame from the cut); for two sources, each one in words and the layout. */
+  from: { clip: string; src: number } | 'card' | { face: string; subject: string; layout: ThumbLayout };
+  /** What the person should hear about (⚠): a layout that differs from the series'. */
+  warnings?: string[];
+}
+
+const LOOK = 'unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08';
+
+/**
+ * The input and the filters that make a clip item's frame a width×height picture: its frame read from the clip file
+ * itself (not the compressed cut), framed as the video frames it there (thumbCrop), sharpened and brightened a little.
+ */
+function clipPicture(ep: Episode, catalog: Catalog, shown: Extract<ThumbSource, { src: number }>, focus: { x: number; y: number } | undefined, size: { width: number; height: number }): { input: string[]; picture: string } {
+  const fps = ep.output.fps;
+  const item = shown.laid.item as ClipItem;
+  const src = sourcesFor({ ...ep, items: [item] }, catalog).get(item.clip)!;
+  // Read as the render's chunks read a clip (readFrom: the clip's clock, a late video stream included; FFmpeg turns a
+  // rotated clip upright as it does there), and pick the frame the render shows: the latest at or before the time, a
+  // quarter of a frame late still counting, on the render's clock (setpts … / speed, then fps). The seek goes to the
+  // keyframe before and decodes from there, so the frame is exact.
+  // The time can be at or past the clip's last frame (a freeze on its end, a shot running a little past the video):
+  // reading from there, FFmpeg would have nothing at or after 0 and write nothing. So it reads from `back` seconds
+  // earlier (a frame's worth, and at least a second before the video's end), puts the time `k` output frames in, and
+  // keeps frame k, or the last frame there is when the clip ends first, as the render's hold does (tpad clones it).
+  const videoEnd = (() => {
+    const p = catalog.clips.find((c) => c.id === item.clip)!.probe;
+    return p.videoDurationSec ?? p.durationSec;
+  })();
+  const from0 = Math.max(0, Math.min(shown.src - item.speed / fps, videoEnd - 1));
+  const back = shown.src - from0;
+  const k = Math.max(0, Math.ceil((back * fps) / item.speed - 1e-6));
+  // What the video shows on that frame: the item's framing, at the move's zoom and focus there.
+  const framing = thumbFraming(shown.laid, shown.frame, fps);
+  const crop = thumbCrop({ frame: item.frame, zoom: framing.zoom, focus: focus ?? framing.focus, output: ep.output, thumb: size });
+  return {
+    input: readFrom(src, from0),
+    picture:
+      `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,` +
+      `trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',` +
+      `${crop},scale=${size.width}:${size.height}:flags=lanczos,setsar=1,${LOOK}`,
+  };
+}
+
+const PHOTO_HINT = 'Put the picture (a PNG or JPEG) in the project folder and give its path from there, e.g. photos/me.jpg.';
+const badFocus = (f?: { x: number; y: number }) => f !== undefined && ![f.x, f.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1);
+
+/** One source of a two-source thumbnail as an input and the filters that make it a width×height picture, and what it is in words. */
+function partPicture(project: string, ep: Episode, catalog: Catalog, which: 'face' | 'subject', part: ThumbPart, size: { width: number; height: number }, k: number): { input: string[]; picture: string; what: string } {
+  if ((part.at === undefined) === (part.image === undefined)) {
+    throw new MirageError('BAD_INPUT', `the ${which} needs at (a second of the video) or image (a picture inside the project), one of the two`, '');
+  }
+  if (badFocus(part.focus)) throw new MirageError('BAD_INPUT', 'focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)', '');
+  if (part.image !== undefined) {
+    const image = part.image;
+    if (isAbsolute(image) || /^[A-Za-z]:/.test(image) || image.split(/[\\/]/).includes('..')) throw new MirageError('BAD_INPUT', `the ${which}'s picture ${image} must be a plain path inside the project`, PHOTO_HINT);
+    let pic;
+    try {
+      pic = cardImagesFor(project, { ...ep, items: [{ id: which, beat: 'photo', card: { text: '', style: 'image', sec: 1, image }, hold: 0, quiet: true } as CardItem] }).get(which)!;
+    } catch (e) {
+      throw new MirageError('BAD_INPUT', `the ${which}'s picture ${image} ${(e as Error).message.endsWith('is missing') ? 'is missing' : "isn't a PNG or JPEG"}`, PHOTO_HINT);
+    }
+    return { input: cardPictureInput(pic, ep.output.fps), picture: `${cardPicture(pic, size, k, part.focus ?? { x: 0.5, y: 0.5 })},trim=end_frame=1,${LOOK}`, what: image };
+  }
+  const shown = thumbSource(ep, part.at!);
+  if ('card' in shown) throw new MirageError('BAD_INPUT', `the ${which}: the video shows a card at ${secs(part.at!)} s`, 'Pick a second that shows a clip, or give a picture with image.');
+  return { ...clipPicture(ep, catalog, shown, part.focus, size), what: `${(shown.laid.item as ClipItem).clip} at ${secs(Math.round(shown.src * 100) / 100)} s` };
 }
 
 /**
@@ -375,33 +468,60 @@ export interface Thumbnail {
  * Then `text` (at most MAX_THUMB_WORDS words) drawn on it (thumbnailAss), and the colours turned into a JPEG's own
  * (JPEG_COLOUR). Written beside the old one and then renamed over it, so a stop or failure leaves an earlier thumbnail as
  * it was; a thumbnail.jpg open in another app is said so.
+ * With `two` instead of `at`: the thumbnail is built from two sources (TwoSources), each a second of the video or a
+ * picture inside the project, cropped to its own part of a landscape thumbnail around its own `focus`. The layout is the
+ * one given, else the one the video's series keeps (so every episode matches), else the face on the left third; one that
+ * differs from the series' comes back as a warning. How it was made is recorded in thumbnail.json either way.
  */
 export async function writeThumbnail(
   project: string,
   n: number,
-  o: { at: number; text?: string; focus?: { x: number; y: number } },
+  o: { at?: number; text?: string; focus?: { x: number; y: number }; two?: TwoSources },
   tools: MediaTools,
   run: { signal?: AbortSignal } = {},
 ): Promise<Thumbnail> {
   const words = o.text === undefined ? 0 : thumbWordCount(o.text);
   if (words > MAX_THUMB_WORDS) throw new MirageError('BAD_INPUT', `thumbnail text is ${words} words — keep it to ${MAX_THUMB_WORDS} or fewer`, '');
-  if (o.focus && ![o.focus.x, o.focus.y].every((v) => Number.isFinite(v) && v >= 0 && v <= 1)) {
-    throw new MirageError('BAD_INPUT', 'focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)', '');
-  }
+  if (badFocus(o.focus)) throw new MirageError('BAD_INPUT', 'focus x and y go from 0 to 1 (0 = the left or top edge, 1 = the right or bottom edge)', '');
+  if ((o.at === undefined) === (o.two === undefined)) throw new MirageError('BAD_INPUT', 'a thumbnail is written from at (one second of the video) or from face and subject (two sources), one of the two', '');
   const dir = episodeDir(project, n);
   const ep = await loadEpisode(project, n);
   const fps = ep.output.fps;
-  const shown = thumbSource(ep, o.at);
   const { width: W, height: H } = thumbSize(ep.output);
-
-  const look = 'unsharp=5:5:0.6:5:5:0.0,eq=brightness=0.03:saturation=1.08';
+  const look = LOOK;
   const fontsDir = filterValue(bundledFontsDir());
   const scripts: [string, string][] = [];
   let input: string[];
   let picture: string;
   let from: Thumbnail['from'];
   let where: { name: string; hint: string };
-  if ('card' in shown) {
+  /** For two sources: the graph that joins them, ending in [two]. */
+  let graph: string | null = null;
+  let record: object;
+  const warnings: string[] = [];
+  const shown = o.two ? null : thumbSource(ep, o.at!);
+  if (o.two) {
+    if (W < H) throw new MirageError('BAD_INPUT', 'a thumbnail from two sources is for a landscape video', "A vertical video's cover is one frame: call thumbnail with at.");
+    const kept = await seriesOf(project, n);
+    const layout: ThumbLayout = { face: o.two.side ?? kept?.thumbnail?.face ?? 'left', share: o.two.share ?? kept?.thumbnail?.share ?? DEFAULT_FACE_SHARE };
+    if (!(layout.share >= 0.2 && layout.share <= 0.5)) throw new MirageError('BAD_INPUT', "the face's share of the width goes from 0.2 to 0.5", 'About a third (0.34) is the usual.');
+    if (kept?.thumbnail && (kept.thumbnail.face !== layout.face || Math.abs(kept.thumbnail.share - layout.share) > 0.005)) {
+      warnings.push(`this thumbnail has the face on the ${layout.face} at ${Math.round(layout.share * 100)}% of the width, and the series “${kept.name}” keeps it on the ${kept.thumbnail.face} at ${Math.round(kept.thumbnail.share * 100)}% — leave side and share out so every episode matches, or change the series' layout with the series tool`);
+    }
+    const faceW = Math.round((W * layout.share) / 2) * 2;
+    const catalog = await loadCatalog(project);
+    const face = partPicture(project, ep, catalog, 'face', o.two.face, { width: faceW, height: H }, 0);
+    const subject = partPicture(project, ep, catalog, 'subject', o.two.subject, { width: W - faceW - JOIN_PX, height: H }, 1);
+    // Each crop is one frame at time 0 in the same pixel format; the left one carries the white line on its right edge.
+    const one = 'setpts=PTS-STARTPTS,format=yuv420p';
+    const [l, r] = layout.face === 'left' ? ['f', 's'] : ['s', 'f'];
+    input = [...face.input, ...subject.input];
+    graph = `[0:v]${face.picture},${one}[f];[1:v]${subject.picture},${one}[s];[${l}]pad=iw+${JOIN_PX}:ih:0:0:color=white[l];[l][${r}]hstack=inputs=2,setsar=1[two]`;
+    picture = '';
+    from = { face: face.what, subject: subject.what, layout };
+    where = { name: `${face.what} and ${subject.what}`, hint: 'Check both sources, or pick other ones.' };
+    record = { made: 'two-sources', face: o.two.face, subject: o.two.subject, layout };
+  } else if ('card' in shown!) {
     // A card is drawn at the thumbnail's size as the render draws it: its background (black, or its picture through the
     // render's own picture chain, cropped around the focus), then its text in the card styles of buildAss.
     const item = shown.laid.item as CardItem;
@@ -420,58 +540,43 @@ export async function writeThumbnail(
     from = 'card';
     where = { name: `card ${item.id}`, hint: `Check card ${item.id} (run check), then write the thumbnail again.` };
   } else {
-    const item = shown.laid.item as ClipItem;
-    const catalog = await loadCatalog(project);
-    const src = sourcesFor({ ...ep, items: [item] }, catalog).get(item.clip)!;
-    // Read as the render's chunks read a clip (readFrom: the clip's clock, a late video stream included; FFmpeg turns a
-    // rotated clip upright as it does there), and pick the frame the render shows: the latest at or before the time, a
-    // quarter of a frame late still counting, on the render's clock (setpts … / speed, then fps). The seek goes to the
-    // keyframe before and decodes from there, so the frame is exact.
-    // The time can be at or past the clip's last frame (a freeze on its end, a shot running a little past the video):
-    // reading from there, FFmpeg would have nothing at or after 0 and write nothing. So it reads from `back` seconds
-    // earlier (a frame's worth, and at least a second before the video's end), puts the time `k` output frames in, and
-    // keeps frame k, or the last frame there is when the clip ends first, as the render's hold does (tpad clones it).
-    const videoEnd = (() => {
-      const p = catalog.clips.find((c) => c.id === item.clip)!.probe;
-      return p.videoDurationSec ?? p.durationSec;
-    })();
-    const from0 = Math.max(0, Math.min(shown.src - item.speed / fps, videoEnd - 1));
-    const back = shown.src - from0;
-    const k = Math.max(0, Math.ceil((back * fps) / item.speed - 1e-6));
-    input = readFrom(src, from0);
-    // What the video shows on that frame: the item's framing, at the move's zoom and focus there.
-    const framing = thumbFraming(shown.laid, shown.frame, fps);
-    const crop = thumbCrop({ frame: item.frame, zoom: framing.zoom, focus: o.focus ?? framing.focus, output: ep.output, thumb: { width: W, height: H } });
-    picture =
-      `setpts=(PTS-${ffNum(Number(frameTolerance(fps)) + back)}/TB)/${ffNum(item.speed)}+${ffNum(k / fps)}/TB,fps=${ffNum(fps)}:start_time=0:round=up,` +
-      `trim=end_frame=${k + 1},tpad=stop=${k + 1}:stop_mode=clone,select='eq(n,${k})',` +
-      `${crop},scale=${W}:${H}:flags=lanczos,setsar=1,${look}`;
-    from = { clip: item.clip, src: ms(shown.src) };
+    const item = shown!.laid.item as ClipItem;
+    const made = clipPicture(ep, await loadCatalog(project), shown as Extract<ThumbSource, { src: number }>, o.focus, { width: W, height: H });
+    input = made.input;
+    picture = made.picture;
+    from = { clip: item.clip, src: ms((shown as { src: number }).src) };
     where = { name: item.clip, hint: `Check item ${item.id}'s src against ${item.clip}, or pick another time.` };
   }
+  const text = o.text !== undefined && tidy(o.text) !== '' ? o.text : null;
+  record = o.two ? { ...record!, text } : { made: 'one-frame', at: o.at, text };
   if (o.text !== undefined && tidy(o.text) !== '') scripts.push(['thumbnail.ass', thumbnailAss(W, H, o.text)]);
   // The picture is stamped CARD_SEC/2 into the scripts: past a card's fade in, before its fade out. Scripts are named
   // relative to the folder FFmpeg runs in, so their paths need no escaping in the graph.
-  const vf = [picture, ...(scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : []), ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`), JPEG_COLOUR].join(',');
+  const vf = [...(graph ? [] : [picture]), ...(scripts.length ? [`setpts=PTS-STARTPTS+${CARD_SEC / 2}/TB`] : []), ...scripts.map(([name]) => `ass=${name}:fontsdir=${fontsDir}`), JPEG_COLOUR].join(',');
   const file = join(dir, 'thumbnail.jpg');
   await sweep(dir, LEFT_THUMBNAIL);
   const part = join(dir, `.thumbnail-${randomUUID().slice(0, 8)}.jpg`);
   const work = await mkdtemp(join(tmpdir(), 'mirage-thumb-'));
   try {
     for (const [name, text] of scripts) await writeFile(join(work, name), text);
-    await tools.runFfmpeg([...input, '-vf', vf, '-frames:v', '1', '-q:v', '2', part], { cwd: work, signal: run.signal });
-    if (!existsSync(part)) throw new MirageError('BAD_INPUT', `${'card' in shown ? where.name : `${where.name} at ${secs(shown.src)} s`} gave no picture`, where.hint);
+    const filters = graph ? ['-filter_complex', `${graph};[two]${vf}[out]`, '-map', '[out]'] : ['-vf', vf];
+    await tools.runFfmpeg([...input, ...filters, '-frames:v', '1', '-q:v', '2', part], { cwd: work, signal: run.signal });
+    if (!existsSync(part)) throw new MirageError('BAD_INPUT', `${!shown || 'card' in shown ? where.name : `${where.name} at ${secs(shown.src)} s`} gave no picture`, where.hint);
     run.signal?.throwIfAborted();
     await openElsewhere(rename(part, file), `episodes/${n}/thumbnail.jpg`);
+    // What it was written with, for `posted`'s snapshot of the video (features.json): a record, so failing to write it never fails the thumbnail.
+    await writeFile(join(dir, THUMBNAIL_RECORD), `${JSON.stringify(record, null, 2)}\n`).catch(() => {});
   } finally {
     await rm(part, { force: true });
     await rm(work, { recursive: true, force: true });
   }
-  return { file, width: W, height: H, from };
+  return { file, width: W, height: H, from, ...(warnings.length ? { warnings } : {}) };
 }
 
 /** The tool's reply: the file, its size and where the picture came from. */
 export function thumbnailReport(n: number, r: Thumbnail): string {
-  const from = r.from === 'card' ? 'the card' : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
+  const from = r.from === 'card' ? 'the card'
+    : 'layout' in r.from ? `two sources: the face (${r.from.face}) on the ${r.from.layout.face}, ${Math.round(r.from.layout.share * 100)}% of the width, and the subject (${r.from.subject}) filling the rest`
+    : `${r.from.clip} at ${Math.round(r.from.src * 100) / 100} s`;
   return `wrote episodes/${n}/thumbnail.jpg (${r.width}×${r.height}, from ${from})`;
 }

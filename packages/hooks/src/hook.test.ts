@@ -256,6 +256,17 @@ describe('runHook', () => {
     expect(Date.now() - mtimeMs).toBeLessThan(60_000);
   });
 
+  it('refuses a write into the plugin\'s own formulas, formats or skills, and not one into the project\'s formulas folder', async () => {
+    const { dir } = await project();
+    const pluginRoot = await tmp('mirage-plugin-');
+    const { deps } = await fakeDeps({ pluginRoot });
+    const reason = deny("Mirage's own formats, formulas and skills are read-only. Save your own formula in the project's formulas folder, under a new name.");
+    for (const file of [join('formulas', 'episode.md'), join('formats', 'vlog.md'), join('skills', 'edit', 'SKILL.md')]) {
+      expect((await runHook('pre', input(dir, { tool_name: 'Write', tool_input: { file_path: join(pluginRoot, file) } }), deps)).stdout, file).toBe(reason);
+    }
+    expect((await runHook('pre', input(dir, { tool_name: 'Write', tool_input: { file_path: join(dir, 'formulas', 'mine.md') } }), deps)).stdout).not.toContain('deny');
+  });
+
   it('works from a subfolder of the project: cwd = <project>/episodes/1 still guards footage and holds on pause', async () => {
     const { dir, footage } = await project();
     const sub = join(dir, 'episodes', '1');
@@ -688,6 +699,15 @@ describe('main.ts', () => {
     const { dir } = await project();
     const out = run('pre', JSON.stringify(input(dir, { tool_name: E('status'), tool_input: {} })), { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), CLAUDE_PROJECT_DIR: '' });
     expect(out).toBe(ALLOW);
+  });
+
+  it('takes the plugin\'s folder from CLAUDE_PLUGIN_ROOT and refuses a write into its formulas', async () => {
+    const { dir } = await project();
+    const root = await tmp('mirage-plugin-');
+    const json = JSON.stringify(input(dir, { tool_name: 'Edit', tool_input: { file_path: join(root, 'formulas', 'episode.md') } }));
+    expect(run('pre', json, { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), CLAUDE_PROJECT_DIR: dir, CLAUDE_PLUGIN_ROOT: root })).toBe(
+      deny("Mirage's own formats, formulas and skills are read-only. Save your own formula in the project's formulas folder, under a new name."),
+    );
   });
 
   it('finds the project through CLAUDE_PROJECT_DIR from a subfolder', async () => {

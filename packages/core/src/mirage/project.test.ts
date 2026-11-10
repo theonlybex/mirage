@@ -49,6 +49,19 @@ describe('resolveUserPath', () => {
   });
 });
 
+describe('mirage.json', () => {
+  it('takes the channels that lead the person\'s niche, per format, and still refuses a misspelled key', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-project-'));
+    const base = { version: 1, title: 'My build', createdAt: '2026-11-09T10:00:00Z' };
+    await writeFile(join(dir, 'mirage.json'), JSON.stringify({ ...base, niche: { short: ['https://www.youtube.com/@leader/shorts'], 'build-story': ['@one', '@two'] } }));
+    expect((await readProject(dir))!.niche).toEqual({ short: ['https://www.youtube.com/@leader/shorts'], 'build-story': ['@one', '@two'] });
+    await writeFile(join(dir, 'mirage.json'), JSON.stringify({ ...base, niches: {} }));
+    await expect(readProject(dir)).rejects.toThrow(/unknown key "niches"/);
+    await writeFile(join(dir, 'mirage.json'), JSON.stringify({ ...base, niche: { short: '@leader' } }));
+    await expect(readProject(dir)).rejects.toThrow(/mirage\.json/);
+  });
+});
+
 describe('readProject', () => {
   it('reads what init wrote, null when there is no project, and names a broken file', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'we-proj-'));
