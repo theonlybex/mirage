@@ -41017,7 +41017,9 @@ var VideoSchema2 = strictObject2({
   id: external_exports.string().min(1),
   title: external_exports.string(),
   durationSec: external_exports.number().nonnegative().nullable(),
-  views: external_exports.number().nonnegative().nullable()
+  views: external_exports.number().nonnegative().nullable(),
+  /** The day it was posted, `YYYY-MM-DD`, when it is known. From a channel's list it is approximate (YouTube shows "2 weeks ago"). */
+  posted: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
 });
 var ChannelFileSchema = strictObject2({
   version: external_exports.literal(1),
@@ -41111,7 +41113,7 @@ var BUCKETS = [
 ];
 var isAllCaps = (title) => new RegExp("\\p{L}", "u").test(title) && title === title.toUpperCase();
 var wordCount = (title) => title.trim().split(/\s+/).filter(Boolean).length;
-var videoLine = (v, i2) => `  ${i2 + 1}. ${v.views === null ? "no view count" : viewsText(v.views)} \xB7 ${v.durationSec === null ? "length unknown" : clockText(v.durationSec)} \xB7 ${v.id} \xB7 ${v.title}`;
+var videoLine = (v, i2) => `  ${i2 + 1}. ${v.views === null ? "no view count" : viewsText(v.views)} \xB7 ${v.durationSec === null ? "length unknown" : clockText(v.durationSec)}${v.posted ? ` \xB7 ${v.posted}` : ""} \xB7 ${v.id} \xB7 ${v.title}`;
 var byViews = (videos, dir) => videos.filter((v) => v.views !== null).sort((a2, b) => dir * (a2.views - b.views));
 function pickVideos(videos, which) {
   if (which === "newest") return videos.slice(0, LIST);
@@ -41121,7 +41123,8 @@ function statLines(videos, set2) {
   const lines = [];
   const lengths = sorted(videos.flatMap((v) => v.durationSec === null ? [] : [v.durationSec]));
   if (lengths.length) {
-    lines.push(`Length, ${set2}: ${clockText(lengths[0])} shortest \xB7 ${clockText(at2(lengths, 0.25))} quarter \xB7 ${clockText(at2(lengths, 0.5))} middle \xB7 ${clockText(at2(lengths, 0.75))} three-quarters \xB7 ${clockText(lengths.at(-1))} longest`);
+    const of = lengths.length === videos.length ? "" : ` (${lengths.length} of ${videos.length} have a length)`;
+    lines.push(`Length, ${set2}: ${clockText(lengths[0])} shortest \xB7 ${clockText(at2(lengths, 0.25))} quarter \xB7 ${clockText(at2(lengths, 0.5))} middle \xB7 ${clockText(at2(lengths, 0.75))} three-quarters \xB7 ${clockText(lengths.at(-1))} longest${of}`);
     const buckets = BUCKETS.flatMap(([label, below], i2) => {
       const from = i2 === 0 ? 0 : BUCKETS[i2 - 1][1];
       const inBucket = videos.filter((v) => v.durationSec !== null && v.durationSec >= from && v.durationSec < below);
@@ -41135,21 +41138,69 @@ function statLines(videos, set2) {
   lines.push(`Titles, ${set2}: ${words[0]}\u2013${words.at(-1)} words, ${at2(words, 0.5)} typical, about ${Math.round(chars)} characters \xB7 ALL CAPS on ${caps} of ${videos.length} (${Math.round(caps / videos.length * 100)}%)`);
   return lines;
 }
+var DAY_MS = 864e5;
+function postedLines(videos, set2, approximate) {
+  const days = sorted(videos.flatMap((v) => v.posted ? [Date.parse(`${v.posted}T00:00:00Z`)] : []));
+  if (days.length < 2) return [];
+  const every = (days.at(-1) - days[0]) / DAY_MS / (days.length - 1);
+  const day3 = (ms2) => new Date(ms2).toISOString().slice(0, 10);
+  const of = days.length === videos.length ? "" : ` (${days.length} of ${videos.length} have a date)`;
+  return [`Posted, ${set2}: one every ${every < 10 ? every.toFixed(1) : Math.round(every)} days, ${day3(days[0])} to ${day3(days.at(-1))}${of}${approximate ? ' \xB7 approximate: the list only says "2 weeks ago"' : ""}`];
+}
+var dayOrNull = (text) => {
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(text.trim());
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+};
 var numberOrNull = (text) => /^\d+(\.\d+)?$/.test(text.trim()) ? Number(text) : null;
+var LIST_PRINT = "%(id)s|%(duration)s|%(view_count)s|%(upload_date)s|%(title)s";
+var DETAIL_PRINT = "%(id)s|%(duration)s|%(upload_date)s";
+var DETAILS_AT_ONCE = 6;
 function parseVideoLines(stdout) {
   const videos = [];
   for (const line of stdout.split(/\r?\n/)) {
-    const m = /^([A-Za-z0-9_-]{6,})\|([^|]*)\|([^|]*)\|(.*)$/.exec(line);
-    if (m) videos.push({ id: m[1], durationSec: numberOrNull(m[2]), views: numberOrNull(m[3]), title: m[4].trim() });
+    const m = /^([A-Za-z0-9_-]{6,})\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$/.exec(line);
+    if (!m) continue;
+    const posted = dayOrNull(m[4]);
+    videos.push({ id: m[1], durationSec: numberOrNull(m[2]), views: numberOrNull(m[3]), title: m[5].trim(), ...posted ? { posted } : {} });
   }
   return videos;
+}
+async function readDetails(videos, deps, signal) {
+  let failed2 = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < videos.length) {
+      const v = videos[next++];
+      signal?.throwIfAborted();
+      try {
+        const out = await deps.ytDlp(["--skip-download", "--print", DETAIL_PRINT, `https://www.youtube.com/watch?v=${v.id}`], { signal });
+        const m = out.split(/\r?\n/).map((l) => /^([A-Za-z0-9_-]{6,})\|([^|]*)\|([^|]*)$/.exec(l.trim())).find((x) => x?.[1] === v.id);
+        const duration3 = m ? numberOrNull(m[2]) : null;
+        const posted = m ? dayOrNull(m[3]) : null;
+        if (duration3 !== null) v.durationSec = duration3;
+        if (posted) v.posted = posted;
+        if (duration3 === null && !posted) failed2++;
+      } catch (e) {
+        const code = e.code;
+        if (code === "NOT_FOUND" || code === "CANCELLED" || e.name === "AbortError") throw e;
+        failed2++;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(DETAILS_AT_ONCE, videos.length) }, worker));
+  return failed2;
 }
 async function gatherChannel(project2, o2, deps, signal) {
   const { url: url2, slug } = channelAddress(o2.url);
   const count2 = o2.videos ?? DEFAULT_VIDEOS;
-  const stdout = await deps.ytDlp(["--flat-playlist", "--playlist-end", String(count2), "--print", "%(id)s|%(duration)s|%(view_count)s|%(title)s", url2], { signal });
+  const stdout = await deps.ytDlp(["--flat-playlist", "--extractor-args", "youtubetab:approximate_date", "--playlist-end", String(count2), "--print", LIST_PRINT, url2], { signal });
   const videos = parseVideoLines(stdout);
   if (!videos.length) throw new MirageError("BAD_INPUT", `no videos were found at ${url2}`, "Check the channel's address (open it in a browser: its Videos tab must list videos).");
+  const approximate = videos.some((v) => v.posted);
+  const newest = videos.slice(0, LATEST);
+  const unlisted = newest.filter((v) => v.durationSec === null && VIDEO_ID.test(v.id));
+  const oneByOne = unlisted.length * 2 >= newest.length ? unlisted : [];
+  const unread = oneByOne.length ? await readDetails(oneByOne, deps, signal) : 0;
   await mkdir6(absDir(project2, slug), { recursive: true });
   await writeJsonFile(join17(absDir(project2, slug), "videos.json"), ChannelFileSchema, { version: 1, url: url2, gatheredAt: (deps.now?.() ?? /* @__PURE__ */ new Date()).toISOString(), videos }, `${relDir(slug)}/videos.json`);
   const all = `all ${videos.length}`;
@@ -41159,8 +41210,14 @@ async function gatherChannel(project2, o2, deps, signal) {
     `Channel ${slug}: ${videos.length} videos gathered, newest first (${relDir(slug)}/videos.json). Use name "${slug}" in the next channel calls.`,
     `Median views: ${medianText(videos)} (${all})${more ? ` \xB7 ${medianText(latest)} (latest ${LATEST})` : ""}`,
     ...statLines(videos, all),
-    ...more ? statLines(latest, `latest ${LATEST}`) : []
+    ...postedLines(videos, all, approximate),
+    ...more ? [...statLines(latest, `latest ${LATEST}`), ...postedLines(latest, `latest ${LATEST}`, approximate)] : []
   ];
+  if (oneByOne.length) {
+    const older = videos.length - newest.length;
+    lines.push(`This page lists no lengths or dates, so those of the newest ${oneByOne.length} were read one video at a time${older ? `; the ${older} older videos have none (channel { name, captions } reports one video's)` : ""}.`);
+  }
+  if (unread) lines.push(`\u26A0 ${unread} of ${oneByOne.length} videos couldn't be read one by one \u2014 their length and date stay unknown`);
   const unknown2 = videos.filter((v) => v.views === null).length;
   if (unknown2) lines.push(`\u26A0 ${unknown2} of ${videos.length} videos have no view count (members-only, upcoming or live) \u2014 they are left out of the medians and the most and least viewed lists`);
   lines.push("Most viewed:", ...pickVideos(videos, "top").map(videoLine));
@@ -41281,6 +41338,8 @@ function captionsReport(id, info, json3, dir) {
   } else {
     lines.push("  Most replayed: YouTube shows none for this video");
   }
+  const posted = info.upload_date ? dayOrNull(info.upload_date) : null;
+  if (posted) lines.push(`  Posted: ${posted}`);
   lines.push(info.chapters?.length ? `  Chapters: ${info.chapters.map((c3) => `${clockText(c3.start_time)} ${c3.title}`).join(" \xB7 ")}` : "  Chapters: none set");
   if (words.length) {
     const text = (ws) => ws.map((w) => w.w).join(" ");

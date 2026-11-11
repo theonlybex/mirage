@@ -764,7 +764,7 @@ describe('formulas', () => {
 });
 
 describe('channel', () => {
-  const LIST = ['aaaaaaaaaa1|600|9000|I BOUGHT A WRECK', 'aaaaaaaaaa2|1200|4000|Fixing it | part 2', 'aaaaaaaaaa3|300|1000|I BOUGHT ANOTHER', 'aaaaaaaaaa4|NA|NA|Upcoming'].join('\n');
+  const LIST = ['aaaaaaaaaa1|600|9000|NA|I BOUGHT A WRECK', 'aaaaaaaaaa2|1200|4000|NA|Fixing it | part 2', 'aaaaaaaaaa3|300|1000|NA|I BOUGHT ANOTHER', 'aaaaaaaaaa4|NA|NA|NA|Upcoming'].join('\n');
   function fakes(over: Partial<ChannelDeps> = {}) {
     const calls = { ytDlp: [] as string[][], fetched: [] as string[], ffmpeg: [] as string[][] };
     const channel: ChannelDeps = {
@@ -791,12 +791,12 @@ describe('channel', () => {
     const { call } = await connect(dir, { channel, now: () => new Date('2026-11-09T12:00:00Z') });
     const r = await call('channel', { url: '@Demo', videos: 50 });
     expect(r.isError).toBe(false);
-    expect(calls.ytDlp).toEqual([['--flat-playlist', '--playlist-end', '50', '--print', '%(id)s|%(duration)s|%(view_count)s|%(title)s', 'https://www.youtube.com/@Demo/videos']]);
+    expect(calls.ytDlp).toEqual([['--flat-playlist', '--extractor-args', 'youtubetab:approximate_date', '--playlist-end', '50', '--print', '%(id)s|%(duration)s|%(view_count)s|%(upload_date)s|%(title)s', 'https://www.youtube.com/@Demo/videos']]);
     const lines = r.text.split('\n');
     expect(lines.slice(0, 5)).toEqual([
       'Channel demo: 4 videos gathered, newest first (analysis/demo/videos.json). Use name "demo" in the next channel calls.',
       'Median views: 4.0K (all 4)',
-      'Length, all 4: 5:00 shortest · 10:00 quarter · 10:00 middle · 20:00 three-quarters · 20:00 longest',
+      'Length, all 4: 5:00 shortest · 10:00 quarter · 10:00 middle · 20:00 three-quarters · 20:00 longest (3 of 4 have a length)',
       'Median views by length, all 4: 4–8 min 1.0K (1) · 8–15 min 9.0K (1) · 15–30 min 4.0K (1)',
       'Titles, all 4: 1–5 words, 4 typical, about 16 characters · ALL CAPS on 2 of 4 (50%)',
     ]);
@@ -809,7 +809,7 @@ describe('channel', () => {
 
   it('with name and patterns compares titles; a bad regex names its label', async () => {
     const dir = await projectWithVideo();
-    const { call } = await connect(dir, { channel: fakes({ ytDlp: async () => Array.from({ length: 8 }, (_, i) => `aaaaaaaaaa${i}|60|${(i + 1) * 1000}|${i % 2 ? 'I BOUGHT IT' : 'Fixing it'}`).join('\n') }).channel });
+    const { call } = await connect(dir, { channel: fakes({ ytDlp: async () => Array.from({ length: 8 }, (_, i) => `aaaaaaaaaa${i}|60|${(i + 1) * 1000}|NA|${i % 2 ? 'I BOUGHT IT' : 'Fixing it'}`).join('\n') }).channel });
     await call('channel', { url: '@demo' });
     expect(await call('channel', { name: 'demo', patterns: [{ label: 'I BOUGHT', regex: '^i bought' }, { label: 'a price', regex: '[£$]\\d' }] })).toEqual({
       isError: false,

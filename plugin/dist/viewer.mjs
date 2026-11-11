@@ -28622,7 +28622,9 @@ var VideoSchema2 = strictObject2({
   id: external_exports.string().min(1),
   title: external_exports.string(),
   durationSec: external_exports.number().nonnegative().nullable(),
-  views: external_exports.number().nonnegative().nullable()
+  views: external_exports.number().nonnegative().nullable(),
+  /** The day it was posted, `YYYY-MM-DD`, when it is known. From a channel's list it is approximate (YouTube shows "2 weeks ago"). */
+  posted: external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
 });
 var ChannelFileSchema = strictObject2({
   version: external_exports.literal(1),

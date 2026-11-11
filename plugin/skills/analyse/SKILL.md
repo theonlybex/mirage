@@ -16,10 +16,10 @@ Speak to the person in plain words. Say what you are doing in a line before each
 
 | Tool | Input | What it does |
 |---|---|---|
-| `mcp__plugin_mirage_engine__channel` | `{ url, videos? }` | lists the channel's newest videos (default 200, at most 1000): titles, lengths and views. Writes `analysis/<name>/videos.json` and reports the name to use next, the medians, lengths, title habits, and three lists of 12: most viewed, newest, least viewed of the latest 60 |
+| `mcp__plugin_mirage_engine__channel` | `{ url, videos? }` | lists the channel's newest videos (default 200, at most 1000): titles, lengths and views. Writes `analysis/<name>/videos.json` and reports the name to use next, the medians, lengths, how often it posts, title habits, and three lists of 12: most viewed, newest, least viewed of the latest 60 |
 | | `{ name, patterns: [{ label, regex }] }` | for each title pattern: how many titles match, the median views with and without, and the ratio (`×1.35`), over all videos and over the latest 60 |
 | | `{ name, thumbnails: "top" \| "newest" \| "lowest" }` | writes `analysis/<name>/thumbs-<which>.jpg`, 12 thumbnails tiled 4 across in reading order, and lists the 12 videos in tile order |
-| | `{ name, captions: [ids] }` | for 1–5 videos: writes each transcript to `analysis/<name>/<id>.txt` and reports its length, words a minute per 5-minute block, most replayed points, chapters, and the words of its first 150 s and last 100 s |
+| | `{ name, captions: [ids] }` | for 1–5 videos: writes each transcript to `analysis/<name>/<id>.txt` and reports its length, the day it was posted, words a minute per 5-minute block, most replayed points, chapters, and the words of its first 150 s and last 100 s |
 | `mcp__plugin_mirage_engine__formulas` | `{ id? }` | lists the formulas: Mirage's own (`algorithm`, `youtube`, `instagram`, `tiktok`, `episode`, `vlog`, `short`; they can't be changed) and then the person's own, marked `(yours)`; with `id`, that formula's whole file |
 | `mcp__plugin_mirage_engine__formats` | `{ id? }` | the kinds of video Mirage makes; a formula says which of them it is for |
 | `mcp__plugin_mirage_engine__new_project` | `{ title }` | starts a Mirage project in this folder, when there is none yet |
@@ -56,6 +56,9 @@ For a channel of Shorts, give `channel` the address of its Shorts tab (`https://
 
 Tell the person in two or three lines what stands out: how many videos, the typical views, how long the videos are, how the titles are written.
 
+- `Posted, <set>: one every <d> days, <first> to <last>`: how often the channel posts. With `approximate: the list only says "2 weeks ago"` the days come from YouTube's rough labels: good for the rhythm over months, not for a single day. For one video's exact day, use `captions` on it (`Posted: <day>`).
+- `This page lists no lengths or dates, so those of the newest <k> were read one video at a time; the <m> older videos have none`: a Shorts tab lists neither, so Mirage reads the latest 60 one by one (about a minute). The length lines and the `Posted` line then cover those videos only, and their days are exact. To date an older video (when did the format change?), run `captions` on it.
+- `⚠ <k> of <n> videos couldn't be read one by one — their length and date stay unknown`: private, removed or age-restricted videos, or YouTube limiting requests. If it is most of them, wait some minutes and run `channel { url }` again.
 - `⚠ <k> of <n> videos have no view count (members-only, upcoming or live) — they are left out of the medians and the most and least viewed lists`: nothing to do; mention it if it is a large part of the channel.
 
 ## 2. Titles

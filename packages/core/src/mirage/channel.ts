@@ -25,6 +25,8 @@ const VideoSchema = strictObject({
   title: z.string(),
   durationSec: z.number().nonnegative().nullable(),
   views: z.number().nonnegative().nullable(),
+  /** The day it was posted, `YYYY-MM-DD`, when it is known. From a channel's list it is approximate (YouTube shows "2 weeks ago"). */
+  posted: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 export type ChannelVideo = z.infer<typeof VideoSchema>;
 
@@ -154,7 +156,7 @@ const wordCount = (title: string) => title.trim().split(/\s+/).filter(Boolean).l
 
 /** One video as a list line: its place, views, length, id and title. */
 const videoLine = (v: ChannelVideo, i: number) =>
-  `  ${i + 1}. ${v.views === null ? 'no view count' : viewsText(v.views)} · ${v.durationSec === null ? 'length unknown' : clockText(v.durationSec)} · ${v.id} · ${v.title}`;
+  `  ${i + 1}. ${v.views === null ? 'no view count' : viewsText(v.views)} · ${v.durationSec === null ? 'length unknown' : clockText(v.durationSec)}${v.posted ? ` · ${v.posted}` : ''} · ${v.id} · ${v.title}`;
 
 const byViews = (videos: ChannelVideo[], dir: 1 | -1) => videos.filter((v) => v.views !== null).sort((a, b) => dir * (a.views! - b.views!));
 
@@ -169,7 +171,8 @@ function statLines(videos: ChannelVideo[], set: string): string[] {
   const lines: string[] = [];
   const lengths = sorted(videos.flatMap((v) => (v.durationSec === null ? [] : [v.durationSec])));
   if (lengths.length) {
-    lines.push(`Length, ${set}: ${clockText(lengths[0]!)} shortest · ${clockText(at(lengths, 0.25))} quarter · ${clockText(at(lengths, 0.5))} middle · ${clockText(at(lengths, 0.75))} three-quarters · ${clockText(lengths.at(-1)!)} longest`);
+    const of = lengths.length === videos.length ? '' : ` (${lengths.length} of ${videos.length} have a length)`;
+    lines.push(`Length, ${set}: ${clockText(lengths[0]!)} shortest · ${clockText(at(lengths, 0.25))} quarter · ${clockText(at(lengths, 0.5))} middle · ${clockText(at(lengths, 0.75))} three-quarters · ${clockText(lengths.at(-1)!)} longest${of}`);
     const buckets = BUCKETS.flatMap(([label, below], i) => {
       const from = i === 0 ? 0 : BUCKETS[i - 1]![1];
       const inBucket = videos.filter((v) => v.durationSec !== null && v.durationSec >= from && v.durationSec < below);
@@ -184,17 +187,75 @@ function statLines(videos: ChannelVideo[], set: string): string[] {
   return lines;
 }
 
+const DAY_MS = 86_400_000;
+
+/** How often the videos of a set were posted, from the ones whose day is known; nothing when fewer than two are. */
+function postedLines(videos: ChannelVideo[], set: string, approximate: boolean): string[] {
+  const days = sorted(videos.flatMap((v) => (v.posted ? [Date.parse(`${v.posted}T00:00:00Z`)] : [])));
+  if (days.length < 2) return [];
+  const every = (days.at(-1)! - days[0]!) / DAY_MS / (days.length - 1);
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const of = days.length === videos.length ? '' : ` (${days.length} of ${videos.length} have a date)`;
+  return [`Posted, ${set}: one every ${every < 10 ? every.toFixed(1) : Math.round(every)} days, ${day(days[0]!)} to ${day(days.at(-1)!)}${of}${approximate ? ' · approximate: the list only says "2 weeks ago"' : ''}`];
+}
+
+/** `20261103` → `2026-11-03`; anything else is unknown. */
+const dayOrNull = (text: string): string | null => {
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(text.trim());
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+};
+
 /** `NA`, an empty field or anything that isn't a number is unknown. */
 const numberOrNull = (text: string): number | null => (/^\d+(\.\d+)?$/.test(text.trim()) ? Number(text) : null);
 
-/** yt-dlp's `%(id)s|%(duration)s|%(view_count)s|%(title)s` lines (the title last: it may hold a `|`). */
+/** What yt-dlp prints for each listed video (the title last: it may hold a `|`). */
+export const LIST_PRINT = '%(id)s|%(duration)s|%(view_count)s|%(upload_date)s|%(title)s';
+/** What it prints for one video read by itself. */
+export const DETAIL_PRINT = '%(id)s|%(duration)s|%(upload_date)s';
+/** How many videos are read at once when a list gives no lengths. */
+const DETAILS_AT_ONCE = 6;
+
+/** yt-dlp's `LIST_PRINT` lines. */
 export function parseVideoLines(stdout: string): ChannelVideo[] {
   const videos: ChannelVideo[] = [];
   for (const line of stdout.split(/\r?\n/)) {
-    const m = /^([A-Za-z0-9_-]{6,})\|([^|]*)\|([^|]*)\|(.*)$/.exec(line);
-    if (m) videos.push({ id: m[1]!, durationSec: numberOrNull(m[2]!), views: numberOrNull(m[3]!), title: m[4]!.trim() });
+    const m = /^([A-Za-z0-9_-]{6,})\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$/.exec(line);
+    if (!m) continue;
+    const posted = dayOrNull(m[4]!);
+    videos.push({ id: m[1]!, durationSec: numberOrNull(m[2]!), views: numberOrNull(m[3]!), title: m[5]!.trim(), ...(posted ? { posted } : {}) });
   }
   return videos;
+}
+
+/**
+ * A Shorts tab lists neither lengths nor dates. Reads both for these videos, one video at a time (a few at once), and
+ * sets them on the videos. Returns how many could not be read.
+ */
+async function readDetails(videos: ChannelVideo[], deps: ChannelDeps, signal?: AbortSignal): Promise<number> {
+  let failed = 0;
+  let next = 0;
+  const worker = async () => {
+    while (next < videos.length) {
+      const v = videos[next++]!;
+      signal?.throwIfAborted();
+      try {
+        const out = await deps.ytDlp(['--skip-download', '--print', DETAIL_PRINT, `https://www.youtube.com/watch?v=${v.id}`], { signal });
+        const m = out.split(/\r?\n/).map((l) => /^([A-Za-z0-9_-]{6,})\|([^|]*)\|([^|]*)$/.exec(l.trim())).find((x) => x?.[1] === v.id);
+        const duration = m ? numberOrNull(m[2]!) : null;
+        const posted = m ? dayOrNull(m[3]!) : null;
+        if (duration !== null) v.durationSec = duration;
+        if (posted) v.posted = posted;
+        if (duration === null && !posted) failed++;
+      } catch (e) {
+        const code = (e as { code?: unknown }).code;
+        // No yt-dlp, or the person stopped it: that is the whole call's answer, not one video's.
+        if (code === 'NOT_FOUND' || code === 'CANCELLED' || (e as { name?: unknown }).name === 'AbortError') throw e;
+        failed++;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(DETAILS_AT_ONCE, videos.length) }, worker));
+  return failed;
 }
 
 /**
@@ -204,9 +265,15 @@ export function parseVideoLines(stdout: string): ChannelVideo[] {
 export async function gatherChannel(project: string, o: { url: string; videos?: number }, deps: ChannelDeps, signal?: AbortSignal): Promise<string[]> {
   const { url, slug } = channelAddress(o.url);
   const count = o.videos ?? DEFAULT_VIDEOS;
-  const stdout = await deps.ytDlp(['--flat-playlist', '--playlist-end', String(count), '--print', '%(id)s|%(duration)s|%(view_count)s|%(title)s', url], { signal });
+  const stdout = await deps.ytDlp(['--flat-playlist', '--extractor-args', 'youtubetab:approximate_date', '--playlist-end', String(count), '--print', LIST_PRINT, url], { signal });
   const videos = parseVideoLines(stdout);
   if (!videos.length) throw new MirageError('BAD_INPUT', `no videos were found at ${url}`, 'Check the channel\'s address (open it in a browser: its Videos tab must list videos).');
+  // A list with dates got them from "2 weeks ago" labels; dates read one video at a time are exact.
+  const approximate = videos.some((v) => v.posted);
+  const newest = videos.slice(0, LATEST);
+  const unlisted = newest.filter((v) => v.durationSec === null && VIDEO_ID.test(v.id));
+  const oneByOne = unlisted.length * 2 >= newest.length ? unlisted : [];
+  const unread = oneByOne.length ? await readDetails(oneByOne, deps, signal) : 0;
   await mkdir(absDir(project, slug), { recursive: true });
   await writeJsonFile(join(absDir(project, slug), 'videos.json'), ChannelFileSchema, { version: 1, url, gatheredAt: (deps.now?.() ?? new Date()).toISOString(), videos }, `${relDir(slug)}/videos.json`);
 
@@ -217,8 +284,14 @@ export async function gatherChannel(project: string, o: { url: string; videos?: 
     `Channel ${slug}: ${videos.length} videos gathered, newest first (${relDir(slug)}/videos.json). Use name "${slug}" in the next channel calls.`,
     `Median views: ${medianText(videos)} (${all})${more ? ` · ${medianText(latest)} (latest ${LATEST})` : ''}`,
     ...statLines(videos, all),
-    ...(more ? statLines(latest, `latest ${LATEST}`) : []),
+    ...postedLines(videos, all, approximate),
+    ...(more ? [...statLines(latest, `latest ${LATEST}`), ...postedLines(latest, `latest ${LATEST}`, approximate)] : []),
   ];
+  if (oneByOne.length) {
+    const older = videos.length - newest.length;
+    lines.push(`This page lists no lengths or dates, so those of the newest ${oneByOne.length} were read one video at a time${older ? `; the ${older} older videos have none (channel { name, captions } reports one video's)` : ''}.`);
+  }
+  if (unread) lines.push(`⚠ ${unread} of ${oneByOne.length} videos couldn't be read one by one — their length and date stay unknown`);
   const unknown = videos.filter((v) => v.views === null).length;
   if (unknown) lines.push(`⚠ ${unknown} of ${videos.length} videos have no view count (members-only, upcoming or live) — they are left out of the medians and the most and least viewed lists`);
   lines.push('Most viewed:', ...pickVideos(videos, 'top').map(videoLine));
@@ -343,6 +416,7 @@ const REPLAYED = 8;
 
 interface VideoInfo {
   title?: string;
+  upload_date?: string;
   duration?: number;
   heatmap?: { start_time: number; end_time: number; value: number }[] | null;
   chapters?: { start_time: number; title: string }[] | null;
@@ -374,6 +448,8 @@ export function captionsReport(id: string, info: VideoInfo, json3: string | null
   } else {
     lines.push('  Most replayed: YouTube shows none for this video');
   }
+  const posted = info.upload_date ? dayOrNull(info.upload_date) : null;
+  if (posted) lines.push(`  Posted: ${posted}`);
   lines.push(info.chapters?.length ? `  Chapters: ${info.chapters.map((c) => `${clockText(c.start_time)} ${c.title}`).join(' · ')}` : '  Chapters: none set');
   if (words.length) {
     const text = (ws: Word[]) => ws.map((w) => w.w).join(' ');

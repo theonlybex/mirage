@@ -14,7 +14,7 @@ const id = (n: number) => `vid${String(n).padStart(8, '0')}`;
 
 /** A channel of `n` videos, newest first: video k is k minutes long, has (n − k + 1) thousand views, and every third title is in capitals and starts "I BOUGHT". */
 const lines = (n: number) =>
-  Array.from({ length: n }, (_, i) => i + 1).map((k) => `${id(k)}|${k * 60}|${(n - k + 1) * 1000}|${k % 3 === 0 ? `I BOUGHT A WRECK | PT${k}` : `Rebuilding the thing part ${k}`}`).join('\n');
+  Array.from({ length: n }, (_, i) => i + 1).map((k) => `${id(k)}|${k * 60}|${(n - k + 1) * 1000}|NA|${k % 3 === 0 ? `I BOUGHT A WRECK | PT${k}` : `Rebuilding the thing part ${k}`}`).join('\n');
 
 function stubs(over: Partial<ChannelDeps> = {}) {
   const calls = { ytDlp: [] as string[][], fetched: [] as string[], ffmpeg: [] as string[][] };
@@ -65,8 +65,8 @@ describe('the numbers as they are printed', () => {
 });
 
 describe('parseVideoLines', () => {
-  it('reads id, length, views and the title last, which may hold a |', () => {
-    expect(parseVideoLines('abcDEF_-123|3105|13000000|I BOUGHT A YACHT | PT1\r\nxyz00000001|NA|NA|Upcoming\nWARNING: something\n\n')).toEqual([
+  it('reads id, length, views, the day posted and the title last, which may hold a |', () => {
+    expect(parseVideoLines('abcDEF_-123|3105|13000000|NA|I BOUGHT A YACHT | PT1\r\nxyz00000001|NA|NA|NA|Upcoming\nWARNING: something\n\n')).toEqual([
       { id: 'abcDEF_-123', durationSec: 3105, views: 13_000_000, title: 'I BOUGHT A YACHT | PT1' },
       { id: 'xyz00000001', durationSec: null, views: null, title: 'Upcoming' },
     ]);
@@ -78,7 +78,7 @@ describe('gatherChannel', () => {
     const dir = await project();
     const { deps, calls } = stubs();
     const report = await gatherChannel(dir, { url: 'https://www.youtube.com/@Demo', videos: 5 }, deps);
-    expect(calls.ytDlp).toEqual([['--flat-playlist', '--playlist-end', '5', '--print', '%(id)s|%(duration)s|%(view_count)s|%(title)s', 'https://www.youtube.com/@Demo/videos']]);
+    expect(calls.ytDlp).toEqual([['--flat-playlist', '--extractor-args', 'youtubetab:approximate_date', '--playlist-end', '5', '--print', '%(id)s|%(duration)s|%(view_count)s|%(upload_date)s|%(title)s', 'https://www.youtube.com/@Demo/videos']]);
     const file = JSON.parse(await readFile(join(dir, 'analysis', 'demo', 'videos.json'), 'utf8'));
     expect(file).toMatchObject({ version: 1, url: 'https://www.youtube.com/@Demo/videos', gatheredAt: '2026-11-09T10:00:00.000Z' });
     expect(file.videos).toHaveLength(5);
@@ -114,7 +114,7 @@ describe('gatherChannel', () => {
     const dir = await project();
     const { deps, calls } = stubs({ ytDlp: async (args) => { calls.ytDlp.push(args); return lines(90); } });
     const report = await gatherChannel(dir, { url: '@demo' }, deps);
-    expect(calls.ytDlp[0]![2]).toBe('200');
+    expect(calls.ytDlp[0]![4]).toBe('200');
     expect(report[1]).toBe('Median views: 46K (all 90) · 61K (latest 60)');
     expect(report.filter((l) => /^(Length|Median views by length|Titles), /.test(l)).map((l) => l.split(':')[0])).toEqual([
       'Length, all 90', 'Median views by length, all 90', 'Titles, all 90', 'Length, latest 60', 'Median views by length, latest 60', 'Titles, latest 60',
@@ -129,11 +129,62 @@ describe('gatherChannel', () => {
 
   it('warns about videos with no view count and leaves them out of the medians and the viewed lists', async () => {
     const dir = await project();
-    const { deps } = stubs({ ytDlp: async () => `${lines(4)}\nvidupcoming1|NA|NA|Coming soon` });
+    const { deps } = stubs({ ytDlp: async () => `${lines(4)}\nvidupcoming1|NA|NA|NA|Coming soon` });
     const report = await gatherChannel(dir, { url: '@demo' }, deps);
     expect(report).toContain('Median views: 2.5K (all 5)');
     expect(report).toContain('⚠ 1 of 5 videos have no view count (members-only, upcoming or live) — they are left out of the medians and the most and least viewed lists');
     expect(report.filter((l) => l.includes('vidupcoming1'))).toEqual(['  5. no view count · length unknown · vidupcoming1 · Coming soon']);
+  });
+
+  it('reads the day each video was posted when the list has it, and says how often the channel posts', async () => {
+    const dir = await project();
+    const { deps } = stubs({ ytDlp: async () => ['vid00000001|60|3000|20261103|Three', 'vid00000002|60|2000|20261024|Two', 'vid00000003|60|1000|NA|One'].join('\n') });
+    const report = await gatherChannel(dir, { url: '@demo' }, deps);
+    expect(report).toContain('Posted, all 3: one every 10 days, 2026-10-24 to 2026-11-03 (2 of 3 have a date) · approximate: the list only says "2 weeks ago"');
+    expect(report).toContain('  1. 3.0K · 1:00 · 2026-11-03 · vid00000001 · Three');
+    expect(report).toContain('  3. 1.0K · 1:00 · vid00000003 · One');
+    const file = JSON.parse(await readFile(join(dir, 'analysis', 'demo', 'videos.json'), 'utf8'));
+    expect(file.videos.map((v: ChannelVideo) => v.posted)).toEqual(['2026-11-03', '2026-10-24', undefined]);
+  });
+
+  it('reads the newest videos one at a time when the page lists no lengths (a Shorts tab), never downloading', async () => {
+    const dir = await project();
+    const calls: string[][] = [];
+    const { deps } = stubs({
+      ytDlp: async (args) => {
+        calls.push(args);
+        if (args.includes('--flat-playlist')) return Array.from({ length: 62 }, (_, i) => `${id(i + 1)}|NA|${(62 - i) * 1000}|NA|Short ${i + 1}`).join('\n');
+        const vid = args.at(-1)!.split('v=')[1]!;
+        const k = Number(vid.slice(3));
+        if (k === 7) throw Object.assign(new Error('yt-dlp exited with code 1'), { code: 'FAILED' });
+        return `${vid}|${100 + k}|202611${String(31 - Math.ceil(k / 2)).padStart(2, '0')}\n`;
+      },
+    });
+    const report = await gatherChannel(dir, { url: 'https://www.youtube.com/@demo/shorts' }, deps);
+    const single = calls.filter((c) => !c.includes('--flat-playlist'));
+    expect(single).toHaveLength(60);
+    expect(single[0]).toEqual(['--skip-download', '--print', '%(id)s|%(duration)s|%(upload_date)s', `https://www.youtube.com/watch?v=${id(1)}`]);
+    expect(report).toContain('Length, latest 60: 1:41 shortest · 1:57 quarter · 2:11 middle · 2:26 three-quarters · 2:40 longest (59 of 60 have a length)');
+    expect(report).toContain('Length, all 62: 1:41 shortest · 1:57 quarter · 2:11 middle · 2:26 three-quarters · 2:40 longest (59 of 62 have a length)');
+    expect(report).toContain('Posted, latest 60: one every 0.5 days, 2026-11-01 to 2026-11-30 (59 of 60 have a date)');
+    expect(report).toContain("This page lists no lengths or dates, so those of the newest 60 were read one video at a time; the 2 older videos have none (channel { name, captions } reports one video's).");
+    expect(report).toContain("⚠ 1 of 60 videos couldn't be read one by one — their length and date stay unknown");
+    expect(report).toContain(`  1. 62K · 1:41 · 2026-11-30 · ${id(1)} · Short 1`);
+    const file = JSON.parse(await readFile(join(dir, 'analysis', 'demo-shorts', 'videos.json'), 'utf8'));
+    expect(file.videos[0]).toEqual({ id: id(1), title: 'Short 1', durationSec: 101, views: 62000, posted: '2026-11-30' });
+    expect(file.videos[6]).toEqual({ id: id(7), title: 'Short 7', durationSec: null, views: 56000 });
+    expect(file.videos[61]).toEqual({ id: id(62), title: 'Short 62', durationSec: null, views: 1000 });
+  });
+
+  it('stops when the person stops it while videos are read one at a time', async () => {
+    const dir = await project();
+    const { deps } = stubs({
+      ytDlp: async (args) => {
+        if (args.includes('--flat-playlist')) return `${id(1)}|NA|1000|NA|Short\n${id(2)}|NA|900|NA|Short`;
+        throw Object.assign(new Error('cancelled'), { code: 'CANCELLED' });
+      },
+    });
+    await expect(gatherChannel(dir, { url: 'https://www.youtube.com/@demo/shorts' }, deps)).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 
   it('says so when the page lists no videos, and writes nothing', async () => {
@@ -292,6 +343,11 @@ describe('captionsReport', () => {
     expect(lines).toHaveLength(6);
     expect(transcript!.split('\n').slice(0, 2)).toEqual(['[0:00] a0 b c', '[0:02] a1 b c']);
     expect(transcript!.endsWith('[11:58] w359\n')).toBe(true);
+  });
+
+  it('says the day the video was posted when its info has it', () => {
+    const { lines } = captionsReport('abc12345678', { ...info, upload_date: '20250221' }, json3(events), 'analysis/demo');
+    expect(lines.slice(2, 5)).toEqual(['  Most replayed, strongest first: 1% (0:04) · 93% (11:06) · 15% (1:45)', '  Posted: 2025-02-21', '  Chapters: 0:00 The wreck · 1:00 The work']);
   });
 
   it('says so when YouTube shows no replay graph and no chapters are set', () => {

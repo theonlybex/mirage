@@ -812,7 +812,7 @@ describe('the plugin skills', () => {
       const front = (id: string) => JSON.parse(format(id).split('\n')[1]!).playbook;
       expect(front('build-story').title).toEqual({ allCaps: true, hasNumber: true, words: { min: 6, max: 8 } });
       expect(front('vlog').title).toEqual({ allCaps: true, endsWith: '!!', words: { min: 3, max: 8 } });
-      expect(front('short').title).toEqual({ endsWith: '?' });
+      expect(front('short').title).toBeUndefined();
       expect(front('vlog').cutsPerMin).toEqual({ min: 15, except: ['headline'], beats: { bit: { min: 15 } }, after: { beat: 'headline', min: 20, except: ['sponsor', 'plugs', 'tag'] } });
       const learn = read('learn');
       for (const words of [

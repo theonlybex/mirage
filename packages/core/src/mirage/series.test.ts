@@ -163,12 +163,14 @@ describe('the playbook: the title, the length, the pace per beat and the loop', 
     const lines = await predictVideo(dir, n, { tools: tools(24), ...NOW });
     expect(lines.join('\n')).toContain("episodes/1/video.json (titles.chosen): offer the person a title that is in capitals, has a number, 6–8 words, and never a claim the video does not deliver; when they keep this one on purpose, it is the video's experiment");
     expect((await readPrediction(dir, n))!.steps[0]!.rules).toContainEqual({ rule: 'title', status: 'missed', weight: 3 });
-    // The vlog's classic shape and the short's question, from their own format files.
+    // The vlog's classic shape from its format file. A short has no title shape of its own; a person's formula can set one.
     const { formats } = loadFormats();
     expect(formats.find((f) => f.id === 'vlog')!.playbook!.title).toEqual({ allCaps: true, endsWith: '!!', words: { min: 3, max: 8 } });
-    expect(formats.find((f) => f.id === 'short')!.playbook!.title).toEqual({ endsWith: '?' });
+    expect(formats.find((f) => f.id === 'short')!.playbook!.title).toBeUndefined();
     const short = await video(dir, [shot('h', 'hook', 0, 2), shot('p', 'payoff', 2, 4), shot('l', 'loop', 4, 6)], { format: 'short', titles: { chosen: 'Did it actually light? (PART 2)' } }, { width: 1080, height: 1920, fps: 30 });
-    expect((await playbook(dir, short)).find((l) => l.includes('title'))).toBe("  ✓ the chosen title “Did it actually light? (PART 2)” fits the format's title shape: ends with ?");
+    expect((await playbook(dir, short)).find((l) => l.includes('title'))).toBeUndefined();
+    await mine(dir, 'short', { title: { endsWith: '?' } });
+    expect((await playbook(dir, short)).find((l) => l.includes('chosen title'))).toBe("  ✓ the chosen title “Did it actually light? (PART 2)” fits the format's title shape: ends with ?");
   });
 
   it("takes a format's length from the person's formula: a target, and a limit that defaults to 1.5 × the target", async () => {

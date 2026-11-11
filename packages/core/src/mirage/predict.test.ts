@@ -111,12 +111,11 @@ describe('predict', () => {
     const items = ['hook', 'tease', 'tease', 'payoff'].map((beat, i) => ({ id: `s${i}`, beat, clip: 'c001', src: { in: i === 3 ? 19.9 : 0.9 + i * 0.1, out: (i === 3 ? 19.9 : 0.9 + i * 0.1) + 1.5 }, audio: 'keep' }));
     const n = await video(dir, { format: 'short', items, idea: { gap: 'a dead lamp', question: 'Will it light?' } });
     const lines = await predictVideo(dir, n, { tools: tools(6), ...NOW });
-    expect(lines.slice(1, 14)).toEqual([
+    expect(lines.slice(1, 13)).toEqual([
       'Chosen (will they choose to watch): 10/10',
       '  ✓ opens on the picture (item s0)',
       '  ✓ first word at 0.1 s — the playbook asks for one within 0.5 s',
       '  ✓ the idea is on record: gap, question (no doubt, no stake)',
-      '  – the title: not measured — no title is chosen yet (titles.chosen in episodes/1/video.json)',
       'Stayed (will they keep watching): 10/10',
       '  ✓ longest stretch with nothing new 1.0 s — the playbook allows 3 s',
       '  ✓ 30.0 cuts a minute — the playbook asks for 29 or more',
@@ -134,12 +133,11 @@ describe('predict', () => {
     // The same cut from a clip with no transcript: the word rules are named as not measured and left out of the scores.
     await saveCatalog(dir, { version: 1, clips: [{ id: 'c001', path: join(dir, 'a.mov'), sha256: 'a'.repeat(64), kind: 'talking', frames: [], notes: '', moments: [], probe: probeInfo(60), transcript: null }] });
     const deaf = await predictVideo(dir, n, { tools: tools(6), ...NOW });
-    expect(deaf.slice(1, 10)).toEqual([
+    expect(deaf.slice(1, 9)).toEqual([
       'Chosen (will they choose to watch): 10/10',
       '  ✓ opens on the picture (item s0)',
       '  – first word: not measured — item s0 keeps the sound of c001, which has no transcript',
       '  ✓ the idea is on record: gap, question (no doubt, no stake)',
-      '  – the title: not measured — no title is chosen yet (titles.chosen in episodes/1/video.json)',
       'Stayed (will they keep watching): 10/10',
       '  – longest stretch with nothing new: not measured — item s0 keeps the sound of c001, which has no transcript',
       '  ✓ 30.0 cuts a minute — the playbook asks for 29 or more',

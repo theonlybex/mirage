@@ -1,5 +1,5 @@
 ---
-{"id":"short","name":"Short","describe":"A vertical video that opens on its hook and is as long as its story needs; made from a big video it's a teaser that answers one small question and leaves the big one open.","words":["short","shorts","reel","reels","tiktok","teaser","clip"],"beats":["hook","tease","pointer","payoff","loop"],"warnPastSec":180,"output":{"width":1080,"height":1920},"captions":{"style":"pop","position":"middle"},"short":{"kind":"teaser"},"playbook":{"firstWordSec":0.5,"answer":{"beat":"payoff","fromShare":0.5,"toShare":0.9},"emptySec":3,"cutsPerMin":{"min":29},"ideaNeeded":true,"title":{"endsWith":"?"}}}
+{"id":"short","name":"Short","describe":"A vertical video that opens on its hook and is as long as its story needs; made from a big video it's a teaser that answers one small question and leaves the big one open.","words":["short","shorts","reel","reels","tiktok","teaser","clip"],"beats":["hook","tease","pointer","payoff","loop"],"warnPastSec":180,"output":{"width":1080,"height":1920},"captions":{"style":"pop","position":"middle"},"short":{"kind":"teaser"},"playbook":{"firstWordSec":0.5,"answer":{"beat":"payoff","fromShare":0.5,"toShare":0.9},"emptySec":3,"cutsPerMin":{"min":29},"ideaNeeded":true}}
 ---
 A short is a vertical video for YouTube Shorts and Instagram Reels (and TikTok), as long as its story needs and no longer. One file works on both apps: make it once, and the person uploads the same file to each.
 
@@ -45,7 +45,7 @@ A short made `from` a big video has its footage folders, its answers (`about`, `
 Instagram's buttons and caption cover more of the picture than YouTube's, so keep text and faces out of both: about the bottom 20%, the top 10% and the right 15% of the frame. Pick each item's `focus` so faces stay in the clear part of the frame. `check` names any overlay or caption that falls in a covered area; a `callout` sits in the middle of the frame and is always clear.
 
 ## Packaging
-The short's title asks the big video's question, never the answer ("Did he actually say yes?"). A standalone short's title asks the hook's question. `check` holds the title the person picked to that: it ends with a question mark (`title` in this file's `playbook`).
+The short's title asks the big video's question, never the answer: as a question ("Did he actually say yes?") or as the setup said plainly ("He asked her on camera"). A standalone short's title states the hook's claim or asks its question. `check` holds a short's title to no shape: a question mark is not a rule (on the one Shorts channel measured so far, 2026-11-10, question titles went with slightly fewer views). A person's own formula can set a shape (`title` in its `playbook`), and `check` then measures against it.
 
 The cover (1080×1920) is the hook's strongest frame: call `thumbnail` for candidates and pick the one nearest the hook, with a face in the clear part of the frame, no text unless the person asks. The title and description are written as the edit skill says, with facts from the person, the catalog or the music library only.
 
