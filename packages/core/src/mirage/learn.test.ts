@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { EpisodeSchema, type ProbeInfo } from '@wordedits/shared';
 import { describe, expect, it } from 'vitest';
 import { saveCatalog } from './ingest.js';
-import { confidence, FeaturesSchema, learnResults, markPosted, READS, readAt, readDue, replayPeaks, resultsLine, titleFeatures, videoAddress, viewsAtAge, type Features, type LearnDeps } from './learn.js';
+import { confidence, dayOf, FeaturesSchema, learnResults, markPosted, READS, readAt, readDue, replayPeaks, resultsLine, titleFeatures, videoAddress, viewsAtAge, type Features, type LearnDeps } from './learn.js';
 import { saveEpisode } from './render-episode.js';
 import { newVideo, readVideo } from './video.js';
 
@@ -47,6 +47,14 @@ async function video(dir: string, o: { format?: string; from?: number; beats?: [
   if (o.final !== false) await writeFile(join(dir, 'episodes', String(n), 'final.mp4'), 'x');
   return n;
 }
+
+describe('dayOf', () => {
+  it("is the person's own calendar day, not the UTC one", () => {
+    // Built from local parts, so this holds in any time zone: 8:30 in the evening is still the 11th.
+    expect(dayOf(new Date(2026, 10, 11, 20, 30))).toBe('2026-11-11');
+    expect(dayOf(new Date(2026, 0, 5, 0, 10))).toBe('2026-01-05');
+  });
+});
 
 describe('videoAddress', () => {
   it('takes a watch, youtu.be or Shorts address and keeps the id, without what a share link adds', () => {

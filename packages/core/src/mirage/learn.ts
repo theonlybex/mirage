@@ -51,7 +51,8 @@ export const MIN_TO_COMPARE = 4;
 const PEAKS = 3;
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const dayOf = (d: Date) => d.toISOString().slice(0, 10);
+/** The person's own calendar day, YYYY-MM-DD: an evening read in California is that evening's, not the next day's as UTC has it. */
+export const dayOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 /** Whole days from one YYYY-MM-DD to a later one. */
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 const round = (n: number, places: number) => Math.round(n * 10 ** places) / 10 ** places;

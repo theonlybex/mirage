@@ -314,6 +314,7 @@ What the forecast cannot see: the picture, the joke, what the title says (only i
 
 When `predict` answers with a `✖` or a `⚠`:
 - `⚠ the timeline is <a> s long and <file> is <b> s — the timeline changed after that render, so this forecast is of the timeline, not of the file: render again before posting`: the timeline was edited after the newest render. Run `render` again so the file that gets posted is the cut that was forecast.
+- `Read as a build story: episodes/<n>/video.json names no format. …` (a note under the first line, not a warning): the video was started without a format, so the build story's playbook was used. For a build story, nothing to do. If it is a short or a vlog, write `"format": "short"` (or `"vlog"`) into `episodes/<n>/video.json` and call `predict` again. If it is none of Mirage's formats (a short film, a story told in pictures), tell the person the misses on where the answer lands and on words a minute are a long episode's rules and may not apply to it.
 - `✖ there is no video <n>`: check the number with `status`.
 - `✖ results/evidence.json: …` or `✖ episodes/<n>/video.json: …`: that file was edited and broke; the line names the key. For `results/evidence.json`, the mirage:learn skill's next read writes it afresh.
 - `✖ ffprobe was not found`: `predict` measures the render with it; the setup skill installs it.

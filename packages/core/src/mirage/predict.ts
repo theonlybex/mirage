@@ -14,7 +14,7 @@ import { formatOf, loadFormats } from './formats.js';
 import { formulasDir, loadFormulas } from './formulas.js';
 import { loadCatalog } from './ingest.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
-import { COMPARED, cutFeatures, EvidenceSchema, FEATURE_KEYS, MIN_TO_COMPARE, resultsDir, type Evidence } from './learn.js';
+import { COMPARED, cutFeatures, dayOf, EvidenceSchema, FEATURE_KEYS, MIN_TO_COMPARE, resultsDir, type Evidence } from './learn.js';
 import { measurePlaybook, playbookFor, playbookLine, type PlaybookResult, type PlaybookRule } from './playbook.js';
 import { PredictionSchema, predictionFile, STEP_TEXT, STEPS, type Band, type Prediction, type Step } from './prediction.js';
 import { episodeDir, loadEpisode } from './render-episode.js';
@@ -134,7 +134,7 @@ export async function predictVideo(
   if (!existsSync(dir)) throw new MirageError('BAD_INPUT', `there is no video ${n}`, 'Run status to see the videos.');
   const video = await readVideo(project, n);
   const format = formatOf(video, loadFormats(o.formatsDir).formats);
-  const at = (o.now?.() ?? new Date()).toISOString().slice(0, 10);
+  const at = dayOf(o.now?.() ?? new Date());
   const episode = await loadEpisode(project, n);
   const { playbook, overrides } = playbookFor(format, loadFormulas(o.formulasDir ?? formulasDir(), project).formulas);
   const series = await seriesOf(project, n);
@@ -207,6 +207,10 @@ export async function predictVideo(
 
   const yours = overrides.length ? `, with your ${format.id}-mine formula's ${overrides.join(', ')}` : '';
   const lines = [`Forecast for video ${n}${video ? ` “${video.title}”` : ''}${series ? `, series “${series.name}”` : ''} (${format.id}${yours}), from ${CUT_TEXT[cut]}: an approximate reading of the cut against the playbook — not a promise, and not a view count`];
+  if (video?.format === undefined) {
+    // A note, not a ⚠: a build story is started without a format, and a ⚠ would go into the morning report every time.
+    lines.push(`Read as a build story: episodes/${n}/video.json names no format. If it is a short or a vlog, write its format there and run predict again; for any other kind of video the build story's numbers (where the answer lands, words a minute) may not apply`);
+  }
   for (const s of steps) {
     const [name, question] = STEP_TEXT[s.step];
     lines.push(`${name} (${question}): ${s.score === null ? 'not scored — none of its rules could be measured' : `${s.score}/10`}`);

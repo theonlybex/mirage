@@ -56,6 +56,7 @@ describe('predict', () => {
     const lines = await predictVideo(dir, n, { tools: tools(), ...NOW });
     expect(lines).toEqual([
       'Forecast for video 1 “The lamp” (build-story), from the final render: an approximate reading of the cut against the playbook — not a promise, and not a view count',
+      "Read as a build story: episodes/1/video.json names no format. If it is a short or a vlog, write its format there and run predict again; for any other kind of video the build story's numbers (where the answer lands, words a minute) may not apply",
       // The idea (3) and the thumbnail (2) are missed, the opening (2) is met: 10 × 2 ÷ 7.
       'Chosen (will they choose to watch): 3/10',
       '  ✓ opens on the picture (item open)',
@@ -164,6 +165,13 @@ describe('predict', () => {
     const lines = await predictVideo(dir, n, { tools: tools(55), ...NOW });
     expect(lines).toContain('⚠ the timeline is 40.0 s long and final.mp4 is 55.0 s — the timeline changed after that render, so this forecast is of the timeline, not of the file: render again before posting');
     expect((await predictVideo(dir, n, { tools: tools(40.1), ...NOW })).join('\n')).not.toContain('⚠');
+  });
+
+  it('says a video with no format was read as a build story, and says nothing for one that names its format', async () => {
+    const dir = await project();
+    const note = (lines: string[]) => lines.filter((l) => l.startsWith('Read as a build story:')).length;
+    expect(note(await predictVideo(dir, await video(dir), { tools: tools(), ...NOW }))).toBe(1);
+    expect(note(await predictVideo(dir, await video(dir, { format: 'short' }), { tools: tools(), ...NOW }))).toBe(0);
   });
 
   it('refuses a video that is not there', async () => {

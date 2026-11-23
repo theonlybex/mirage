@@ -42217,7 +42217,7 @@ var readText = (r) => r === null ? "before the early read" : `${r} read`;
 var MIN_TO_COMPARE = 4;
 var PEAKS = 3;
 var day2 = external_exports.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-var dayOf = (d) => d.toISOString().slice(0, 10);
+var dayOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 var daysBetween = (from, to) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5);
 var round = (n2, places) => Math.round(n2 * 10 ** places) / 10 ** places;
 var plural2 = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`;
@@ -43861,7 +43861,7 @@ async function predictVideo(project2, n2, o2) {
   if (!existsSync15(dir)) throw new MirageError("BAD_INPUT", `there is no video ${n2}`, "Run status to see the videos.");
   const video2 = await readVideo(project2, n2);
   const format2 = formatOf(video2, loadFormats(o2.formatsDir).formats);
-  const at4 = (o2.now?.() ?? /* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const at4 = dayOf(o2.now?.() ?? /* @__PURE__ */ new Date());
   const episode = await loadEpisode(project2, n2);
   const { playbook, overrides } = playbookFor(format2, loadFormulas(o2.formulasDir ?? formulasDir(), project2).formulas);
   const series = await seriesOf(project2, n2);
@@ -43924,6 +43924,9 @@ async function predictVideo(project2, n2, o2) {
   await writeJsonFile(predictionFile(project2, n2), PredictionSchema, prediction, `episodes/${n2}/prediction.json`);
   const yours = overrides.length ? `, with your ${format2.id}-mine formula's ${overrides.join(", ")}` : "";
   const lines = [`Forecast for video ${n2}${video2 ? ` \u201C${video2.title}\u201D` : ""}${series ? `, series \u201C${series.name}\u201D` : ""} (${format2.id}${yours}), from ${CUT_TEXT[cut]}: an approximate reading of the cut against the playbook \u2014 not a promise, and not a view count`];
+  if (video2?.format === void 0) {
+    lines.push(`Read as a build story: episodes/${n2}/video.json names no format. If it is a short or a vlog, write its format there and run predict again; for any other kind of video the build story's numbers (where the answer lands, words a minute) may not apply`);
+  }
   for (const s of steps) {
     const [name, question] = STEP_TEXT[s.step];
     lines.push(`${name} (${question}): ${s.score === null ? "not scored \u2014 none of its rules could be measured" : `${s.score}/10`}`);
