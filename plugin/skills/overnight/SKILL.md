@@ -15,17 +15,17 @@ With no such line, ask which videos (`mcp__plugin_mirage_engine__status` lists t
 
 First load the `mirage:edit` skill with the Skill tool, then follow its rules throughout: the `episode.json` fields, how to read `⚠` and `✖` lines, and what to do when the person pauses, corrects or stops you.
 
-## 1. Check the Mac
-Call `mcp__plugin_mirage_engine__overnight` with `{ videos: [2, 3] }`. It checks that the Mac is plugged in, that the disk has room for tonight's renders and that the tools are installed, then keeps the Mac awake until this session ends.
+## 1. Check the computer
+Call `mcp__plugin_mirage_engine__overnight` with `{ videos: [2, 3] }`. It checks that the computer is plugged in, that the disk has room for tonight's renders and that the tools are installed, then keeps it awake until this session ends (on a Mac or a Windows PC).
 
 If it reports problems, pass each one on in plain words and stop there. The person fixes them and asks again.
 
-## 2. Ask the person to get the Mac ready
+## 2. Ask the person to get the computer ready
 Tell them, in one message:
 - Switch Claude Code to auto mode: press Shift+Tab until it says "auto". That way nothing waits for them to say yes overnight.
-- Leave the lid open and the Mac plugged in. The screen can be off.
+- Leave the computer plugged in, and a laptop's lid open. The screen can be off.
 
-If you haven't yet told them for this project, add: "Your footage stays on this Mac, but frames, transcripts and audio from it go to Anthropic so I can see and hear it."
+If you haven't yet told them for this project, add: "Your footage stays on this computer, but frames, transcripts and audio from it go to Anthropic so I can see and hear it."
 
 Start once they say it's done.
 

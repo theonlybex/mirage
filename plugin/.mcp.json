@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "engine": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/engine.mjs"],
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/start.mjs",
+        "${CLAUDE_PLUGIN_ROOT}/dist/engine.mjs"
+      ],
       "env": {
         "MIRAGE_PROJECT": "${CLAUDE_PROJECT_DIR}",
         "MIRAGE_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}"

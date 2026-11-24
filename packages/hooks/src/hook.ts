@@ -28,7 +28,7 @@ export interface HookDeps {
   sleep(ms: number): Promise<void>;
   /** ${CLAUDE_PLUGIN_DATA}: hook-errors.log lives here. */
   pluginData: string;
-  /** The Claude Code process running the hook (process.ppid: scripts/node execs node). The engine it started has the same parent. */
+  /** The Claude Code process running the hook (claudePid()). The engine it started has the same parent. */
   ppid: number;
   /** ${CLAUDE_PROJECT_DIR}, when set: the project root if it holds a mirage.json. */
   projectDir?: string;

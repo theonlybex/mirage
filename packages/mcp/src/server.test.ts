@@ -12,7 +12,7 @@ formatsDir, formulasDir, loadCatalog, loadEpisode, readLog, realMediaTools, read
 import { EpisodeSchema } from '@wordedits/shared';
 import { run, SidecarError, type Speaker } from '@wordedits/sidecars';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { PreflightDeps } from './preflight.js';
+import { machineName, type PreflightDeps } from './preflight.js';
 import { createEngineServer, newestSessionId, TOOL_NAMES, type EngineContext } from './server.js';
 
 const enc = { name: 'libx264' as const, extraArgs: [] };
@@ -470,16 +470,16 @@ describe('engine tools', () => {
     const dir = await projectWithVideo();
     const { call } = await connect(dir, { preflightDeps: deps({ onBattery: async () => true, which: async (c) => c !== 'ffmpeg' }) });
     const r = await call('overnight', { videos: [1] });
-    expect(r).toEqual({ isError: true, text: "Plug in your Mac. Overnight editing needs the power adapter.\nffmpeg isn't installed. Run /mirage:setup." });
+    expect(r).toEqual({ isError: true, text: `Plug in your ${machineName()}. Overnight editing needs the power adapter.\nffmpeg isn't installed. Run /mirage:setup.` });
     expect((await readSessionState(dir, 's1')).overnight).toBeNull();
   });
 
-  it('overnight keeps the Mac awake and writes the session state', async () => {
+  it('overnight keeps the machine awake and writes the session state', async () => {
     const dir = await projectWithVideo();
     let awake = 0;
     const { call } = await connect(dir, { startAwake: () => { awake++; return 4242; } });
     const r = await call('overnight', { videos: [1, 2] });
-    expect(r).toEqual({ isError: false, text: 'ready: 2 videos, Mac kept awake until this session ends' });
+    expect(r).toEqual({ isError: false, text: `ready: 2 videos, ${machineName()} kept awake until this session ends` });
     expect(awake).toBe(1);
     const state = await readSessionState(dir, 's1');
     expect(state.awakePid).toBe(4242);

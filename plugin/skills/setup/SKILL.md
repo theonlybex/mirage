@@ -83,9 +83,11 @@ node --version    # needs v22 or later
 - **macOS:**
   - Homebrew from https://brew.sh (ask the person to paste the one-line installer into Terminal themselves).
   - Then `brew install node`.
-- **Windows:** `winget install OpenJS.NodeJS.LTS`.
+- **Windows:** `winget install OpenJS.NodeJS.LTS`. Then quit Claude Code completely (the desktop app too) and open it again: it only sees the new PATH after a restart.
 
-**If `node --version` works in the terminal but Mirage still says it needs Node:** the Claude desktop app, opened from the Dock, may not see the terminal's PATH. Mirage then looks in `/opt/homebrew/bin`, `/usr/local/bin`, the newest nvm Node, `~/.volta/bin` and `~/.local/node/bin`. Run `command -v node`. If it's somewhere else, Homebrew's Node (`brew install node`) is the simplest fix.
+**How Mirage finds Node:** Claude Code starts Mirage with the `node` on its own PATH. If that Node is older than 22, Mirage looks for a newer one in `/opt/homebrew/bin`, `/usr/local/bin`, the newest nvm Node, `~/.volta/bin` and `~/.local/node/bin` (on Windows: `C:\Program Files\nodejs`, nvm-windows and Volta). If there is no `node` on Claude Code's PATH at all, none of Mirage starts and the engine tools are missing.
+
+**If `node --version` works in the terminal but Mirage's engine tools are missing:** Claude Code may have been opened before Node was installed, or may not see the terminal's PATH. Quit Claude Code completely and open it again. On a Mac, if that doesn't help, run `command -v node`: a Node that only an nvm line in `~/.zshrc` puts on PATH can be missed, and Homebrew's Node (`brew install node`) is the simplest fix.
 
 ---
 

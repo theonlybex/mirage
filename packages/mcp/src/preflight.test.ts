@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest';
-import { preflight, type PreflightDeps } from './preflight.js';
+import { keepAwakeCommand, machineName, onBatteryFromWin32, powershellArgs, preflight, windowsAwakeScript, type PreflightDeps } from './preflight.js';
 
 const GB = 1024 ** 3;
 const fine = (over: Partial<PreflightDeps> = {}): PreflightDeps => ({
@@ -20,8 +20,10 @@ describe('preflight', () => {
   });
 
   it('asks to plug in when on battery', async () => {
-    const r = await preflight({ project: '/p', videos: [1], deps: fine({ onBattery: async () => true }) });
+    const r = await preflight({ project: '/p', videos: [1], deps: fine({ onBattery: async () => true }), platform: 'darwin' });
     expect(r).toEqual({ ok: false, problems: ['Plug in your Mac. Overnight editing needs the power adapter.'], notes: [] });
+    const pc = await preflight({ project: '/p', videos: [1], deps: fine({ onBattery: async () => true }), platform: 'win32' });
+    expect(pc.problems).toEqual(['Plug in your computer. Overnight editing needs the power adapter.']);
   });
 
   it('asks for space: at least 10 GB, or twice the footage of tonight\'s videos', async () => {
@@ -65,5 +67,42 @@ describe('preflight', () => {
   it('reports every problem at once', async () => {
     const r = await preflight({ project: '/p', videos: [1], deps: fine({ onBattery: async () => true, which: async () => false, freeBytes: async () => 0, transcriber: async () => 'The speech model is missing.' }) });
     expect(r.problems).toHaveLength(5);
+  });
+});
+
+describe('keeping the machine awake', () => {
+  it('calls it a Mac only on macOS', () => {
+    expect(machineName('darwin')).toBe('Mac');
+    expect(machineName('win32')).toBe('computer');
+    expect(machineName('linux')).toBe('computer');
+  });
+
+  it('uses caffeinate on a Mac, held until the engine ends', () => {
+    expect(keepAwakeCommand(4242, 'darwin')).toEqual({ file: 'caffeinate', args: ['-i', '-w', '4242'] });
+  });
+
+  it('uses PowerShell on Windows, holding SetThreadExecutionState until the engine ends', () => {
+    const cmd = keepAwakeCommand(4242, 'win32')!;
+    expect(cmd.file).toBe('powershell.exe');
+    expect(cmd.args.slice(0, 5)).toEqual(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand']);
+    const script = Buffer.from(cmd.args[5]!, 'base64').toString('utf16le');
+    expect(script).toBe(windowsAwakeScript(4242));
+    expect(script).toContain('SetThreadExecutionState([uint32]2147483649)'); // ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+    expect(script.split('\n').at(-1)).toBe('Wait-Process -Id 4242 -ErrorAction SilentlyContinue');
+  });
+
+  it('has nothing for Linux', () => {
+    expect(keepAwakeCommand(4242, 'linux')).toBeNull();
+  });
+
+  it('encodes PowerShell scripts as UTF-16LE base64', () => {
+    expect(powershellArgs('Get-Date').at(-1)).toBe(Buffer.from('Get-Date', 'utf16le').toString('base64'));
+  });
+
+  it('reads a Windows battery as discharging only for BatteryStatus 1', () => {
+    expect(onBatteryFromWin32('1\r\n')).toBe(true);
+    expect(onBatteryFromWin32('2\r\n')).toBe(false);
+    expect(onBatteryFromWin32('')).toBe(false); // a desktop: no battery
+    expect(onBatteryFromWin32('2\r\n1\r\n')).toBe(true);
   });
 });

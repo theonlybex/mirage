@@ -52034,16 +52034,23 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// packages/shared/src/claude-pid.ts
+function claudePid(env = process.env, ppid = process.ppid) {
+  const pid = Number(env.MIRAGE_CLAUDE_PID);
+  return Number.isInteger(pid) && pid > 0 ? pid : ppid;
+}
+
 // packages/mcp/src/preflight.ts
 import { execFile, spawn as spawn3 } from "node:child_process";
 import { readdir as readdir11, stat as stat6, statfs } from "node:fs/promises";
 import { join as join30 } from "node:path";
 import { promisify as promisify3 } from "node:util";
 var GB = 1024 ** 3;
+var machineName = (platform2 = process.platform) => platform2 === "darwin" ? "Mac" : "computer";
 async function preflight(o2) {
   const { deps } = o2;
   const problems = [];
-  if (await deps.onBattery()) problems.push("Plug in your Mac. Overnight editing needs the power adapter.");
+  if (await deps.onBattery()) problems.push(`Plug in your ${machineName(o2.platform)}. Overnight editing needs the power adapter.`);
   const footage = (await Promise.all(o2.videos.map((n2) => deps.footageBytes(o2.project, n2)))).reduce((a2, b) => a2 + b, 0);
   const needed = Math.max(10 * GB, 2 * footage);
   if (await deps.freeBytes(o2.project) < needed) problems.push(`Free up space: Mirage needs about ${Math.ceil(needed / GB)} GB on this disk for tonight's videos.`);
@@ -52077,6 +52084,10 @@ function realPreflightDeps() {
   return {
     onBattery: async () => {
       try {
+        if (process.platform === "win32") {
+          const { stdout } = await execFileAsync("powershell.exe", powershellArgs(WIN_BATTERY), { windowsHide: true, timeout: 3e4 });
+          return onBatteryFromWin32(stdout);
+        }
         return (await execFileAsync("pmset", ["-g", "batt"])).stdout.includes("Battery Power");
       } catch {
         return false;
@@ -52099,8 +52110,29 @@ function realPreflightDeps() {
     tts: async () => ttsSetup()
   };
 }
+function powershellArgs(script) {
+  return ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
+}
+var WIN_BATTERY = "(Get-CimInstance -ClassName Win32_Battery).BatteryStatus";
+function onBatteryFromWin32(stdout) {
+  return stdout.split(/\r?\n/).some((l) => l.trim() === "1");
+}
+function windowsAwakeScript(pid) {
+  return [
+    `$k = Add-Type -Name Awake -Namespace Mirage -PassThru -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);'`,
+    "[void]$k::SetThreadExecutionState([uint32]2147483649)",
+    `Wait-Process -Id ${Math.trunc(pid)} -ErrorAction SilentlyContinue`
+  ].join("\n");
+}
+function keepAwakeCommand(pid, platform2 = process.platform) {
+  if (platform2 === "darwin") return { file: "caffeinate", args: ["-i", "-w", String(pid)] };
+  if (platform2 === "win32") return { file: "powershell.exe", args: powershellArgs(windowsAwakeScript(pid)) };
+  return null;
+}
 function startCaffeinate() {
-  const child = spawn3("caffeinate", ["-i", "-w", String(process.pid)], { detached: true, stdio: "ignore" });
+  const cmd = keepAwakeCommand(process.pid);
+  if (!cmd) return null;
+  const child = spawn3(cmd.file, cmd.args, { detached: true, stdio: "ignore", windowsHide: true });
   child.on("error", () => {
   });
   child.unref();
@@ -52235,7 +52267,7 @@ function createEngineServer(ctx) {
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
   const speaker = ctx.speaker ?? kokoroSpeaker();
-  const ppid = ctx.ppid ?? process.ppid;
+  const ppid = ctx.ppid ?? claudePid();
   const now = ctx.now ?? (() => /* @__PURE__ */ new Date());
   const formatFiles = () => ctx.formatsDir ?? formatsDir();
   const formulas = () => loadFormulas(ctx.formulasDir ?? formulasDir(), existsSync17(join31(project2, "mirage.json")) ? project2 : void 0);
@@ -52484,13 +52516,13 @@ function createEngineServer(ctx) {
       return ok("noted");
     }
   );
-  tool("overnight", "Get ready to edit unattended overnight: checks the Mac and keeps it awake until this session ends.", { videos: external_exports.array(external_exports.number().int().positive()).min(1) }, async ({ videos }) => {
+  tool("overnight", "Get ready to edit unattended overnight: checks the computer and keeps it awake until this session ends.", { videos: external_exports.array(external_exports.number().int().positive()).min(1) }, async ({ videos }) => {
     const { ok: ready, problems, notes } = await preflight({ project: project2, videos, deps });
     if (!ready) return { content: [{ type: "text", text: problems.join("\n") }], isError: true };
     const earlier = (await readSessionState(project2, sid())).awakePid;
     const awakePid = earlier !== null && alive2(earlier) ? earlier : startAwake();
     await writeSessionState(project2, sid(), { overnight: { videos, startedAt: (/* @__PURE__ */ new Date()).toISOString() }, awakePid });
-    return ok([`ready: ${videos.length} videos, Mac kept awake until this session ends`, ...notes]);
+    return ok([`ready: ${videos.length} videos, ${machineName()} kept awake until this session ends`, ...notes]);
   });
   tool("status", "Where the project stands: its title, each video's stage and deliveries, the viewer, and whether the tools are installed.", {}, async () => {
     const lines = [];

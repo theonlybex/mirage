@@ -38371,10 +38371,18 @@ var init_hook = __esm({
 });
 
 // packages/hooks/src/main.ts
-init_project_root();
 import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync7 } from "node:fs";
 import { homedir as homedir5 } from "node:os";
 import { join as join30 } from "node:path";
+
+// packages/shared/src/claude-pid.ts
+function claudePid(env = process.env, ppid = process.ppid) {
+  const pid = Number(env.MIRAGE_CLAUDE_PID);
+  return Number.isInteger(pid) && pid > 0 ? pid : ppid;
+}
+
+// packages/hooks/src/main.ts
+init_project_root();
 
 // packages/hooks/src/setup-notice.ts
 init_setup_state();
@@ -38522,7 +38530,7 @@ async function main() {
     now: () => /* @__PURE__ */ new Date(),
     sleep: (ms2) => new Promise((r2) => setTimeout(r2, ms2)),
     pluginData,
-    ppid: process.ppid,
+    ppid: claudePid(),
     projectDir,
     pluginRoot: process.env.CLAUDE_PLUGIN_ROOT || void 0,
     setupNotice: notice

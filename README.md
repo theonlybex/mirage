@@ -4,7 +4,7 @@ Mirage edits build-story videos inside Claude Code: drop your footage, watch the
 
 ## Install
 
-Made and tested on the Mac. Speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp), which also runs on Windows and Linux; the rest of the plugin isn't ready for Windows yet.
+Made and tested on the Mac. Windows support is new: the plugin starts the same way there (with the `node` on Claude Code's PATH), and the setup installs its tools with `winget`, but it hasn't been tried on a real PC yet. Speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp), which runs on macOS, Windows and Linux.
 
 1. Install Claude Code (https://claude.com/download) and sign in.
 2. In Claude Code, add this repository as a plugin marketplace, then install the plugin:
@@ -17,9 +17,9 @@ Made and tested on the Mac. Speech recognition uses [whisper.cpp](https://github
 3. Start a new session and run `/mirage:setup`. Claude checks that Node, FFmpeg and whisper.cpp (with its speech model, about 574 MB) are installed, and installs what is missing after asking you.
 4. Open Claude Code in a new folder and say "make a video".
 
-**Privacy.** Your footage and project files stay on your Mac, and the live viewer listens only on your own computer. Claude reads still frames and speech text from your clips to describe them, and that goes to Anthropic like anything else in a Claude Code session, so don't record screens that show secrets.
+**Privacy.** Your footage and project files stay on your computer, and the live viewer listens only on your own computer. Claude reads still frames and speech text from your clips to describe them, and that goes to Anthropic like anything else in a Claude Code session, so don't record screens that show secrets.
 
-**Overnight.** For long renders, keep the Mac plugged in with the lid open, and switch Claude Code to auto mode (press Shift+Tab until it says "auto") so nothing waits for a yes while you sleep. The screen can be off.
+**Overnight.** For long renders, keep the computer plugged in (a laptop with its lid open), and switch Claude Code to auto mode (press Shift+Tab until it says "auto") so nothing waits for a yes while you sleep. The screen can be off: Mirage keeps the computer from sleeping until the session ends (`caffeinate` on a Mac, PowerShell on Windows).
 
 **Licence.** Mirage is MIT-licensed. Contributions are welcome under the same licence, with a DCO sign-off (`git commit -s`); see `CONTRIBUTING.md`.
 
@@ -34,6 +34,8 @@ pnpm build:plugin     # rebuilds plugin/dist (the engine, hooks and viewer bundl
 ```
 
 `pnpm install` runs the `ffmpeg-static` postinstall script because `pnpm-workspace.yaml` allows builds for `ffmpeg-static` and `esbuild` (pnpm 12 blocks postinstall scripts otherwise).
+
+Claude Code starts every part of the plugin (hooks, engine, viewer) as `node plugin/scripts/start.mjs <program>`: on Windows a hook's command has to be a real `.exe`, so no shell script can launch it. `start.mjs` runs the program in its own process when that Node is 22 or later, and otherwise looks for a newer one (Homebrew, `/usr/local`, nvm, Volta, `~/.local/node`; on Windows the Node installer's folder, nvm-windows and Volta).
 
 FFmpeg resolution order: `WORDEDITS_FFMPEG_DIR`, then PATH, then the `ffmpeg-static` package.
 

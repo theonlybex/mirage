@@ -6,6 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZodRawShape } from 'zod';
 import { z } from 'zod';
 import { ViewerInfoSchema } from '@wordedits/shared';
+import { claudePid } from '@wordedits/shared/claude-pid';
 import { LATER_DAYS, writeSetupState } from '@wordedits/shared/setup-state';
 import {
   addEpisode, analyzeLibrary, appendLog, findSeries, listSeries, planSeries, seriesLine, seriesReport, seriesSlug, updateSeries, candidatesReport, channelCaptions, channelPatterns, channelThumbnails, checkEpisode, checkReport, describeError, episodeDir, fitRecording, formatsDir, formulaLine, formulasDir, gatherChannel, ingestClips, ingestReport, initProject, learnResults, listVersions, loadFormats, loadFormulas, markPosted, predictVideo,
@@ -13,7 +14,7 @@ import {
   sessionDir, slotsReport, speakNarration, speakReport, thumbnailReport, updateSlots, videoStage, voReport, writeCandidates, writeSessionState, writeThumbnail, DEFAULT_VIDEOS, MAX_VIDEOS, type ChannelDeps, type EpisodeMode, type MediaTools,
 } from '@wordedits/core';
 import { DEFAULT_VOICE, KOKORO_VOICES, kokoroSpeaker, type Speaker } from '@wordedits/sidecars';
-import { preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } from './preflight.js';
+import { machineName, preflight, realPreflightDeps, startCaffeinate, type PreflightDeps } from './preflight.js';
 import { runLong } from './run-long.js';
 
 export const TOOL_NAMES: readonly string[] = [
@@ -29,11 +30,11 @@ export interface EngineContext {
    * Code process that started this server (`.mirage/claude/<ppid>.json`), else newestSessionId(project).
    */
   sessionId?: () => string | null;
-  /** The Claude Code process that started this server (through the `scripts/node` launcher, which execs). Default: process.ppid. */
+  /** The Claude Code process that started this server. Default: claudePid() (MIRAGE_CLAUDE_PID, else process.ppid). */
   ppid?: number;
   /** Machine checks for `overnight` and `status`. Default: the real machine. */
   preflightDeps?: PreflightDeps;
-  /** Keeps the Mac awake; returns the pid of what does. Default: caffeinate. */
+  /** Keeps the machine awake; returns the pid of what does. Default: startCaffeinate (caffeinate, or PowerShell on Windows). */
   startAwake?: () => number | null;
   /** The AI narration voice for `speak`. Default: Kokoro in the plugin's data folder. */
   speaker?: Speaker;
@@ -152,7 +153,7 @@ export function createEngineServer(ctx: EngineContext): McpServer {
   const deps = ctx.preflightDeps ?? realPreflightDeps();
   const startAwake = ctx.startAwake ?? startCaffeinate;
   const speaker = ctx.speaker ?? kokoroSpeaker();
-  const ppid = ctx.ppid ?? process.ppid;
+  const ppid = ctx.ppid ?? claudePid();
   const now = ctx.now ?? (() => new Date());
   const formatFiles = () => ctx.formatsDir ?? formatsDir();
   /** Mirage's own formulas, then the person's from the project's `formulas` folder (a folder that is no project has none). */
@@ -430,14 +431,14 @@ export function createEngineServer(ctx: EngineContext): McpServer {
     },
   );
 
-  tool('overnight', 'Get ready to edit unattended overnight: checks the Mac and keeps it awake until this session ends.', { videos: z.array(z.number().int().positive()).min(1) }, async ({ videos }) => {
+  tool('overnight', 'Get ready to edit unattended overnight: checks the computer and keeps it awake until this session ends.', { videos: z.array(z.number().int().positive()).min(1) }, async ({ videos }) => {
     const { ok: ready, problems, notes } = await preflight({ project, videos, deps });
     if (!ready) return { content: [{ type: 'text', text: problems.join('\n') }], isError: true };
-    // A caffeinate this session already started and that still runs keeps the Mac awake: no second one.
+    // A keep-awake this session already started and that still runs keeps the machine awake: no second one.
     const earlier = (await readSessionState(project, sid())).awakePid;
     const awakePid = earlier !== null && alive(earlier) ? earlier : startAwake();
     await writeSessionState(project, sid(), { overnight: { videos, startedAt: new Date().toISOString() }, awakePid });
-    return ok([`ready: ${videos.length} videos, Mac kept awake until this session ends`, ...notes]);
+    return ok([`ready: ${videos.length} videos, ${machineName()} kept awake until this session ends`, ...notes]);
   });
 
   tool('status', 'Where the project stands: its title, each video\'s stage and deliveries, the viewer, and whether the tools are installed.', {}, async () => {

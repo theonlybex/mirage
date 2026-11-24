@@ -6,6 +6,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { claudePid } from '@wordedits/shared/claude-pid';
 import { findProject } from './project-root.js';
 import { missingTools, setupNotice } from './setup-notice.js';
 
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     now: () => new Date(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     pluginData,
-    ppid: process.ppid,
+    ppid: claudePid(),
     projectDir,
     pluginRoot: process.env.CLAUDE_PLUGIN_ROOT || undefined,
     setupNotice: notice,

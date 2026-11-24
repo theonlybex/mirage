@@ -12,6 +12,10 @@
     "./setup-state": {
       "types": "./src/setup-state.ts",
       "default": "./src/setup-state.ts"
+    },
+    "./claude-pid": {
+      "types": "./src/claude-pid.ts",
+      "default": "./src/claude-pid.ts"
     }
   },
   "dependencies": {

@@ -176,8 +176,9 @@ describe('manifests', () => {
     for (const ev of Object.values<any>(h)) {
       const hook = ev[0].hooks[0];
       expect(hook.type).toBe('command');
-      expect(hook.command).toBe('${CLAUDE_PLUGIN_ROOT}/scripts/node');
-      expect(hook.args[0]).toBe('${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs');
+      // Exec form with node itself: on Windows a hook's command must be a real .exe, so no shell script can launch it.
+      expect(hook.command).toBe('node');
+      expect(hook.args.slice(0, 2)).toEqual(['${CLAUDE_PLUGIN_ROOT}/scripts/start.mjs', '${CLAUDE_PLUGIN_ROOT}/dist/hook.mjs']);
     }
   });
 
@@ -186,17 +187,21 @@ describe('manifests', () => {
     expect(rest).toEqual([]);
     expect(m.name).toBe('viewer');
     expect('when' in m).toBe(false);
-    expect(m.command).toContain('dist/viewer.mjs');
+    // The same words run in sh, Git Bash and PowerShell: node, then quoted paths.
+    expect(m.command.startsWith('node "${CLAUDE_PLUGIN_ROOT}/scripts/start.mjs" "${CLAUDE_PLUGIN_ROOT}/dist/viewer.mjs"')).toBe(true);
     expect(m.command).toContain('--data "${CLAUDE_PLUGIN_DATA}"');
   });
 
   it('points the engine at the project', () => {
     const s = json(join(PLUGIN, '.mcp.json')).mcpServers.engine;
     expect(s.env).toEqual({ MIRAGE_PROJECT: '${CLAUDE_PROJECT_DIR}', MIRAGE_PLUGIN_DATA: '${CLAUDE_PLUGIN_DATA}' });
+    expect(s.command).toBe('node');
+    expect(s.args).toEqual(['${CLAUDE_PLUGIN_ROOT}/scripts/start.mjs', '${CLAUDE_PLUGIN_ROOT}/dist/engine.mjs']);
   });
 
-  it('ships the node launcher executable', () => {
-    expect(statSync(join(PLUGIN, 'scripts/node')).mode & 0o111).not.toBe(0);
+  it('ships the starter, and no shell launcher', () => {
+    expect(existsSync(join(PLUGIN, 'scripts/start.mjs'))).toBe(true);
+    expect(existsSync(join(PLUGIN, 'scripts/node'))).toBe(false);
   });
 });
 
@@ -207,6 +212,12 @@ describe('the bundles run', () => {
     const reply = JSON.parse(out.split('\n')[0]!);
     expect(reply.id).toBe(1);
     expect(reply.result.serverInfo).toBeTruthy();
+  });
+
+  it('the engine answers through scripts/start.mjs, as Claude Code starts it', () => {
+    const msg = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } });
+    const out = execFileSync(process.execPath, [join(PLUGIN, 'scripts/start.mjs'), join(PLUGIN, 'dist/engine.mjs')], { input: `${msg}\n`, encoding: 'utf8', cwd: tmpdir(), timeout: 30_000, env: { ...process.env, MIRAGE_PROJECT: tmpdir() } });
+    expect(JSON.parse(out.split('\n')[0]!).result.serverInfo.name).toBe('engine');
   });
 
   it('the viewer stays silent outside a Mirage project', async () => {

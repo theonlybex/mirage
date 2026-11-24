@@ -22,11 +22,14 @@ export interface PreflightDeps {
 
 const GB = 1024 ** 3;
 
+/** What to call the machine in what the person reads: "Mac" on macOS, else "computer". */
+export const machineName = (platform: NodeJS.Platform = process.platform): string => (platform === 'darwin' ? 'Mac' : 'computer');
+
 /** Whether tonight's videos can be edited unattended: plugged in, with room for the renders, and with the tools installed. */
-export async function preflight(o: { project: string; videos: number[]; deps: PreflightDeps }): Promise<{ ok: boolean; problems: string[]; notes: string[] }> {
+export async function preflight(o: { project: string; videos: number[]; deps: PreflightDeps; platform?: NodeJS.Platform }): Promise<{ ok: boolean; problems: string[]; notes: string[] }> {
   const { deps } = o;
   const problems: string[] = [];
-  if (await deps.onBattery()) problems.push('Plug in your Mac. Overnight editing needs the power adapter.');
+  if (await deps.onBattery()) problems.push(`Plug in your ${machineName(o.platform)}. Overnight editing needs the power adapter.`);
   const footage = (await Promise.all(o.videos.map((n) => deps.footageBytes(o.project, n)))).reduce((a, b) => a + b, 0);
   const needed = Math.max(10 * GB, 2 * footage);
   if ((await deps.freeBytes(o.project)) < needed) problems.push(`Free up space: Mirage needs about ${Math.ceil(needed / GB)} GB on this disk for tonight's videos.`);
@@ -69,9 +72,13 @@ export function realPreflightDeps(): PreflightDeps {
   return {
     onBattery: async () => {
       try {
+        if (process.platform === 'win32') {
+          const { stdout } = await execFileAsync('powershell.exe', powershellArgs(WIN_BATTERY), { windowsHide: true, timeout: 30_000 });
+          return onBatteryFromWin32(stdout);
+        }
         return (await execFileAsync('pmset', ['-g', 'batt'])).stdout.includes('Battery Power');
       } catch {
-        return false; // no pmset (not a Mac): nothing says it runs on battery
+        return false; // no pmset or PowerShell to ask: nothing says it runs on battery
       }
     },
     freeBytes: async (path) => {
@@ -92,13 +99,48 @@ export function realPreflightDeps(): PreflightDeps {
   };
 }
 
+/** PowerShell arguments that run `script` with no profile, no prompts and no window (-EncodedCommand: no quoting to get wrong). */
+export function powershellArgs(script: string): string[] {
+  return ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')];
+}
+
+/** Each battery's BatteryStatus, one per line; a desktop has none. */
+const WIN_BATTERY = '(Get-CimInstance -ClassName Win32_Battery).BatteryStatus';
+
+/** Whether a Windows PC runs on battery: a BatteryStatus of 1 means discharging (2 is on mains power). */
+export function onBatteryFromWin32(stdout: string): boolean {
+  return stdout.split(/\r?\n/).some((l) => l.trim() === '1');
+}
+
 /**
- * Keeps the Mac from sleeping for as long as this process lives (`caffeinate -i -w <pid>` ends when the pid does). Detached and
- * unref'd so it never holds the server up. Returns caffeinate's pid, or null when it could not be started (not a Mac).
+ * The PowerShell that keeps Windows from sleeping while process `pid` lives: SetThreadExecutionState with ES_CONTINUOUS |
+ * ES_SYSTEM_REQUIRED (0x80000001), held by this thread until Wait-Process returns; Windows drops it when PowerShell ends.
+ */
+export function windowsAwakeScript(pid: number): string {
+  return [
+    "$k = Add-Type -Name Awake -Namespace Mirage -PassThru -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint flags);'",
+    '[void]$k::SetThreadExecutionState([uint32]2147483649)',
+    `Wait-Process -Id ${Math.trunc(pid)} -ErrorAction SilentlyContinue`,
+  ].join('\n');
+}
+
+/** The program and arguments that keep this machine awake while `pid` lives, or null where Mirage has none (Linux). */
+export function keepAwakeCommand(pid: number, platform: NodeJS.Platform = process.platform): { file: string; args: string[] } | null {
+  if (platform === 'darwin') return { file: 'caffeinate', args: ['-i', '-w', String(pid)] };
+  if (platform === 'win32') return { file: 'powershell.exe', args: powershellArgs(windowsAwakeScript(pid)) };
+  return null;
+}
+
+/**
+ * Keeps the machine from sleeping for as long as this process lives: `caffeinate -i -w <pid>` on a Mac, a PowerShell holding
+ * SetThreadExecutionState on Windows; both end when the pid does. Detached and unref'd so it never holds the server up.
+ * Returns its pid, or null when nothing could be started.
  */
 export function startCaffeinate(): number | null {
-  const child = spawn('caffeinate', ['-i', '-w', String(process.pid)], { detached: true, stdio: 'ignore' });
-  child.on('error', () => {}); // no caffeinate on this machine: the overnight run is just not kept awake
+  const cmd = keepAwakeCommand(process.pid);
+  if (!cmd) return null;
+  const child = spawn(cmd.file, cmd.args, { detached: true, stdio: 'ignore', windowsHide: true });
+  child.on('error', () => {}); // not on this machine: the overnight run is just not kept awake
   child.unref();
   return child.pid ?? null;
 }
