@@ -1159,10 +1159,19 @@ describe('thumbnail', () => {
 
   it('is stopped when the person stops it, and says nothing was changed', async () => {
     const dir = await withCut('rough.mp4');
-    const tools = { ...(await realMediaTools()), runFfmpeg: async (_a: string[], o?: { signal?: AbortSignal }) => { await new Promise((_r, rej) => o?.signal?.addEventListener('abort', () => rej(Object.assign(new Error('stopped'), { name: 'AbortError' })))); } } as unknown as MediaTools;
+    // FFmpeg that runs until it is stopped, and stops at once when it starts already stopped (as the real one does).
+    let started!: () => void;
+    const reached = new Promise<void>((r) => (started = r));
+    const stopped = () => Object.assign(new Error('stopped'), { name: 'AbortError' });
+    const runFfmpeg = async (_a: string[], o?: { signal?: AbortSignal }) => {
+      started();
+      await new Promise((_r, rej) => (o?.signal?.aborted ? rej(stopped()) : o?.signal?.addEventListener('abort', () => rej(stopped()))));
+    };
+    const tools = { ...(await realMediaTools()), runFfmpeg } as unknown as MediaTools;
     const { call } = await connect(dir, { tools });
     const running = call('thumbnail', { video: 1 });
-    await new Promise((r) => setTimeout(r, 100));
+    // Stop once the command is under way: a pause already on when it starts belongs to an earlier command and is ignored.
+    await reached;
     await writeControl(dir, 1, { pauseNow: true });
     expect(await running).toEqual({ isError: true, text: '✖ Stopped by the person before it finished. Nothing was changed.' });
   });
