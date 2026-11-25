@@ -76,10 +76,11 @@ function readSetupState(dataDir) {
   try {
     const raw = JSON.parse(readFileSync(join2(dataDir, SETUP_FILE), "utf8"));
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
-    const { askedVersion, laterUntil, ffmpeg } = raw;
+    const { askedVersion, laterUntil, ffmpeg, updateCheckedAt } = raw;
     const state = {};
     if (typeof askedVersion === "string") state.askedVersion = askedVersion;
     if (typeof laterUntil === "string") state.laterUntil = laterUntil;
+    if (typeof updateCheckedAt === "string") state.updateCheckedAt = updateCheckedAt;
     if (typeof ffmpeg === "object" && ffmpeg !== null && !Array.isArray(ffmpeg)) {
       const { path: path8, mtimeMs, captions } = ffmpeg;
       if (typeof path8 === "string" && typeof mtimeMs === "number" && Number.isFinite(mtimeMs) && typeof captions === "boolean") state.ffmpeg = { path: path8, mtimeMs, captions };
@@ -95,17 +96,19 @@ function writeSetupState(dataDir, patch) {
     if (patch.askedVersion !== void 0) next.askedVersion = patch.askedVersion;
     if (patch.laterUntil !== void 0) next.laterUntil = patch.laterUntil;
     if (patch.ffmpeg !== void 0) next.ffmpeg = patch.ffmpeg;
+    if (patch.updateCheckedAt !== void 0) next.updateCheckedAt = patch.updateCheckedAt;
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join2(dataDir, SETUP_FILE), `${JSON.stringify(next, null, 2)}
 `);
   } catch {
   }
 }
-var SETUP_FILE;
+var SETUP_FILE, UPDATE_DAYS;
 var init_setup_state = __esm({
   "packages/shared/src/setup-state.ts"() {
     "use strict";
     SETUP_FILE = "setup.json";
+    UPDATE_DAYS = 7;
   }
 });
 
@@ -38474,6 +38477,15 @@ function setupNotice(o2) {
   const opening = o2.inProject ? `This Mirage project can't edit videos until ${list} ${several ? "are" : "is"} installed.` : `Mirage, the video-editing plugin, was just installed or updated, and it can't edit videos until ${list} ${several ? "are" : "is"} installed.`;
   return `${opening} At the start of your first reply, before anything else, ask the person whether Mirage may install ${several ? "them" : "it"} now. Use the mirage:setup skill: it says in one plain sentence what each tool is for and about how big it is, and how to install it. Install only what they agree to. If they say not now, call mcp__plugin_mirage_engine__setup_later.`;
 }
+var UPDATE_NOTICE = "Mirage checks its tools for newer versions once a week, and a check is due. Answer the person's first message as usual, without holding it up; then use the mirage:update skill to find which of Mirage's tools have a newer version, and list them for the person. Update only what they agree to.";
+function updateNotice(o2) {
+  if (!o2.dataDir || !o2.inProject || o2.missing.length > 0) return null;
+  const last = Date.parse(readSetupState(o2.dataDir).updateCheckedAt ?? "");
+  const age = o2.now.getTime() - last;
+  if (Number.isFinite(age) && age >= 0 && age < UPDATE_DAYS * 864e5) return null;
+  writeSetupState(o2.dataDir, { updateCheckedAt: o2.now.toISOString() });
+  return UPDATE_NOTICE;
+}
 
 // packages/hooks/src/main.ts
 var EVENTS = ["session-start", "pre", "post", "stop"];
@@ -38507,13 +38519,9 @@ function pluginVersion() {
 }
 function sessionNotice(inProject) {
   if (!pluginData && !inProject) return null;
-  return setupNotice({
-    dataDir: pluginData,
-    version: pluginVersion(),
-    inProject,
-    now: /* @__PURE__ */ new Date(),
-    missing: missingTools({ env: process.env, platform: process.platform, home: homedir5(), dataDir: pluginData })
-  });
+  const now = /* @__PURE__ */ new Date();
+  const missing = missingTools({ env: process.env, platform: process.platform, home: homedir5(), dataDir: pluginData });
+  return setupNotice({ dataDir: pluginData, version: pluginVersion(), inProject, now, missing }) ?? updateNotice({ dataDir: pluginData, inProject, now, missing });
 }
 async function main() {
   if (!EVENTS.includes(event)) return;

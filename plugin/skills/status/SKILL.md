@@ -30,3 +30,5 @@ Call `mcp__plugin_mirage_engine__status` (no input) and explain what it says in 
 If everything is fine, say so in one line.
 
 Mirage asks at the start of a session whether to install what's missing. When the person says "not now", `mcp__plugin_mirage_engine__setup_later` stops that for 7 days, so it doesn't nag. If they ask why Mirage stopped asking, that is why; `/mirage:setup` works any time.
+
+Once a week, at the start of a session in a Mirage project with nothing missing, Mirage also asks Claude to check its tools for newer versions (the mirage:update skill). If the person asks whether their tools are up to date, use that skill; `/mirage:update` works any time.

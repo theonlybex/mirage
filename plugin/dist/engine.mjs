@@ -29096,10 +29096,11 @@ function readSetupState(dataDir) {
   try {
     const raw = JSON.parse(readFileSync(join(dataDir, SETUP_FILE), "utf8"));
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
-    const { askedVersion, laterUntil, ffmpeg } = raw;
+    const { askedVersion, laterUntil, ffmpeg, updateCheckedAt } = raw;
     const state = {};
     if (typeof askedVersion === "string") state.askedVersion = askedVersion;
     if (typeof laterUntil === "string") state.laterUntil = laterUntil;
+    if (typeof updateCheckedAt === "string") state.updateCheckedAt = updateCheckedAt;
     if (typeof ffmpeg === "object" && ffmpeg !== null && !Array.isArray(ffmpeg)) {
       const { path: path6, mtimeMs, captions } = ffmpeg;
       if (typeof path6 === "string" && typeof mtimeMs === "number" && Number.isFinite(mtimeMs) && typeof captions === "boolean") state.ffmpeg = { path: path6, mtimeMs, captions };
@@ -29115,6 +29116,7 @@ function writeSetupState(dataDir, patch) {
     if (patch.askedVersion !== void 0) next.askedVersion = patch.askedVersion;
     if (patch.laterUntil !== void 0) next.laterUntil = patch.laterUntil;
     if (patch.ffmpeg !== void 0) next.ffmpeg = patch.ffmpeg;
+    if (patch.updateCheckedAt !== void 0) next.updateCheckedAt = patch.updateCheckedAt;
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, SETUP_FILE), `${JSON.stringify(next, null, 2)}
 `);

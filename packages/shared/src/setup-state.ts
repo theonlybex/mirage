@@ -10,6 +10,9 @@ export const SETUP_FILE = 'setup.json';
 /** How many days "not now" holds off asking again. */
 export const LATER_DAYS = 7;
 
+/** How many days apart Mirage asks Claude to check its tools for newer versions. */
+export const UPDATE_DAYS = 7;
+
 export interface SetupState {
   /** The plugin version the person was last asked about, wherever the notice shows. */
   askedVersion?: string;
@@ -17,6 +20,8 @@ export interface SetupState {
   laterUntil?: string;
   /** The FFmpeg the engine last checked: where it is, when the file was last changed, and whether it can draw captions (has libass). */
   ffmpeg?: FfmpegRecord;
+  /** An ISO date: when Mirage last asked Claude to check its tools for newer versions (the weekly update check). */
+  updateCheckedAt?: string;
 }
 
 export interface FfmpegRecord {
@@ -30,10 +35,11 @@ export function readSetupState(dataDir: string): SetupState {
   try {
     const raw: unknown = JSON.parse(readFileSync(join(dataDir, SETUP_FILE), 'utf8'));
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
-    const { askedVersion, laterUntil, ffmpeg } = raw as Record<string, unknown>;
+    const { askedVersion, laterUntil, ffmpeg, updateCheckedAt } = raw as Record<string, unknown>;
     const state: SetupState = {};
     if (typeof askedVersion === 'string') state.askedVersion = askedVersion;
     if (typeof laterUntil === 'string') state.laterUntil = laterUntil;
+    if (typeof updateCheckedAt === 'string') state.updateCheckedAt = updateCheckedAt;
     if (typeof ffmpeg === 'object' && ffmpeg !== null && !Array.isArray(ffmpeg)) {
       const { path, mtimeMs, captions } = ffmpeg as Record<string, unknown>;
       if (typeof path === 'string' && typeof mtimeMs === 'number' && Number.isFinite(mtimeMs) && typeof captions === 'boolean') state.ffmpeg = { path, mtimeMs, captions };
@@ -51,6 +57,7 @@ export function writeSetupState(dataDir: string, patch: SetupState): void {
     if (patch.askedVersion !== undefined) next.askedVersion = patch.askedVersion;
     if (patch.laterUntil !== undefined) next.laterUntil = patch.laterUntil;
     if (patch.ffmpeg !== undefined) next.ffmpeg = patch.ffmpeg;
+    if (patch.updateCheckedAt !== undefined) next.updateCheckedAt = patch.updateCheckedAt;
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, SETUP_FILE), `${JSON.stringify(next, null, 2)}\n`);
   } catch {

@@ -3,7 +3,7 @@
 // every Claude Code session, so it stays fast: sync node:fs only, no process spawns, nothing from @wordedits/core.
 import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
-import { readSetupState, writeSetupState } from '@wordedits/shared/setup-state';
+import { readSetupState, UPDATE_DAYS, writeSetupState } from '@wordedits/shared/setup-state';
 
 /** 'ffmpeg-captions': an FFmpeg is there, but the engine recorded that it can't draw captions (no libass). */
 export type MissingTool = 'ffmpeg' | 'ffmpeg-captions' | 'ffprobe' | 'whisper-cli' | 'speech-model';
@@ -133,4 +133,26 @@ export function setupNotice(o: { dataDir: string; version: string; inProject: bo
     ? `This Mirage project can't edit videos until ${list} ${several ? 'are' : 'is'} installed.`
     : `Mirage, the video-editing plugin, was just installed or updated, and it can't edit videos until ${list} ${several ? 'are' : 'is'} installed.`;
   return `${opening} At the start of your first reply, before anything else, ask the person whether Mirage may install ${several ? 'them' : 'it'} now. Use the mirage:setup skill: it says in one plain sentence what each tool is for and about how big it is, and how to install it. Install only what they agree to. If they say not now, call mcp__plugin_mirage_engine__setup_later.`;
+}
+
+/** The weekly notice that has Claude check Mirage's tools for newer versions (updateNotice). Fixed text. */
+export const UPDATE_NOTICE =
+  'Mirage checks its tools for newer versions once a week, and a check is due. Answer the person\'s first message as usual, without holding it up; ' +
+  'then use the mirage:update skill to find which of Mirage\'s tools have a newer version, and list them for the person. ' +
+  'Update only what they agree to.';
+
+/**
+ * The notice asking Claude to check Mirage's tools for newer versions, or null. It shows in a Mirage project at most once
+ * every UPDATE_DAYS days, and records the day it shows, so a check Claude skips waits for the next week rather than
+ * repeating every session. Never while a tool is missing (the setup notice comes first), never outside a project (the
+ * person may be doing something else), and never without a data folder (nothing could remember the day).
+ */
+export function updateNotice(o: { dataDir: string; inProject: boolean; now: Date; missing: MissingTool[] }): string | null {
+  if (!o.dataDir || !o.inProject || o.missing.length > 0) return null;
+  const last = Date.parse(readSetupState(o.dataDir).updateCheckedAt ?? '');
+  const age = o.now.getTime() - last;
+  // A broken date, or one in the future (a clock that was wrong), counts as due.
+  if (Number.isFinite(age) && age >= 0 && age < UPDATE_DAYS * 86_400_000) return null;
+  writeSetupState(o.dataDir, { updateCheckedAt: o.now.toISOString() });
+  return UPDATE_NOTICE;
 }

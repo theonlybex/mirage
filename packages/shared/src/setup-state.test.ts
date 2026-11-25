@@ -31,3 +31,14 @@ describe('setup state: the ffmpeg record', () => {
     }
   });
 });
+
+describe('setup state: the weekly update check', () => {
+  it('writes and reads updateCheckedAt, keeping the other fields, and drops a wrong-typed one', () => {
+    const d = dir();
+    writeSetupState(d, { askedVersion: '1.0.0' });
+    writeSetupState(d, { updateCheckedAt: '2026-11-24T09:00:00.000Z' });
+    expect(readSetupState(d)).toEqual({ askedVersion: '1.0.0', updateCheckedAt: '2026-11-24T09:00:00.000Z' });
+    writeFileSync(join(d, SETUP_FILE), JSON.stringify({ askedVersion: 'v', updateCheckedAt: 5 }));
+    expect(readSetupState(d)).toEqual({ askedVersion: 'v' });
+  });
+});

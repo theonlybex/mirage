@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readSetupState, SETUP_FILE, writeSetupState } from '@wordedits/shared/setup-state';
-import { kegDirsFor, missingTools, setupNotice, type MissingTool } from './setup-notice.js';
+import { kegDirsFor, missingTools, setupNotice, UPDATE_NOTICE, updateNotice, type MissingTool } from './setup-notice.js';
 
 const WIN = process.platform === 'win32';
 const now = new Date('2026-11-06T12:00:00Z');
@@ -284,6 +284,49 @@ describe('setupNotice', () => {
     expect(notice(['ffmpeg-captions', 'whisper-cli', 'speech-model'])).toContain('until FFmpeg with caption support and whisper.cpp with its speech model are installed');
     expect(notice(['ffmpeg-captions', 'whisper-cli', 'speech-model'])).toContain('install them now');
     expect(notice(['ffmpeg-captions', 'speech-model'])).toContain("until FFmpeg with caption support and whisper.cpp's speech model are installed");
+  });
+});
+
+describe('updateNotice', () => {
+  const DAY = 86_400_000;
+  const at = (days: number) => new Date(now.getTime() + days * DAY);
+
+  it('asks for a check in a project with a data folder and nothing missing, then not again for 7 days', () => {
+    const o = { dataDir, inProject: true, missing: [] as MissingTool[] };
+    expect(updateNotice({ ...o, now })).toBe(UPDATE_NOTICE);
+    expect(readSetupState(dataDir).updateCheckedAt).toBe(now.toISOString());
+    expect(updateNotice({ ...o, now })).toBeNull();
+    expect(updateNotice({ ...o, now: at(6.9) })).toBeNull();
+    expect(updateNotice({ ...o, now: at(7) })).toBe(UPDATE_NOTICE);
+    expect(readSetupState(dataDir).updateCheckedAt).toBe(at(7).toISOString());
+  });
+
+  it('says nothing outside a Mirage project, without a data folder, or while a tool is missing (setup comes first)', () => {
+    expect(updateNotice({ dataDir, inProject: false, now, missing: [] })).toBeNull();
+    expect(updateNotice({ dataDir: '', inProject: true, now, missing: [] })).toBeNull();
+    expect(updateNotice({ dataDir, inProject: true, now, missing: ['ffmpeg'] })).toBeNull();
+    // none of them used up the week
+    expect(readSetupState(dataDir).updateCheckedAt).toBeUndefined();
+    expect(updateNotice({ dataDir, inProject: true, now, missing: [] })).toBe(UPDATE_NOTICE);
+  });
+
+  it('checks again when the recorded date is broken or far in the future', () => {
+    const o = { dataDir, inProject: true, now, missing: [] as MissingTool[] };
+    writeSetupState(dataDir, { updateCheckedAt: 'last week' });
+    expect(updateNotice(o)).toBe(UPDATE_NOTICE);
+    writeSetupState(dataDir, { updateCheckedAt: at(30).toISOString() });
+    expect(updateNotice(o)).toBe(UPDATE_NOTICE);
+  });
+
+  it('keeps the setup fields it did not change', () => {
+    writeSetupState(dataDir, { askedVersion: 'v', laterUntil: at(-1).toISOString() });
+    updateNotice({ dataDir, inProject: true, now, missing: [] });
+    expect(readSetupState(dataDir)).toEqual({ askedVersion: 'v', laterUntil: at(-1).toISOString(), updateCheckedAt: now.toISOString() });
+  });
+
+  it('is fixed text that names the mirage:update skill and asks before updating', () => {
+    expect(UPDATE_NOTICE).toContain('mirage:update');
+    expect(UPDATE_NOTICE).toMatch(/only what they agree to/);
   });
 });
 

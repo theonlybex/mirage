@@ -14,7 +14,7 @@ Made and tested on the Mac. Windows support is new: the plugin starts the same w
    /plugin install mirage@mirage
    ```
 
-3. Start a new session and run `/mirage:setup`. Claude checks that Node, FFmpeg and whisper.cpp (with its speech model, about 574 MB) are installed, and installs what is missing after asking you.
+3. Start a new session and run `/mirage:setup`. Claude checks that Node, FFmpeg and whisper.cpp (with its speech model, about 574 MB) are installed, and installs what is missing after asking you. After that, once a week in a Mirage project, Claude checks whether Mirage and its tools have newer versions and asks before updating any (`/mirage:update` checks any time).
 4. Open Claude Code in a new folder and say "make a video".
 
 **Privacy.** Your footage and project files stay on your computer, and the live viewer listens only on your own computer. Claude reads still frames and speech text from your clips to describe them, and that goes to Anthropic like anything else in a Claude Code session, so don't record screens that show secrets.

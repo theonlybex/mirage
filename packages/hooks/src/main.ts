@@ -2,13 +2,14 @@
 // The hook script Claude Code runs: `hook.mjs <session-start|pre|post|stop>` with the event's JSON on stdin. It always exits
 // 0; any failure prints nothing and adds a line to ${CLAUDE_PLUGIN_DATA}/hook-errors.log. Outside a Mirage project it only
 // reads stdin and looks for mirage.json (findProject), so it stays fast in every other session of the person; at session
-// start it also checks, with sync node:fs only, whether Mirage's tools are installed (setup-notice.ts).
+// start it also checks, with sync node:fs only, whether Mirage's tools are installed and whether the weekly check for
+// newer versions is due (setup-notice.ts).
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { claudePid } from '@wordedits/shared/claude-pid';
 import { findProject } from './project-root.js';
-import { missingTools, setupNotice } from './setup-notice.js';
+import { missingTools, setupNotice, updateNotice } from './setup-notice.js';
 
 const EVENTS = ['session-start', 'pre', 'post', 'stop'] as const;
 type Event = (typeof EVENTS)[number];
@@ -48,18 +49,15 @@ function pluginVersion(): string {
 }
 
 /**
- * The notice asking whether Mirage may install what is missing, or null. Without a data folder nothing can be remembered,
- * so outside a project there is none (it would repeat every session); inside one it still shows.
+ * The notice asking whether Mirage may install what is missing, or, when nothing is, the weekly one asking Claude to check
+ * Mirage's tools for newer versions; null for neither. Without a data folder nothing can be remembered, so outside a
+ * project there is none (it would repeat every session); inside one the setup notice still shows.
  */
 function sessionNotice(inProject: boolean): string | null {
   if (!pluginData && !inProject) return null;
-  return setupNotice({
-    dataDir: pluginData,
-    version: pluginVersion(),
-    inProject,
-    now: new Date(),
-    missing: missingTools({ env: process.env, platform: process.platform, home: homedir(), dataDir: pluginData }),
-  });
+  const now = new Date();
+  const missing = missingTools({ env: process.env, platform: process.platform, home: homedir(), dataDir: pluginData });
+  return setupNotice({ dataDir: pluginData, version: pluginVersion(), inProject, now, missing }) ?? updateNotice({ dataDir: pluginData, inProject, now, missing });
 }
 
 async function main(): Promise<void> {
