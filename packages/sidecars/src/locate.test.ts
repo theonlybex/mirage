@@ -9,6 +9,8 @@ import { SidecarError } from './errors.js';
 const saved = { path: process.env.PATH, dir: process.env.WORDEDITS_FFMPEG_DIR, data: process.env.MIRAGE_PLUGIN_DATA };
 const roots: string[] = [];
 
+// No Homebrew ffmpeg-full folders unless a test passes its own: one installed on this computer would be found otherwise.
+beforeEach(() => _setCaptionsCheck({ kegDirs: [] }));
 afterEach(async () => {
   process.env.PATH = saved.path;
   for (const [k, v] of [['WORDEDITS_FFMPEG_DIR', saved.dir], ['MIRAGE_PLUGIN_DATA', saved.data]] as const) {
@@ -131,7 +133,7 @@ sh('ffmpegCaptions', () => {
   it('counts an FFmpeg that hangs on -filters as unable to draw captions, within the timeout', async () => {
     const hang = await fake('hang', 'exec /bin/sleep 20');
     process.env.PATH = hang;
-    _setCaptionsCheck({ timeoutMs: 300 });
+    _setCaptionsCheck({ kegDirs: [], timeoutMs: 300 });
     const t0 = Date.now();
     expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(hang, 'ffmpeg') });
     expect(Date.now() - t0).toBeLessThan(5000);
@@ -141,7 +143,7 @@ sh('ffmpegCaptions', () => {
     const hang = await fake('hang', 'exec /bin/sleep 20');
     process.env.PATH = hang;
     process.env.MIRAGE_PLUGIN_DATA = join(root, 'data');
-    _setCaptionsCheck({ timeoutMs: 2000 }); // long enough that a busy machine still starts the fake before it is stopped; the fake never ends by itself
+    _setCaptionsCheck({ kegDirs: [], timeoutMs: 2000 }); // long enough that a busy machine still starts the fake before it is stopped; the fake never ends by itself
     expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(hang, 'ffmpeg') });
     expect(await runs(hang)).toBe(1);
     expect(readSetupState(join(root, 'data')).ffmpeg).toBeUndefined();
@@ -158,6 +160,7 @@ sh('ffmpegCaptions', () => {
     await writeFile(join(dir, 'ffmpeg'), 'not a program\n');
     await chmod(join(dir, 'ffmpeg'), 0o755);
     process.env.PATH = dir;
+    _setCaptionsCheck({ kegDirs: [] });
     process.env.MIRAGE_PLUGIN_DATA = join(root, 'data');
     expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(dir, 'ffmpeg') });
     expect(readSetupState(join(root, 'data')).ffmpeg).toBeUndefined();
@@ -166,7 +169,7 @@ sh('ffmpegCaptions', () => {
   it('kills a check that ignores SIGTERM soon after the timeout', async () => {
     const stubborn = await fake('stubborn', "trap '' TERM\nwhile :; do :; done");
     process.env.PATH = stubborn;
-    _setCaptionsCheck({ timeoutMs: 300 });
+    _setCaptionsCheck({ kegDirs: [], timeoutMs: 300 });
     const t0 = Date.now();
     expect(await ffmpegCaptions()).toMatchObject({ ok: false, path: join(stubborn, 'ffmpeg') });
     expect(Date.now() - t0).toBeLessThan(3000);

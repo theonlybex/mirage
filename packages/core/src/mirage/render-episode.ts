@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { EpisodeSchema, isCard, TranscriptSchema, type Catalog, type ClipItem, type Episode, type MusicCue, type MusicLibrary, type SfxCue, type Transcript, type VoiceLine } from '@wordedits/shared';
-import { encodeArgs, ffNum } from './encode.js';
+import { BT709_TAGS, delayed, encodeArgs, ffNum } from './encode.js';
 import type { Encoder, MediaTools } from '../media-tools.js';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 import { asCancelled } from './cancel.js';
@@ -373,11 +373,11 @@ export function musicTrackArgs(cues: MusicCue[], lib: MusicLibrary, musicDir: st
         ...(measured > dur ? [`atrim=duration=${ffNum(dur)}`] : []),
         ...fades,
         ...dipFilters(c, dur),
-        `adelay=delays=${Math.round(c.start * 1000)}:all=1[m${i}]`,
+        `${delayed(String(Math.round(c.start * 1000)))}[m${i}]`,
       ].join(','),
     );
   });
-  chains.push(`${cues.map((_, i) => `[m${i}]`).join('')}amix=inputs=${cues.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  chains.push(`${cues.map((_, i) => `[m${i}]`).join('')}amix=inputs=${cues.length}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', output];
 }
 
@@ -413,11 +413,11 @@ export function sfxTrackArgs(sounds: PlacedSfx[], durationSec: number, output: s
         'asetpts=N/SR/TB',
         ...(skip > 0 ? [`atrim=start_sample=${Math.round(skip * SR)}`, 'asetpts=PTS-STARTPTS'] : []),
         `volume=${ffNum(x.volumeDb)}dB`,
-        `adelay=delays=${Math.round(delay * SR)}S:all=1[s${i}]`,
+        `${delayed(`${Math.round(delay * SR)}S`)}[s${i}]`,
       ].join(','),
     );
   });
-  chains.push(`${sounds.map((_, i) => `[s${i}]`).join('')}amix=inputs=${sounds.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  chains.push(`${sounds.map((_, i) => `[s${i}]`).join('')}amix=inputs=${sounds.length}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', output];
 }
 
@@ -438,11 +438,11 @@ export function spillTrackArgs(list: FadedSpill[], sources: Map<string, ClipSour
     inputs.push(...readFrom(src, s.srcIn));
     const sec = ffNum(s.sec);
     const fade = fadeFilter(s.fade ?? singleFade(s));
-    chains.push(`${ownSound(i, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},adelay=delays=${Math.round(s.at * SR)}S:all=1[s${i}]`);
+    chains.push(`${ownSound(i, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},${delayed(`${Math.round(s.at * SR)}S`)}[s${i}]`);
   });
   if (under) inputs.push('-i', under);
   const mix = [...list.map((_, i) => `[s${i}]`), ...(under ? [`[${list.length}:a]`] : [])];
-  chains.push(`${mix.join('')}amix=inputs=${mix.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  chains.push(`${mix.join('')}amix=inputs=${mix.length}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, '-filter_complex', chains.join(';'), '-map', '[out]', '-c:a', 'pcm_f32le', '-ar', String(SR), '-ac', '2', output];
 }
 
@@ -554,14 +554,14 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   if (o.spillWav) inputs.push('-i', o.spillWav);
   const D = ffNum(o.durationSec);
 
-  const chains = [`[0:v]ass=${filterValue(o.assFile)}${o.fontsDir ? `:fontsdir=${filterValue(o.fontsDir)}` : ''}[vout]`];
+  const chains = [`[0:v]ass=${filterValue(o.assFile)}${o.fontsDir ? `:fontsdir=${filterValue(o.fontsDir)}` : ''},${BT709_TAGS}[vout]`];
   if (o.voiceRaw || o.spillWav) {
     // The live sound, the voice-over and the shots' sound carried over a cut make one speech bus.
     chains.push(`[0:a]${FLTP_STEREO}[live]`);
     if (o.voiceRaw) chains.push(`[${voiceIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[vo]`);
     if (o.spillWav) chains.push(`[${spillIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[spill]`);
     const parts = ['[live]', ...(o.voiceRaw ? ['[vo]'] : []), ...(o.spillWav ? ['[spill]'] : [])];
-    chains.push(`${parts.join('')}amix=inputs=${parts.length}:duration=first:normalize=0[speechraw]`);
+    chains.push(`${parts.join('')}amix=inputs=${parts.length}:duration=first:normalize=0,asetpts=N/SR/TB[speechraw]`);
   } else {
     chains.push('[0:a]anull[speechraw]');
   }
@@ -577,7 +577,7 @@ export function episodeFinalArgs(o: FinalEpisodeOptions): string[] {
   // Sound effects join the mix after the ducking (they never duck) and go through the limiter with everything else.
   const sfx = o.sfxWav ? '[sfx]' : '';
   if (o.sfxWav) chains.push(`[${sfxIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=${D}[sfx]`);
-  const limited = (n: number) => `amix=inputs=${n}:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]`;
+  const limited = (n: number) => `amix=inputs=${n}:duration=first:normalize=0,asetpts=N/SR/TB,alimiter=limit=0.891:level=false[aout]`;
   if (o.musicWav) {
     chains.push(
       '[speech]asplit=2[smix][skey]',

@@ -37463,6 +37463,8 @@ function bitrateFor(width, height, fps) {
   return "5M";
 }
 var ffNum = (n2) => String(Math.round(n2 * 1e6) / 1e6);
+var delayed = (delays) => `adelay=delays=${delays}:all=1,asetpts=N/SR/TB`;
+var BT709_TAGS = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709";
 function encodeArgs(o2) {
   const video2 = o2.mode === "preview" ? ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28"] : ["-c:v", o2.encoder.name, ...o2.encoder.extraArgs, "-b:v", bitrateFor(o2.width, o2.height, o2.fps), "-g", String(Math.round(o2.fps * 2))];
   const audio = o2.mode === "preview" ? ["-c:a", "aac", "-b:a", "128k"] : ["-c:a", "aac", "-b:a", "384k"];
@@ -38935,7 +38937,7 @@ import { mkdir as mkdir3, readFile as readFile6, rename as rename3, rm as rm6 } 
 import { homedir as homedir4, tmpdir as tmpdir2 } from "node:os";
 import { basename as basename2, dirname as dirname5, join as join11 } from "node:path";
 var BUILTIN_SFX = ["whoosh", "swoosh-out", "hit", "riser", "pop", "ding", "click"];
-var SFX_RECIPE_VERSION = 1;
+var SFX_RECIPE_VERSION = 2;
 var SR = 48e3;
 var PEAK_DB = -1.5;
 var PAD_SEC = 0.1;
@@ -38962,14 +38964,14 @@ var RECIPES = {
     durationSec: 0.8,
     peakSec: 0.01,
     fadeOutSec: 0.05,
-    graph: `${curve("sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))", 0.8)}[b];${noise("brown", 31, 0.8)},${band(60, 250)}[n];${curve("0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))", 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0[s]`
+    graph: `${curve("sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))", 0.8)}[b];${noise("brown", 31, 0.8)},${band(60, 250)}[n];${curve("0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))", 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0,asetpts=N/SR/TB[s]`
   },
   // Pink noise (400 Hz–6 kHz) and a sine at about the same level sweeping from 300 Hz to 1.5 kHz, both growing as t³ to 2 s.
   riser: {
     durationSec: 2.02,
     peakSec: 2,
     fadeOutSec: 0.019,
-    graph: `${noise("pink", 47, 2.02)},${band(400, 6e3)}[n];${curve("min(1,pow(t/2,3))", 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0[s]`
+    graph: `${noise("pink", 47, 2.02)},${band(400, 6e3)}[n];${curve("min(1,pow(t/2,3))", 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0,asetpts=N/SR/TB[s]`
   },
   // A sine dropping from 700 to 250 Hz in about 15 ms, a 5 ms rise and a 22 ms decay.
   pop: { durationSec: 0.12, peakSec: 5e-3, fadeOutSec: 0.02, graph: `${curve("sin(2*PI*(250*t+450*0.015*(1-exp(-t/0.015))))*if(lt(t,0.005),pow(sin(PI/2*t/0.005),2),exp(-(t-0.005)/0.022))", 0.12)}[s]` },
@@ -38998,7 +39000,7 @@ async function builtinSfx(name, tools, o2 = {}) {
     const pad2 = Math.round(PAD_SEC * SR);
     const len = Math.round(recipe.durationSec * SR);
     const total = len + 2 * pad2;
-    const graph = `${recipe.graph};[s]apad=pad_len=${pad2},${band(PASS.highpassHz, PASS.lowpassHz)},adelay=delays=${pad2}S:all=1,apad=whole_len=${total},atrim=end_sample=${total}[out]`;
+    const graph = `${recipe.graph};[s]apad=pad_len=${pad2},${band(PASS.highpassHz, PASS.lowpassHz)},${delayed(`${pad2}S`)},apad=whole_len=${total},atrim=end_sample=${total}[out]`;
     await tools.runFfmpeg(["-filter_complex", graph, "-map", "[out]", "-ac", "1", "-ar", String(SR), "-c:a", "pcm_f32le", "-f", "f32le", raw], { signal: o2.signal });
     const buf = await readFile6(raw);
     const x = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
@@ -40013,11 +40015,11 @@ function musicTrackArgs(cues, lib, musicDir, durationSec, loudnessLufs, output2)
         ...measured > dur ? [`atrim=duration=${ffNum(dur)}`] : [],
         ...fades,
         ...dipFilters(c3, dur),
-        `adelay=delays=${Math.round(c3.start * 1e3)}:all=1[m${i2}]`
+        `${delayed(String(Math.round(c3.start * 1e3)))}[m${i2}]`
       ].join(",")
     );
   });
-  chains.push(`${cues.map((_, i2) => `[m${i2}]`).join("")}amix=inputs=${cues.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  chains.push(`${cues.map((_, i2) => `[m${i2}]`).join("")}amix=inputs=${cues.length}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, "-filter_complex", chains.join(";"), "-map", "[out]", "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", output2];
 }
 function sfxTrackArgs(sounds, durationSec, output2) {
@@ -40036,11 +40038,11 @@ function sfxTrackArgs(sounds, durationSec, output2) {
         "asetpts=N/SR/TB",
         ...skip > 0 ? [`atrim=start_sample=${Math.round(skip * SR2)}`, "asetpts=PTS-STARTPTS"] : [],
         `volume=${ffNum(x.volumeDb)}dB`,
-        `adelay=delays=${Math.round(delay * SR2)}S:all=1[s${i2}]`
+        `${delayed(`${Math.round(delay * SR2)}S`)}[s${i2}]`
       ].join(",")
     );
   });
-  chains.push(`${sounds.map((_, i2) => `[s${i2}]`).join("")}amix=inputs=${sounds.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  chains.push(`${sounds.map((_, i2) => `[s${i2}]`).join("")}amix=inputs=${sounds.length}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, "-filter_complex", chains.join(";"), "-map", "[out]", "-c:a", "pcm_f32le", "-ar", String(SR2), "-ac", "2", output2];
 }
 function spillTrackArgs(list, sources, durationSec, output2, under) {
@@ -40052,11 +40054,11 @@ function spillTrackArgs(list, sources, durationSec, output2, under) {
     inputs.push(...readFrom(src, s.srcIn));
     const sec = ffNum(s.sec);
     const fade = fadeFilter(s.fade ?? singleFade(s));
-    chains.push(`${ownSound(i2, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},adelay=delays=${Math.round(s.at * SR2)}S:all=1[s${i2}]`);
+    chains.push(`${ownSound(i2, src, s.sec)},apad,atrim=end=${sec},asetpts=PTS-STARTPTS,${fade},${delayed(`${Math.round(s.at * SR2)}S`)}[s${i2}]`);
   });
   if (under) inputs.push("-i", under);
   const mix = [...list.map((_, i2) => `[s${i2}]`), ...under ? [`[${list.length}:a]`] : []];
-  chains.push(`${mix.join("")}amix=inputs=${mix.length}:duration=longest:normalize=0,apad,atrim=end=${ffNum(durationSec)}[out]`);
+  chains.push(`${mix.join("")}amix=inputs=${mix.length}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=${ffNum(durationSec)}[out]`);
   return [...inputs, "-filter_complex", chains.join(";"), "-map", "[out]", "-c:a", "pcm_f32le", "-ar", String(SR2), "-ac", "2", output2];
 }
 function spillTrackCommands(list, sources, durationSec, dir) {
@@ -40122,13 +40124,13 @@ function episodeFinalArgs(o2) {
   const spillIdx = o2.spillWav ? next++ : -1;
   if (o2.spillWav) inputs.push("-i", o2.spillWav);
   const D = ffNum(o2.durationSec);
-  const chains = [`[0:v]ass=${filterValue(o2.assFile)}${o2.fontsDir ? `:fontsdir=${filterValue(o2.fontsDir)}` : ""}[vout]`];
+  const chains = [`[0:v]ass=${filterValue(o2.assFile)}${o2.fontsDir ? `:fontsdir=${filterValue(o2.fontsDir)}` : ""},${BT709_TAGS}[vout]`];
   if (o2.voiceRaw || o2.spillWav) {
     chains.push(`[0:a]${FLTP_STEREO}[live]`);
     if (o2.voiceRaw) chains.push(`[${voiceIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[vo]`);
     if (o2.spillWav) chains.push(`[${spillIdx}:a]${FLTP_STEREO},apad,atrim=end=${D}[spill]`);
     const parts = ["[live]", ...o2.voiceRaw ? ["[vo]"] : [], ...o2.spillWav ? ["[spill]"] : []];
-    chains.push(`${parts.join("")}amix=inputs=${parts.length}:duration=first:normalize=0[speechraw]`);
+    chains.push(`${parts.join("")}amix=inputs=${parts.length}:duration=first:normalize=0,asetpts=N/SR/TB[speechraw]`);
   } else {
     chains.push("[0:a]anull[speechraw]");
   }
@@ -40139,7 +40141,7 @@ function episodeFinalArgs(o2) {
   );
   const sfx = o2.sfxWav ? "[sfx]" : "";
   if (o2.sfxWav) chains.push(`[${sfxIdx}:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=${D}[sfx]`);
-  const limited = (n2) => `amix=inputs=${n2}:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]`;
+  const limited = (n2) => `amix=inputs=${n2}:duration=first:normalize=0,asetpts=N/SR/TB,alimiter=limit=0.891:level=false[aout]`;
   if (o2.musicWav) {
     chains.push(
       "[speech]asplit=2[smix][skey]",

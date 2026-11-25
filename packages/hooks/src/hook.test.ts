@@ -615,7 +615,8 @@ describe.skipIf(!existsSync(DIST))('session start through the bundled script', (
   const contextOf = (out: string): string => JSON.parse(out).hookSpecificOutput.additionalContext;
 
   it('asks once per version outside a Mirage project, fast', async () => {
-    const env = { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: await tmp('mirage-home-') };
+    // An empty FFmpeg folder, so FFmpeg is missing even where Homebrew's ffmpeg-full is installed (its folder is looked in by itself).
+    const env = { CLAUDE_PLUGIN_DATA: await tmp('mirage-data-'), CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, HOME: await tmp('mirage-home-'), WORDEDITS_FFMPEG_DIR: await tmp('mirage-no-ffmpeg-') };
     await sessionStart(env); // warm the disk cache
     const data = await tmp('mirage-data-');
     const first = await sessionStart({ ...env, CLAUDE_PLUGIN_DATA: data });

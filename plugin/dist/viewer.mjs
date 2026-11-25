@@ -28479,14 +28479,14 @@ var RECIPES = {
     durationSec: 0.8,
     peakSec: 0.01,
     fadeOutSec: 0.05,
-    graph: `${curve("sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))", 0.8)}[b];${noise("brown", 31, 0.8)},${band(60, 250)}[n];${curve("0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))", 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0[s]`
+    graph: `${curve("sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))", 0.8)}[b];${noise("brown", 31, 0.8)},${band(60, 250)}[n];${curve("0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))", 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0,asetpts=N/SR/TB[s]`
   },
   // Pink noise (400 Hz–6 kHz) and a sine at about the same level sweeping from 300 Hz to 1.5 kHz, both growing as t³ to 2 s.
   riser: {
     durationSec: 2.02,
     peakSec: 2,
     fadeOutSec: 0.019,
-    graph: `${noise("pink", 47, 2.02)},${band(400, 6e3)}[n];${curve("min(1,pow(t/2,3))", 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0[s]`
+    graph: `${noise("pink", 47, 2.02)},${band(400, 6e3)}[n];${curve("min(1,pow(t/2,3))", 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0,asetpts=N/SR/TB[s]`
   },
   // A sine dropping from 700 to 250 Hz in about 15 ms, a 5 ms rise and a 22 ms decay.
   pop: { durationSec: 0.12, peakSec: 5e-3, fadeOutSec: 0.02, graph: `${curve("sin(2*PI*(250*t+450*0.015*(1-exp(-t/0.015))))*if(lt(t,0.005),pow(sin(PI/2*t/0.005),2),exp(-(t-0.005)/0.022))", 0.12)}[s]` },

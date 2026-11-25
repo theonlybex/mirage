@@ -15,6 +15,7 @@ import { analyzeLibrary, loadLibrary } from './music.js';
 import { buildAss, groupCaptions, speechWords, toSrt } from './overlays.js';
 import { buildVoiceTrack, chunkItems, chunkSize, type ClipSource, commandLength, episodeChunks, MAX_COMMAND, chunkTimeoutMs, episodeFinalArgs, filterValue, itemChunkArgs, loadEpisode, musicTrackArgs, previewSize, renderEpisode, saveEpisode, sfxTrackArgs, sourcesFor, spillTrackArgs, spillTrackCommands } from './render-episode.js';
 import { fadesFor, spills } from './spill.js';
+import { SFX_RECIPE_VERSION } from './sfx.js';
 import { layoutTimeline, timelineDuration } from './timeline.js';
 import { fitVoiceover, holdAt } from './voiceover.js';
 
@@ -299,7 +300,7 @@ describe('musicTrackArgs', () => {
     expect(graph).not.toContain('afade=t=in');
     expect(graph).toContain('afade=t=out:st=9:d=1');
     expect(graph).toContain('adelay=delays=2000:all=1');
-    expect(graph).toContain('amix=inputs=1:duration=longest:normalize=0,apad,atrim=end=15[out]');
+    expect(graph).toContain('amix=inputs=1:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=15[out]');
   });
   it('measures a cue shorter than 3 s over 3.1 s of its looping track, then cuts it to length', () => {
     const args = musicTrackArgs([{ track: 'a.mp3', start: 0, end: 1, gainDb: -5, fadeIn: 0, fadeOut: 0, offset: 0 }], lib, '/m', 2, -14, '/w/m.wav');
@@ -335,7 +336,7 @@ describe('arguments of an episode without sound effects or dips', () => {
         "-i",
         "/m/a.mp3",
         "-filter_complex",
-        "[0:a]asetpts=N/SR/TB,atrim=duration=10,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,loudnorm=I=-19:TP=-2:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:d=0.5,afade=t=out:st=9:d=1,adelay=delays=2000:all=1[m0];[1:a]asetpts=N/SR/TB,atrim=duration=3.1,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,loudnorm=I=-19:TP=-2:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=1,adelay=delays=0:all=1[m1];[m0][m1]amix=inputs=2:duration=longest:normalize=0,apad,atrim=end=15[out]",
+        "[0:a]asetpts=N/SR/TB,atrim=duration=10,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,loudnorm=I=-19:TP=-2:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,afade=t=in:d=0.5,afade=t=out:st=9:d=1,adelay=delays=2000:all=1,asetpts=N/SR/TB[m0];[1:a]asetpts=N/SR/TB,atrim=duration=3.1,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,loudnorm=I=-19:TP=-2:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=1,adelay=delays=0:all=1,asetpts=N/SR/TB[m1];[m0][m1]amix=inputs=2:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=15[out]",
         "-map",
         "[out]",
         "-c:a",
@@ -367,7 +368,7 @@ describe('arguments of an episode without sound effects or dips', () => {
         "-i",
         "vo.f32",
         "-filter_complex",
-        "[0:v]ass=overlays.ass[vout];[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[live];[2:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[vo];[live][vo]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB[speech];[speech]asplit=2[smix][skey];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[mus];[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck];[smix][duck]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]",
+        "[0:v]ass=overlays.ass,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout];[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[live];[2:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[vo];[live][vo]amix=inputs=2:duration=first:normalize=0,asetpts=N/SR/TB[speechraw];[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB[speech];[speech]asplit=2[smix][skey];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[mus];[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck];[smix][duck]amix=inputs=2:duration=first:normalize=0,asetpts=N/SR/TB,alimiter=limit=0.891:level=false[aout]",
         "-map",
         "[vout]",
         "-map",
@@ -410,7 +411,7 @@ describe('arguments of an episode without sound effects or dips', () => {
         "-i",
         "chunks.txt",
         "-filter_complex",
-        "[0:v]ass=overlays.ass[vout];[0:a]anull[speechraw];[speechraw]highpass=f=90,apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB,atrim=end=2.5[aout]",
+        "[0:v]ass=overlays.ass,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout];[0:a]anull[speechraw];[speechraw]highpass=f=90,apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB,atrim=end=2.5[aout]",
         "-map",
         "[vout]",
         "-map",
@@ -454,7 +455,7 @@ describe('musicTrackArgs with dips', () => {
   it("silences the cue's music over each dip, with 80 ms fades ending at its start and starting at its end, on the cue's own clock", () => {
     const g = graph({ dips: [{ start: 5, end: 5.5 }, { start: 8, end: 9 }] });
     const gain = '(clip((3-t)/0.08,0,1)+clip((t-3.5)/0.08,0,1))*(clip((6-t)/0.08,0,1)+clip((t-7)/0.08,0,1))';
-    expect(g).toContain(`afade=t=out:st=9:d=1,asetpts=N/SR/TB,aeval='val(0)*${gain}|val(1)*${gain}':c=same,adelay=delays=2000:all=1[m0]`);
+    expect(g).toContain(`afade=t=out:st=9:d=1,asetpts=N/SR/TB,aeval='val(0)*${gain}|val(1)*${gain}':c=same,adelay=delays=2000:all=1,asetpts=N/SR/TB[m0]`);
   });
   it('leaves out a dip entirely outside the cue, and adds nothing for no dips', () => {
     expect(graph({ dips: [{ start: 1, end: 1.5 }, { start: 12, end: 13 }, { start: 11.5, end: 12.5 }] })).toContain("aeval='val(0)*(clip((9.5-t)/0.08,0,1)+clip((t-10.5)/0.08,0,1))|");
@@ -471,9 +472,9 @@ describe('sfxTrackArgs', () => {
     ], 6, '/w/sfx.wav');
     expect(args.slice(0, args.indexOf('-filter_complex'))).toEqual(['-t', '4.01', '-i', '/s/hit.wav', '-t', '7', '-i', '/s/riser.wav']);
     expect(args[args.indexOf('-filter_complex') + 1]).toBe(
-      '[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,volume=-8.04dB,adelay=delays=95520S:all=1[s0];' +
-        '[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,atrim=start_sample=48000,asetpts=PTS-STARTPTS,volume=0.5dB,adelay=delays=0S:all=1[s1];' +
-        '[s0][s1]amix=inputs=2:duration=longest:normalize=0,apad,atrim=end=6[out]',
+      '[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,volume=-8.04dB,adelay=delays=95520S:all=1,asetpts=N/SR/TB[s0];' +
+        '[1:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,atrim=start_sample=48000,asetpts=PTS-STARTPTS,volume=0.5dB,adelay=delays=0S:all=1,asetpts=N/SR/TB[s1];' +
+        '[s0][s1]amix=inputs=2:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=6[out]',
     );
     // Float samples: overlapping sounds can add past full scale; the final pass's limiter catches them.
     expect(args.slice(args.indexOf('-map'))).toEqual(['-map', '[out]', '-c:a', 'pcm_f32le', '-ar', '48000', '-ac', '2', '/w/sfx.wav']);
@@ -490,14 +491,14 @@ describe('episodeFinalArgs with sound effects', () => {
     const g = graph(a);
     expect(g).toContain('[3:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[sfx]');
     expect(g).toContain('[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck]');
-    expect(g.endsWith('[smix][duck][sfx]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]')).toBe(true);
+    expect(g.endsWith('[smix][duck][sfx]amix=inputs=3:duration=first:normalize=0,asetpts=N/SR/TB,alimiter=limit=0.891:level=false[aout]')).toBe(true);
     expect(g.replace(/;\[3:a\][^;]*\[sfx\]/, '').replace('[smix][duck][sfx]amix=inputs=3', '[smix][duck]amix=inputs=2')).toBe(graph(plain));
   });
   it('without music, mixes speech and sound effects through the limiter', () => {
     const a = episodeFinalArgs({ ...o, sfxWav: 'sfx.wav' });
     expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual(['-f', 'concat', '-safe', '0', '-i', 'chunks.txt', '-i', 'sfx.wav']);
     const g = graph(a);
-    expect(g).toContain('asetpts=N/SR/TB[speech];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[sfx];[speech][sfx]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.891:level=false[aout]');
+    expect(g).toContain('asetpts=N/SR/TB[speech];[1:a]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=end=20[sfx];[speech][sfx]amix=inputs=2:duration=first:normalize=0,asetpts=N/SR/TB,alimiter=limit=0.891:level=false[aout]');
     // An episode under 3 s: the speech is measured over 3.1 s as before; the sound effects are never loudnormed.
     const short = graph(episodeFinalArgs({ ...o, durationSec: 2, sfxWav: 'sfx.wav' }));
     expect(short).toContain('apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,');
@@ -571,10 +572,10 @@ describe('J- and L-cut arguments', () => {
       '-noaccurate_seek', '-ss', '5.5', '-i', join(CLIPS, 'c003.mp4'),
     ]);
     expect(graphOf(a).split(';')).toEqual([
-      '[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=1,apad,atrim=end=1,asetpts=PTS-STARTPTS,afade=t=out:st=0:d=1:curve=qsin,adelay=delays=96000S:all=1[s0]',
-      '[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=168000S:all=1[s1]',
-      '[2:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=360000S:all=1[s2]',
-      '[s0][s1][s2]amix=inputs=3:duration=longest:normalize=0,apad,atrim=end=10[out]',
+      '[0:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=1,apad,atrim=end=1,asetpts=PTS-STARTPTS,afade=t=out:st=0:d=1:curve=qsin,adelay=delays=96000S:all=1,asetpts=N/SR/TB[s0]',
+      '[1:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=168000S:all=1,asetpts=N/SR/TB[s1]',
+      '[2:a:0]aresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=end=0.5,apad,atrim=end=0.5,asetpts=PTS-STARTPTS,afade=t=in:d=0.5:curve=qsin,adelay=delays=360000S:all=1,asetpts=N/SR/TB[s2]',
+      '[s0][s1][s2]amix=inputs=3:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=10[out]',
     ]);
     expect(a.slice(a.indexOf('-map'))).toEqual(['-map', '[out]', '-c:a', 'pcm_f32le', '-ar', '48000', '-ac', '2', '/w/spill.wav']);
     // Without a fade given, a spill fades on its own side only.
@@ -590,8 +591,8 @@ describe('J- and L-cut arguments', () => {
     // a's tail is 0.5 s into the same fade out; b's lead starts the fade in.
     const { sources, list } = faded(both);
     const s = graphOf(spillTrackArgs(list, sources, 4, '/w/spill.wav')).split(';');
-    expect(s[0]).toContain('asetpts=PTS-STARTPTS,asetpts=PTS-STARTPTS+0.5/TB,afade=t=out:st=0:d=1.5:curve=qsin,asetpts=PTS-STARTPTS,adelay=delays=96000S:all=1[s0]');
-    expect(s[1]).toContain('asetpts=PTS-STARTPTS,afade=t=in:d=1.5:curve=qsin,adelay=delays=72000S:all=1[s1]');
+    expect(s[0]).toContain('asetpts=PTS-STARTPTS,asetpts=PTS-STARTPTS+0.5/TB,afade=t=out:st=0:d=1.5:curve=qsin,asetpts=PTS-STARTPTS,adelay=delays=96000S:all=1,asetpts=N/SR/TB[s0]');
+    expect(s[1]).toContain('asetpts=PTS-STARTPTS,afade=t=in:d=1.5:curve=qsin,adelay=delays=72000S:all=1,asetpts=N/SR/TB[s1]');
   });
 
   it('reads a spill before a late video stream from the start of the clip, as the shot itself does, from its audio stream', () => {
@@ -615,7 +616,7 @@ describe('J- and L-cut arguments', () => {
       const prev = cmds[i]!.at(-1)!;
       expect(c).toContain(prev);
       const n = c.filter((x) => x === '-i').length;
-      expect(graphOf(c)).toContain(`[${n - 1}:a]amix=inputs=${n}:duration=longest:normalize=0,apad,atrim=end=200[out]`);
+      expect(graphOf(c)).toContain(`[${n - 1}:a]amix=inputs=${n}:duration=longest:normalize=0,asetpts=N/SR/TB,apad,atrim=end=200[out]`);
     });
     // Every spill is in exactly one command.
     expect(cmds.reduce((s, c) => s + (graphOf(c).match(/afade=/g) ?? []).length, 0)).toBe(90);
@@ -630,7 +631,7 @@ describe('J- and L-cut arguments', () => {
       expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual(['-f', 'concat', '-safe', '0', '-i', 'chunks.txt', '-i', 'spill.wav']);
       expect(graphOf(a)).toContain(
         '[0:a]aformat=sample_fmts=fltp:channel_layouts=stereo[live];[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[spill];' +
-          '[live][spill]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11,',
+          '[live][spill]amix=inputs=2:duration=first:normalize=0,asetpts=N/SR/TB[speechraw];[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11,',
       );
     });
     it('with music, a voice-over and sound effects, adds it as the last input and changes nothing else', () => {
@@ -638,13 +639,13 @@ describe('J- and L-cut arguments', () => {
       const a = episodeFinalArgs({ ...o, musicWav: 'music.wav', voiceRaw: 'vo.f32', sfxWav: 'sfx.wav', spillWav: 'spill.wav' });
       expect(a.slice(0, a.indexOf('-filter_complex'))).toEqual([...plainArgs.slice(0, plainArgs.indexOf('-filter_complex')), '-i', 'spill.wav']);
       const g = graphOf(a);
-      expect(g).toContain('[4:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[spill];[live][vo][spill]amix=inputs=3:duration=first:normalize=0[speechraw]');
+      expect(g).toContain('[4:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[spill];[live][vo][spill]amix=inputs=3:duration=first:normalize=0,asetpts=N/SR/TB[speechraw]');
       expect(g.replace(';[4:a]aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=end=20[spill]', '').replace('[live][vo][spill]amix=inputs=3', '[live][vo]amix=inputs=2')).toBe(graphOf(plainArgs));
       expect(a.slice(a.indexOf('-filter_complex') + 2)).toEqual(plainArgs.slice(plainArgs.indexOf('-filter_complex') + 2));
     });
     it('measures an episode under 3 s over 3.1 s with the spill in it', () => {
       const g = graphOf(episodeFinalArgs({ ...o, durationSec: 2, spillWav: 'spill.wav' }));
-      expect(g).toContain('[live][spill]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,');
+      expect(g).toContain('[live][spill]amix=inputs=2:duration=first:normalize=0,asetpts=N/SR/TB[speechraw];[speechraw]highpass=f=90,apad=whole_dur=3.1,loudnorm=I=-14:TP=-1:LRA=11,');
       expect(g).toMatch(/asetpts=N\/SR\/TB,atrim=end=2\[aout\]$/);
     });
   });
@@ -678,8 +679,8 @@ describe('episodeFinalArgs', () => {
     const args = episodeFinalArgs({ chunkList: 'chunks.txt', output: '/o/final.mp4.partial', encoder: enc, mode: 'final', width: 1920, height: 1080, fps: 30, durationSec: 20, loudnessLufs: -14, assFile: 'overlays.ass', fontsDir: '/System/Library/Fonts', musicWav: 'music.wav', voiceRaw: 'vo.f32' });
     expect(args).toEqual(expect.arrayContaining(['-f', 'concat', '-safe', '0', '-i', 'chunks.txt', '-i', 'music.wav', '-f', 'f32le', '-ar', '48000', '-ac', '1', '-i', 'vo.f32']));
     const graph = args[args.indexOf('-filter_complex') + 1];
-    expect(graph).toContain('[0:v]ass=overlays.ass:fontsdir=/System/Library/Fonts[vout]');
-    expect(graph).toContain('[live][vo]amix=inputs=2:duration=first:normalize=0[speechraw]');
+    expect(graph).toContain('[0:v]ass=overlays.ass:fontsdir=/System/Library/Fonts,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]');
+    expect(graph).toContain('[live][vo]amix=inputs=2:duration=first:normalize=0,asetpts=N/SR/TB[speechraw]');
     expect(graph).toContain('[speechraw]highpass=f=90,loudnorm=I=-14:TP=-1:LRA=11');
     expect(graph).toContain('[mus][skey]sidechaincompress=threshold=0.025:ratio=12:attack=150:release=900[duck]');
     expect(args).toEqual(expect.arrayContaining(['-b:v', '8M', '-t', '20']));
@@ -709,10 +710,10 @@ describe('episodeFinalArgs', () => {
   });
   it('escapes the fonts folder for the filter graph, and adds none without one', () => {
     const graph = (fontsDir?: string) => { const a = episodeFinalArgs({ chunkList: 'c.txt', output: '/o.mp4', encoder: enc, mode: 'preview', width: 960, height: 540, fps: 30, durationSec: 5, loudnessLufs: -14, assFile: 'overlays.ass', fontsDir }); const g = a[a.indexOf('-filter_complex') + 1]; return g.slice(0, g.indexOf('[vout]') + 6); };
-    expect(graph()).toBe('[0:v]ass=overlays.ass[vout]');
-    expect(graph('/a b/fonts')).toBe('[0:v]ass=overlays.ass:fontsdir=/a b/fonts[vout]');
+    expect(graph()).toBe('[0:v]ass=overlays.ass,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]');
+    expect(graph('/a b/fonts')).toBe('[0:v]ass=overlays.ass:fontsdir=/a b/fonts,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]');
     // Option level (\ ' :), then graph level (\ ' [ ] , ;).
-    expect(graph("C:\\Mirage's [x], y;")).toBe("[0:v]ass=overlays.ass:fontsdir=C\\\\:\\\\\\\\Mirage\\\\\\'s \\[x\\]\\, y\\;[vout]");
+    expect(graph("C:\\Mirage's [x], y;")).toBe("[0:v]ass=overlays.ass:fontsdir=C\\\\:\\\\\\\\Mirage\\\\\\'s \\[x\\]\\, y\\;,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]");
   });
 
   it('hands libass a fonts folder whose path has spaces, quotes, colons and brackets (real ffmpeg)', async () => {
@@ -1075,7 +1076,7 @@ describe('renderEpisode (real ffmpeg)', () => {
     expect([p.width, p.height]).toEqual([1080, 1920]);
     expect(logs[0]).toMatch(loadedFont(bundledFontsDir(), CAPTION_FONT_FILE));
     expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
-    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout];`)).toBe(true);
+    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())},setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout];`)).toBe(true);
     // Only font files in the folder libass reads: it opens no licence or readme as a font.
     expect(logs[0]).not.toContain('Error opening memory font');
     const zebra = 'captions.highlight "zebra" is never said in this video — check the spelling or remove it';
@@ -1098,7 +1099,7 @@ describe('renderEpisode (real ffmpeg)', () => {
     // Without captions: today's ass= argument, no fontsdir, no warnings.
     await saveEpisode(project, ep(items, { number: 15, output }));
     const plain = await renderEpisode({ project, episode: 15, mode: 'rough', tools: verbose });
-    expect(graphs[3].split(';')[0]).toBe('[0:v]ass=overlays.ass[vout]');
+    expect(graphs[3].split(';')[0]).toBe('[0:v]ass=overlays.ass,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]');
     expect(plain.warnings).toEqual([]);
   }, 180_000);
 
@@ -1251,7 +1252,7 @@ describe('renderEpisode (real ffmpeg)', () => {
       }
       // The filtered hit's peak sits a little after the file's loudest sample (the filter takes out the noise thump): where
       // it sits in the file itself shows how exactly the hit was placed. The final pass's limiter looks 5 ms ahead.
-      const own = peak(await left(join(process.env.MIRAGE_SFX_DIR!, 'v1', 'hit.wav'), `apad=pad_dur=0.2,${LOW}`), 0, 0.5).t - 0.01;
+      const own = peak(await left(join(process.env.MIRAGE_SFX_DIR!, `v${SFX_RECIPE_VERSION}`, 'hit.wav'), `apad=pad_dur=0.2,${LOW}`), 0, 0.5).t - 0.01;
       lines.push(`the filtered hit peaks ${(own * 1000).toFixed(1)} ms after its peak time in hit.wav itself`);
       console.log(lines.join('\n'));
       for (const { hit, whoosh, ref, back } of got) {
@@ -1616,7 +1617,7 @@ describe('cards (real ffmpeg)', () => {
     expect(await frames(r.outputPath)).toBe(Math.round(timelineDuration(e) * 30));
     expect(Math.abs(p.durationSec - 5.5)).toBeLessThanOrEqual(0.05);
     // libass loads the monospace from the plugin's folder and picks it, and Montserrat for the bold text.
-    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout];`)).toBe(true);
+    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())},setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout];`)).toBe(true);
     expect(logs[0]).toMatch(loadedFont(bundledFontsDir(), MONO_FONT_FILE));
     expect(logs[0]).toMatch(/fontselect: \(JetBrains Mono, 400, 0\) -> JetBrainsMono-Regular\b/);
     expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, 400, 0\) -> Montserrat-ExtraBold\b/);
@@ -1799,8 +1800,9 @@ describe('cards (real ffmpeg)', () => {
       { id: 'talk', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1 } },
     ], { number: 5 }));
     const r = await renderEpisode({ project, episode: 5, mode: 'final', tools });
-    const final = JSON.parse((await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_range', '-of', 'json', r.outputPath])).stdout).streams[0];
-    expect(final).toMatchObject({ pix_fmt: 'yuv420p', color_range: 'tv' });
+    const final = JSON.parse((await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_range,color_space,color_primaries,color_transfer', '-of', 'json', r.outputPath])).stdout).streams[0];
+    // Tagged BT.709 throughout: FFmpeg 9 drops -color_primaries and -color_trc given only as output options.
+    expect(final).toMatchObject({ pix_fmt: 'yuv420p', color_range: 'tv', color_space: 'bt709', color_primaries: 'bt709', color_transfer: 'bt709' });
   }, 180_000);
 
   it('lays a transparent picture on black: clear parts black, half-clear parts half as bright', async () => {
@@ -1878,7 +1880,7 @@ describe('cards (real ffmpeg)', () => {
       },
     };
     const r = await renderEpisode({ project, episode: 3, mode: 'final', tools: verbose });
-    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout];`)).toBe(true);
+    expect(graphs[0].startsWith(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())},setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout];`)).toBe(true);
     expect(logs[0]).toMatch(/fontselect: \(Montserrat ExtraBold, \d+, \d+\) -> Montserrat-ExtraBold\b/);
     expect(logs[0]).not.toContain('Error opening memory font');
 
@@ -1947,10 +1949,10 @@ describe('cards (real ffmpeg)', () => {
     const onClip = (extra: object[]) => ep([{ id: 'talk', beat: 'cold-open', clip: 'c001', src: { in: 0, out: 1 } }], { number: 4, overlays: [{ kind: 'callout', text: '3 DAYS', start: 0.2, end: 1 }, ...extra] });
     await saveEpisode(project, onClip([]));
     await renderEpisode({ project, episode: 4, mode: 'rough', tools: verbose });
-    expect(graphs[1].split(';')[0]).toBe('[0:v]ass=overlays.ass[vout]');
+    expect(graphs[1].split(';')[0]).toBe('[0:v]ass=overlays.ass,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]');
     await saveEpisode(project, onClip([{ kind: 'timecard', text: '9:41', start: 0.2, end: 1 }]));
     await renderEpisode({ project, episode: 4, mode: 'rough', tools: verbose });
-    expect(graphs[2].split(';')[0]).toBe(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())}[vout]`);
+    expect(graphs[2].split(';')[0]).toBe(`[0:v]ass=overlays.ass:fontsdir=${filterValue(bundledFontsDir())},setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]`);
   }, 300_000);
 });
 
@@ -2039,7 +2041,7 @@ describe('J- and L-cuts (real ffmpeg)', () => {
     const spill = calls.find((a) => a.at(-1)!.endsWith('spill.wav'))!;
     expect(spill).toBeDefined();
     expect(calls.find((a) => a.at(-1)!.endsWith('.mov'))!.join(' ')).toContain('afade=t=in:d=1:curve=qsin[a1]');
-    expect(calls.at(-1)![calls.at(-1)!.indexOf('-filter_complex') + 1]).toContain('[live][spill]amix=inputs=2:duration=first:normalize=0[speechraw];[speechraw]highpass=f=90,loudnorm=');
+    expect(calls.at(-1)![calls.at(-1)!.indexOf('-filter_complex') + 1]).toContain('[live][spill]amix=inputs=2:duration=first:normalize=0,asetpts=N/SR/TB[speechraw];[speechraw]highpass=f=90,loudnorm=');
     const [a440, b880] = [tone(x, 440, 1.5, 2.4), tone(x, 880, 4, 5)];
     const w = windows(T, T + 1);
     const lo = w.map((t) => tone(x, 440, t, t + 0.05));

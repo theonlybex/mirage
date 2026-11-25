@@ -6,12 +6,13 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { MediaTools } from '../media-tools.js';
 import { MirageError } from './errors.js';
+import { delayed } from './encode.js';
 import { decodeMono } from './tempo.js';
 
 /** The built-in sound effects, made with FFmpeg's own sources (nothing downloaded). */
 export const BUILTIN_SFX: readonly string[] = ['whoosh', 'swoosh-out', 'hit', 'riser', 'pop', 'ding', 'click'];
 /** Bumped whenever a recipe changes, so older cached files are never used: they live in `v<version>/`. */
-export const SFX_RECIPE_VERSION = 1;
+export const SFX_RECIPE_VERSION = 2;
 
 export const SR = 48000;
 /** Every sound's loudest sample sits here, under the -1 dBFS ceiling. (Exported for the test that ties recipe changes to SFX_RECIPE_VERSION.) */
@@ -52,12 +53,12 @@ export const RECIPES: Record<string, Recipe> = {
   // A sine falling from 90 to 50 Hz (2 ms rise, 160 ms decay) plus a thump of brown noise in 60–250 Hz decaying in 20 ms.
   hit: {
     durationSec: 0.8, peakSec: 0.01, fadeOutSec: 0.05,
-    graph: `${curve('sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))', 0.8)}[b];${noise('brown', 31, 0.8)},${band(60, 250)}[n];${curve('0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))', 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0[s]`,
+    graph: `${curve('sin(2*PI*(50*t+40*0.07*(1-exp(-t/0.07))))*if(lt(t,0.002),pow(sin(PI/2*t/0.002),2),exp(-(t-0.002)/0.16))', 0.8)}[b];${noise('brown', 31, 0.8)},${band(60, 250)}[n];${curve('0.5*if(lt(t,0.003),t/0.003,exp(-(t-0.003)/0.02))', 0.8)}[e];[n][e]amultiply[t];[b][t]amix=inputs=2:normalize=0,asetpts=N/SR/TB[s]`,
   },
   // Pink noise (400 Hz–6 kHz) and a sine at about the same level sweeping from 300 Hz to 1.5 kHz, both growing as t³ to 2 s.
   riser: {
     durationSec: 2.02, peakSec: 2.0, fadeOutSec: 0.019,
-    graph: `${noise('pink', 47, 2.02)},${band(400, 6000)}[n];${curve('min(1,pow(t/2,3))', 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0[s]`,
+    graph: `${noise('pink', 47, 2.02)},${band(400, 6000)}[n];${curve('min(1,pow(t/2,3))', 2.02)}[e];[n][e]amultiply[w];${curve(`0.07*min(1,pow(t/2,3))*sin(2*PI*300*2/log(5)*(pow(5,t/2)-1))`, 2.02)}[v];[w][v]amix=inputs=2:normalize=0,asetpts=N/SR/TB[s]`,
   },
   // A sine dropping from 700 to 250 Hz in about 15 ms, a 5 ms rise and a 22 ms decay.
   pop: { durationSec: 0.12, peakSec: 0.005, fadeOutSec: 0.02, graph: `${curve('sin(2*PI*(250*t+450*0.015*(1-exp(-t/0.015))))*if(lt(t,0.005),pow(sin(PI/2*t/0.005),2),exp(-(t-0.005)/0.022))', 0.12)}[s]` },
@@ -97,7 +98,7 @@ export async function builtinSfx(name: string, tools: MediaTools, o: { dir?: str
     const len = Math.round(recipe.durationSec * SR);
     const total = len + 2 * pad;
     // Pass 1: the recipe, highpassed at 40 Hz and lowpassed at 12 kHz, with silence either side, as raw mono floats.
-    const graph = `${recipe.graph};[s]apad=pad_len=${pad},${band(PASS.highpassHz, PASS.lowpassHz)},adelay=delays=${pad}S:all=1,apad=whole_len=${total},atrim=end_sample=${total}[out]`;
+    const graph = `${recipe.graph};[s]apad=pad_len=${pad},${band(PASS.highpassHz, PASS.lowpassHz)},${delayed(`${pad}S`)},apad=whole_len=${total},atrim=end_sample=${total}[out]`;
     await tools.runFfmpeg(['-filter_complex', graph, '-map', '[out]', '-ac', '1', '-ar', String(SR), '-c:a', 'pcm_f32le', '-f', 'f32le', raw], { signal: o.signal });
     const buf = await readFile(raw);
     const x = new Float32Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));

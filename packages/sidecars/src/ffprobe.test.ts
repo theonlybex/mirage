@@ -30,7 +30,7 @@ describe('probe', () => {
 
   it('reads the colour transfer, so HDR (HLG/PQ) clips can be flagged', async () => {
     const out = join(await mkdtemp(join(tmpdir(), 'we-hdr-')), 'hlg.mp4');
-    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-color_trc', 'arib-std-b67', out]);
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30:duration=1', '-vf', 'setparams=color_trc=arib-std-b67', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-color_trc', 'arib-std-b67', out]);
     expect((await probe(out)).colorTransfer).toBe('arib-std-b67');
   });
 
@@ -82,7 +82,8 @@ describe('probe of awkward files', () => {
   it('applies display rotation, so a portrait phone clip reads as portrait', async () => {
     const f = join(dir, 'rot.mp4');
     await gen([...VIDEO(1, '320x180'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', join(dir, 'flat.mp4')]);
-    await gen(['-i', join(dir, 'flat.mp4'), '-c', 'copy', '-metadata:s:v:0', 'rotate=90', f]);
+    // -display_rotation (FFmpeg 7 and newer) writes the display matrix phones write; FFmpeg 9 ignores the old rotate tag.
+    await gen(['-display_rotation', '90', '-i', join(dir, 'flat.mp4'), '-c', 'copy', f]);
     expect(await probe(f)).toMatchObject({ width: 180, height: 320 });
   });
 

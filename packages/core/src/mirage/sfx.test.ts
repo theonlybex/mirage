@@ -90,9 +90,9 @@ describe('sfxDir', () => {
 });
 
 describe('BUILTIN_SFX', () => {
-  it('names the seven built-ins in the plan order, recipe version 1', () => {
+  it('names the seven built-ins in the plan order, recipe version 2', () => {
     expect(BUILTIN_SFX).toEqual(['whoosh', 'swoosh-out', 'hit', 'riser', 'pop', 'ding', 'click']);
-    expect(SFX_RECIPE_VERSION).toBe(1);
+    expect(SFX_RECIPE_VERSION).toBe(2);
   });
 });
 
@@ -107,7 +107,7 @@ describe('builtinSfx (real ffmpeg)', () => {
   it.each(BUILTIN_SFX.map((n) => [n]))('makes %s to the spec', async (name) => {
     const spec = SPEC[name]!;
     const r = await builtinSfx(name, tools, { dir });
-    expect(r.file).toBe(join(dir, 'v1', `${name}.wav`));
+    expect(r.file).toBe(join(dir, 'v2', `${name}.wav`));
     expect(r.peakSec).toBeCloseTo(spec.peak, 6);
 
     const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_name,sample_rate,channels', '-of', 'json', r.file]);
@@ -159,7 +159,7 @@ describe('builtinSfx (real ffmpeg)', () => {
     const d = await mkdtemp(join(tmpdir(), 'we-sfx-race-'));
     const [a, b] = await Promise.all([builtinSfx('ding', tools, { dir: d }), builtinSfx('ding', tools, { dir: d })]);
     expect(a.file).toBe(b.file);
-    expect(await readdir(join(d, 'v1'))).toEqual(['ding.wav']);
+    expect(await readdir(join(d, 'v2'))).toEqual(['ding.wav']);
     const { left } = await decodeStereo(a.file, d);
     expect(left.length / SR).toBeCloseTo(1.5, 2);
   });
@@ -169,7 +169,7 @@ describe('builtinSfx (real ffmpeg)', () => {
     const ac = new AbortController();
     ac.abort();
     await expect(builtinSfx('riser', tools, { dir: d, signal: ac.signal })).rejects.toThrow();
-    expect(await readdir(join(d, 'v1')).catch(() => [])).toEqual([]);
+    expect(await readdir(join(d, 'v2')).catch(() => [])).toEqual([]);
   });
 
   it('refuses a name that is not a built-in', async () => {
@@ -238,7 +238,7 @@ describe('resolveSfx and measureSfxLevel (real ffmpeg)', () => {
   });
   it('makes a built-in in the data folder and gives its peak and length', async () => {
     const r = await resolveSfx(project, 'riser', tools, { dir: cache });
-    expect(r).toEqual({ file: join(cache, 'v1', 'riser.wav'), peakSec: 2, durationSec: 2.02 });
+    expect(r).toEqual({ file: join(cache, 'v2', 'riser.wav'), peakSec: 2, durationSec: 2.02 });
   });
   it("gives a person's file its loudest sample as the peak, and its length", async () => {
     const r = await resolveSfx(project, 'tick', tools, { dir: cache });
@@ -292,7 +292,7 @@ describe('resolveSfx and measureSfxLevel (real ffmpeg)', () => {
 });
 
 /** The version and the recipes' hash the built-ins were last made with. */
-const RECORDED = { version: 1, hash: '6f28647be4b7b23906095933e5233274f0183ee540cf70e50808ce5d955587e2' };
+const RECORDED = { version: 2, hash: '8b8eba4e0ff632fd516c89f47fa4c3468cbedd90b6640634b3c27bb6d40048e7' };
 
 describe('the built-in recipes and SFX_RECIPE_VERSION', () => {
   it('changes the recipes only together with a bump of SFX_RECIPE_VERSION: older cached files are never used', () => {
